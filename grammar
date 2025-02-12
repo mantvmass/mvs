@@ -14,7 +14,7 @@
 <type> ::= <basic_type> | <array_type> | <dynamic_array_type> | <struct_type>
 <basic_type> ::= "int" | "float" | "string" | "bool" | "void"
 <array_type> ::= "[" <type> ";" <integer_literal> "]"
-<dynamic_array_type> ::= "array" "<" <type> ">"
+<dynamic_array_type> ::= "Array" "<" <type> ">"
 <struct_type> ::= <identifier>
 
 // Parameters and Arguments

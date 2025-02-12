@@ -63,7 +63,7 @@ void lex(const char *source) {
             else if (strcmp(buffer, "return") == 0) add_token(TOKEN_RETURN, buffer);
             else if (strcmp(buffer, "int") == 0 || strcmp(buffer, "float") == 0 ||
                      strcmp(buffer, "string") == 0 || strcmp(buffer, "bool") == 0 ||
-                     strcmp(buffer, "array") == 0) {
+                     strcmp(buffer, "Array") == 0) {
                 add_token(TOKEN_TYPE, buffer);
             } else {
                 add_token(TOKEN_IDENTIFIER, buffer);

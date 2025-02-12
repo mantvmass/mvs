@@ -19,8 +19,8 @@ ASTNode *new_node(TokenType type, char *value) {
 }
 
 ASTNode *parse_array_definition(int *pos) {
-    if (tokens[*pos].type == TOKEN_IDENTIFIER && strcmp(tokens[*pos].value, "array") == 0) {
-        printf("✅ [PARSER] Parsing array definition...\n");
+    if (tokens[*pos].type == TOKEN_IDENTIFIER && strcmp(tokens[*pos].value, "Array") == 0) {
+        printf("✅ [PARSER] Parsing Array definition...\n");
         (*pos)++;
 
         if (tokens[*pos].type == TOKEN_OPERATOR && strcmp(tokens[*pos].value, "<") == 0) {
@@ -35,15 +35,15 @@ ASTNode *parse_array_definition(int *pos) {
                     (*pos)++;
                     return array_node;
                 } else {
-                    printf("❌ [ERROR] Expected '>' after array type\n");
+                    printf("❌ [ERROR] Expected '>' after Array type\n");
                     return NULL;
                 }
             } else {
-                printf("❌ [ERROR] Expected type inside array<>\n");
+                printf("❌ [ERROR] Expected type inside Array<>\n");
                 return NULL;
             }
         } else {
-            printf("❌ [ERROR] Expected '<' after 'array'\n");
+            printf("❌ [ERROR] Expected '<' after 'Array'\n");
             return NULL;
         }
     }
@@ -118,7 +118,7 @@ ASTNode *parse_variable_declaration(int *pos) {
                     printf("✅ [PARSER] Declaring variable %s of type %s\n", var_node->value, tokens[*pos].value);
                     type_node = new_node(TOKEN_TYPE, tokens[*pos].value);
                     (*pos)++;
-                } else if (tokens[*pos].type == TOKEN_IDENTIFIER && strcmp(tokens[*pos].value, "array") == 0) {
+                } else if (tokens[*pos].type == TOKEN_IDENTIFIER && strcmp(tokens[*pos].value, "Array") == 0) {
                     type_node = parse_array_definition(pos);
                     if (!type_node) return NULL;
                 } else {

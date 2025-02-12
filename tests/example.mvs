@@ -13,7 +13,7 @@ func main() -> int {
     struct Monster {
         name: string,
         damage: int,
-        something: array<string>,
+        something: Array<string>,
     }
 
     var monster: Monster = {
@@ -48,13 +48,13 @@ func main() -> int {
 
     var h: bool = true;
 
-    var i: array<int>;
-    var j: array<string>;
+    var i: Array<int>;
+    var j: Array<string>;
     i = [1,5,6,8];
     j = ["Hello", "สวัสดีครับ"];
 
-    var k: array<int> = [1, 2, 3];
-    var l: array<string> = ["dog", "cat", ""];
+    var k: Array<int> = [1, 2, 3];
+    var l: Array<string> = ["dog", "cat", ""];
     
     return c;
 }
