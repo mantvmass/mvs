@@ -1,6 +1,6 @@
 # กำหนดตัวแปรสำคัญ
 CC = gcc               # คอมไพเลอร์ที่ใช้ (GCC)
-NASM = nasm            # แอสเซมเบลอร์ที่ใช้ (NASM)
+
 CFLAGS = -Wall -Wextra -std=c11 -I src/  # ค่าคอมไพเลอร์แฟล็กเพื่อเปิดใช้งานคำเตือนและกำหนดมาตรฐาน C11
 
 # กำหนดไดเรกทอรีสำหรับซอร์สโค้ด, ไฟล์ที่สร้างขึ้น, และโฟลเดอร์ที่ใช้เก็บไฟล์ object (.o)
@@ -13,11 +13,9 @@ UNAME_S := $(shell uname -s)
 
 ifeq ($(UNAME_S), Linux)  
     OS = linux                     # ถ้าเป็น Linux
-    NASM_FORMAT = elf64             # ใช้ฟอร์แมต ELF64 สำหรับไฟล์แอสเซมบลี
     OUTPUT_EXT = out                # ไฟล์เอาต์พุตใช้ .out
 else
     OS = windows                    # ถ้าเป็น Windows
-    NASM_FORMAT = win64             # ใช้ฟอร์แมต Win64 สำหรับไฟล์แอสเซมบลี
     OUTPUT_EXT = exe                # ไฟล์เอาต์พุตใช้ .exe
 endif
 
@@ -47,17 +45,9 @@ $(OBJ_DIR)/codegen.o: $(SRC_DIR)/codegen.c $(SRC_DIR)/codegen.h $(SRC_DIR)/parse
 $(OBJ_DIR)/main.o: $(SRC_DIR)/main.c $(SRC_DIR)/lexer.h $(SRC_DIR)/parser.h $(SRC_DIR)/codegen.h | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# ขั้นตอนการ build: รัน mvsc เพื่อสร้าง output.asm และทำการคอมไพล์แอสเซมบลี
+# ขั้นตอนการ build: รัน mvsc เพื่อสร้าง output.c และทำการคอมไพล์แอสเซมบลี
 build: $(BUILD_DIR)/mvsc.$(OUTPUT_EXT)
-	./$(BUILD_DIR)/mvsc.$(OUTPUT_EXT) $(BUILD_DIR)/example.mvs  # รัน mvsc เพื่อสร้าง output.asm
-	$(NASM) -f $(NASM_FORMAT) output.asm -o output.o           # คอมไพล์ไฟล์แอสเซมบลีเป็น object file
-
-# เช็คว่าเป็นระบบไหน และลิงก์ไฟล์ object เป็นไฟล์ที่รันได้
-ifeq ($(OS), linux)
-	$(CC) output.o -o output.$(OUTPUT_EXT) -nostartfiles  # ลิงก์ไฟล์สำหรับ Linux
-else
-	$(CC) output.o -o output.$(OUTPUT_EXT) -nostartfiles  # ลิงก์ไฟล์สำหรับ Windows
-endif
+	./$(BUILD_DIR)/mvsc.$(OUTPUT_EXT) $(BUILD_DIR)/sample.mvs  # รัน mvsc เพื่อสร้าง output.c
 
 # สร้างโฟลเดอร์ obj/ หากยังไม่มี
 $(OBJ_DIR):
@@ -65,4 +55,4 @@ $(OBJ_DIR):
 
 # คำสั่ง clean เพื่อลบไฟล์ที่สร้างขึ้นทั้งหมด
 clean:
-	rm -rf $(OBJ_DIR) $(BUILD_DIR)/mvsc.$(OUTPUT_EXT) output.o output.asm output.$(OUTPUT_EXT)
+	rm -rf $(OBJ_DIR) $(BUILD_DIR)/mvsc.$(OUTPUT_EXT) output.c output.$(OUTPUT_EXT)

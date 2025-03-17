@@ -1,0 +1,5 @@
+func main() -> Number {
+    print("Hello, ");
+    println("World!");
+    return 0;
+}
