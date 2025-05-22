@@ -1,58 +1,68 @@
-# กำหนดตัวแปรสำคัญ
-CC = gcc               # คอมไพเลอร์ที่ใช้ (GCC)
+# Makefile for MVS Compiler
+# Assumes LLVM 18 is installed, adjust LLVM_CONFIG if using a different version
+CC = gcc
+FLEX = flex
+BISON = bison
+LLVM_CONFIG = llvm-config-18
+CFLAGS = -Wall `$(LLVM_CONFIG) --cflags`
+LDFLAGS = `$(LLVM_CONFIG) --ldflags --libs core target` -lm
 
-CFLAGS = -Wall -Wextra -std=c11 -I src/  # ค่าคอมไพเลอร์แฟล็กเพื่อเปิดใช้งานคำเตือนและกำหนดมาตรฐาน C11
+# Source files
+SOURCES = mvs.tab.c lex.yy.c codegen.c
+OBJECTS = $(SOURCES:.c=.o)
+EXEC = mvs
+TEST_INPUT = test.mvs
+TEST_OUTPUT = mvs_program
+OBJ_FILE = output.o
 
-# กำหนดไดเรกทอรีสำหรับซอร์สโค้ด, ไฟล์ที่สร้างขึ้น, และโฟลเดอร์ที่ใช้เก็บไฟล์ object (.o)
-SRC_DIR = src
-BUILD_DIR = tests
-OBJ_DIR = obj
+# Default target
+all: build
 
-# ตรวจสอบระบบปฏิบัติการที่ใช้งาน (Linux หรือ Windows)
-UNAME_S := $(shell uname -s)
+# Build the compiler
+build: $(EXEC)
 
-ifeq ($(UNAME_S), Linux)  
-    OS = linux                     # ถ้าเป็น Linux
-    OUTPUT_EXT = out                # ไฟล์เอาต์พุตใช้ .out
-else
-    OS = windows                    # ถ้าเป็น Windows
-    OUTPUT_EXT = exe                # ไฟล์เอาต์พุตใช้ .exe
-endif
+# Build the program from test.mvs
+program: $(EXEC) $(TEST_INPUT)
+	@echo "Running compiler on $(TEST_INPUT)..."
+	./$(EXEC) < $(TEST_INPUT)
+	@if [ -f $(TEST_OUTPUT) ]; then \
+		echo "$(TEST_OUTPUT) created successfully"; \
+	else \
+		echo "Error: $(TEST_OUTPUT) was not created"; \
+		exit 1; \
+	fi
 
-# กำหนดรายการไฟล์ object (.o) ที่ต้องใช้ในโปรแกรม
-OBJS = $(OBJ_DIR)/lexer.o $(OBJ_DIR)/parser.o $(OBJ_DIR)/codegen.o $(OBJ_DIR)/main.o
+$(EXEC): $(OBJECTS)
+	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
+	@echo "Compiler $(EXEC) built successfully"
 
-# เป้าหมายหลัก: คอมไพล์ mvsc และทำการ build
-all: $(BUILD_DIR)/mvsc.$(OUTPUT_EXT) build
+mvs.tab.c mvs.tab.h: mvs.y
+	$(BISON) -d $<
+	@echo "Generated mvs.tab.c and mvs.tab.h"
 
-# คอมไพล์ไฟล์ mvsc โดยรวมไฟล์ object ทุกไฟล์
-$(BUILD_DIR)/mvsc.$(OUTPUT_EXT): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS)  # คอมไพล์และลิงก์ไฟล์ทั้งหมด
+lex.yy.c: mvs.l mvs.tab.h
+	$(FLEX) $<
+	@echo "Generated lex.yy.c"
 
-# คอมไพล์ lexer.c เป็น lexer.o
-$(OBJ_DIR)/lexer.o: $(SRC_DIR)/lexer.c $(SRC_DIR)/lexer.h | $(OBJ_DIR)
+%.o: %.c ast.h mvs.tab.h
 	$(CC) $(CFLAGS) -c $< -o $@
+	@echo "Compiled $< to $@"
 
-# คอมไพล์ parser.c เป็น parser.o
-$(OBJ_DIR)/parser.o: $(SRC_DIR)/parser.c $(SRC_DIR)/parser.h $(SRC_DIR)/lexer.h | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+# Test the compiler and check the generated program's output
+test: program
+	@echo "Running generated program $(TEST_OUTPUT)..."
+	@./$(TEST_OUTPUT); \
+	EXIT_CODE=$$?; \
+	if [ $$EXIT_CODE -eq 15 ]; then \
+		echo "Test passed: $(TEST_OUTPUT) returned expected value 15"; \
+	else \
+		echo "Test failed: $(TEST_OUTPUT) returned $$EXIT_CODE, expected 15"; \
+		exit 1; \
+	fi
 
-# คอมไพล์ codegen.c เป็น codegen.o
-$(OBJ_DIR)/codegen.o: $(SRC_DIR)/codegen.c $(SRC_DIR)/codegen.h $(SRC_DIR)/parser.h | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# คอมไพล์ main.c เป็น main.o
-$(OBJ_DIR)/main.o: $(SRC_DIR)/main.c $(SRC_DIR)/lexer.h $(SRC_DIR)/parser.h $(SRC_DIR)/codegen.h | $(OBJ_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# ขั้นตอนการ build: รัน mvsc เพื่อสร้าง output.c และทำการคอมไพล์แอสเซมบลี
-build: $(BUILD_DIR)/mvsc.$(OUTPUT_EXT)
-	./$(BUILD_DIR)/mvsc.$(OUTPUT_EXT) $(BUILD_DIR)/sample.mvs  # รัน mvsc เพื่อสร้าง output.c
-
-# สร้างโฟลเดอร์ obj/ หากยังไม่มี
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
-
-# คำสั่ง clean เพื่อลบไฟล์ที่สร้างขึ้นทั้งหมด
+# Clean generated files
 clean:
-	rm -rf $(OBJ_DIR) $(BUILD_DIR)/mvsc.$(OUTPUT_EXT) output.c output.$(OUTPUT_EXT)
+	rm -f lex.yy.c mvs.tab.c mvs.tab.h *.o $(EXEC) $(TEST_OUTPUT) $(OBJ_FILE)
+	@echo "Cleaned all generated files"
+
+.PHONY: all build program test clean
