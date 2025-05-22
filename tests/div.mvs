@@ -1,0 +1,3 @@
+func main() -> i8 {
+    return 25 / 2;
+}

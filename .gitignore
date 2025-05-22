@@ -1,0 +1,12 @@
+# Generated files
+lex.yy.c
+mvs.tab.c
+mvs.tab.h
+*.o
+mvs
+mvs_program
+output.o
+
+# Editor and system files
+*.swp
+.DS_Store

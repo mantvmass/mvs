@@ -5,15 +5,16 @@ FLEX = flex
 BISON = bison
 LLVM_CONFIG = llvm-config-18
 CFLAGS = -Wall `$(LLVM_CONFIG) --cflags`
-LDFLAGS = `$(LLVM_CONFIG) --ldflags --libs core target` -lm
+LDFLAGS = `$(LLVM_CONFIG) --ldflags` `$(LLVM_CONFIG) --libs all` `$(LLVM_CONFIG) --system-libs`
 
 # Source files
 SOURCES = mvs.tab.c lex.yy.c codegen.c
 OBJECTS = $(SOURCES:.c=.o)
 EXEC = mvs
-TEST_INPUT = test.mvs
+TEST_DIR = tests
 TEST_OUTPUT = mvs_program
 OBJ_FILE = output.o
+TEST_SCRIPT = run_tests.sh
 
 # Default target
 all: build
@@ -21,8 +22,8 @@ all: build
 # Build the compiler
 build: $(EXEC)
 
-# Build the program from test.mvs
-program: $(EXEC) $(TEST_INPUT)
+# Build the program from a single test file
+program: $(EXEC)
 	@echo "Running compiler on $(TEST_INPUT)..."
 	./$(EXEC) < $(TEST_INPUT)
 	@if [ -f $(TEST_OUTPUT) ]; then \
@@ -48,17 +49,10 @@ lex.yy.c: mvs.l mvs.tab.h
 	$(CC) $(CFLAGS) -c $< -o $@
 	@echo "Compiled $< to $@"
 
-# Test the compiler and check the generated program's output
-test: program
-	@echo "Running generated program $(TEST_OUTPUT)..."
-	@./$(TEST_OUTPUT); \
-	EXIT_CODE=$$?; \
-	if [ $$EXIT_CODE -eq 15 ]; then \
-		echo "Test passed: $(TEST_OUTPUT) returned expected value 15"; \
-	else \
-		echo "Test failed: $(TEST_OUTPUT) returned $$EXIT_CODE, expected 15"; \
-		exit 1; \
-	fi
+# Test all test cases using the test script
+test: build $(TEST_SCRIPT)
+	@echo "Running test script..."
+	./$(TEST_SCRIPT)
 
 # Clean generated files
 clean:

@@ -34,12 +34,48 @@ LLVMValueRef codegen(LLVMModuleRef module, LLVMBuilderRef builder, ASTNode *node
             case '/': return LLVMBuildSDiv(builder, left, right, "div");
             case '%': return LLVMBuildSRem(builder, left, right, "mod");
             case '^': {
-                LLVMTypeRef param_types[] = { LLVMInt8Type(), LLVMInt8Type() };
-                LLVMTypeRef pow_type = LLVMFunctionType(LLVMInt8Type(), param_types, 2, 0);
-                LLVMValueRef pow_func = LLVMAddFunction(module, "pow", pow_type);
-                LLVMValueRef args[] = { left, right };
-                return LLVMBuildCall2(builder, pow_type, pow_func, args, 2, "pow");
-            }
+    // Simple power calculation for i8
+    LLVMValueRef base = left;
+    LLVMValueRef exp = right;
+
+    // Create basic blocks
+    LLVMBasicBlockRef entry = LLVMGetInsertBlock(builder);
+    LLVMBasicBlockRef loop_header = LLVMAppendBasicBlock(LLVMGetBasicBlockParent(entry), "pow_header");
+    LLVMBasicBlockRef loop_body = LLVMAppendBasicBlock(LLVMGetBasicBlockParent(entry), "pow_body");
+    LLVMBasicBlockRef loop_end = LLVMAppendBasicBlock(LLVMGetBasicBlockParent(entry), "pow_end");
+
+    // Initialize variables
+    LLVMValueRef result_ptr = LLVMBuildAlloca(builder, LLVMInt8Type(), "result");
+    LLVMValueRef counter_ptr = LLVMBuildAlloca(builder, LLVMInt8Type(), "counter");
+    LLVMValueRef one = LLVMConstInt(LLVMInt8Type(), 1, 1);
+    LLVMValueRef zero = LLVMConstInt(LLVMInt8Type(), 0, 1);
+    
+    LLVMBuildStore(builder, one, result_ptr);     // result = 1
+    LLVMBuildStore(builder, zero, counter_ptr);   // counter = 0
+    LLVMBuildBr(builder, loop_header);
+
+    // Loop header - check condition
+    LLVMPositionBuilderAtEnd(builder, loop_header);
+    LLVMValueRef counter_val = LLVMBuildLoad2(builder, LLVMInt8Type(), counter_ptr, "counter_val");
+    LLVMValueRef cond = LLVMBuildICmp(builder, LLVMIntSLT, counter_val, exp, "cmp");
+    LLVMBuildCondBr(builder, cond, loop_body, loop_end);
+
+    // Loop body - multiply and increment
+    LLVMPositionBuilderAtEnd(builder, loop_body);
+    LLVMValueRef current_result = LLVMBuildLoad2(builder, LLVMInt8Type(), result_ptr, "current_result");
+    LLVMValueRef new_result = LLVMBuildMul(builder, current_result, base, "new_result");
+    LLVMBuildStore(builder, new_result, result_ptr);
+    
+    LLVMValueRef current_counter = LLVMBuildLoad2(builder, LLVMInt8Type(), counter_ptr, "current_counter");
+    LLVMValueRef next_counter = LLVMBuildAdd(builder, current_counter, one, "next_counter");
+    LLVMBuildStore(builder, next_counter, counter_ptr);
+    
+    LLVMBuildBr(builder, loop_header);
+
+    // Loop end - return result
+    LLVMPositionBuilderAtEnd(builder, loop_end);
+    return LLVMBuildLoad2(builder, LLVMInt8Type(), result_ptr, "final_result");
+}
         }
     }
     return NULL;
@@ -112,8 +148,8 @@ int main() {
 
     // Link object file to executable
     printf("Linking output.o to mvs_program...\n");
-    if (system("gcc output.o -o mvs_program -lm") != 0) {
-        fprintf(stderr, "Linking failed: gcc output.o -o mvs_program -lm\n");
+    if (system("gcc output.o -o mvs_program") != 0) {
+        fprintf(stderr, "Linking failed: gcc output.o -o mvs_program\n");
         free_ast(root);
         return 1;
     }
