@@ -1,0 +1,21 @@
+// ============================================================
+//  use_c — MVS เรียกฟังก์ชันจากไฟล์ C ของเราเอง (mathops.c)
+//  build:  mvs.exe examples/07_c_interop/use_c.mvs -c
+//          clang use_c.obj mathops.c -o use_c.exe -llegacy_stdio_definitions
+//  run:    use_c.exe
+//
+//  หลักการ: -c ให้ MVS ผลิต use_c.obj; แล้วใช้ clang ลิงก์ .obj เข้ากับ mathops.c
+//          ประกาศ extern func ให้ตรงกับ signature ของ C (ดู mathops.c)
+// ============================================================
+import { io } from "std";
+
+extern func c_add(a: i32, b: i32) -> i32;
+extern func c_gcd(a: i32, b: i32) -> i32;
+extern func c_hypot(x: f64, y: f64) -> f64;
+
+func main() -> i8 {
+    io.out("c_add(20, 22) = {}", c_add(20, 22));        // 42
+    io.out("c_gcd(48, 36) = {}", c_gcd(48, 36));        // 12
+    io.out("c_hypot(3.0, 4.0) = {}", c_hypot(3.0, 4.0)); // 5.0
+    return 0;
+}

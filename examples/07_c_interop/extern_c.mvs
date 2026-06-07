@@ -1,0 +1,16 @@
+// ============================================================
+//  extern_c — MVS เรียกฟังก์ชันของภาษา C โดยตรงผ่าน extern
+//  build:  mvs.exe examples/07_c_interop/extern_c.mvs
+//  run:    examples\07_c_interop\extern_c.exe
+//  (extern = ประกาศ foreign function จาก C runtime / ไลบรารีที่ลิงก์อยู่)
+// ============================================================
+import { io } from "std";
+
+extern func strlen(s: str) -> usize;
+extern func atoi(s: str) -> i32;
+
+func main() -> i8 {
+    io.out("strlen(\"hello world\") = {}", strlen("hello world")); // 11
+    io.out("atoi(\"123\") + 1 = {}", atoi("123") + 1);             // 124
+    return 0;
+}

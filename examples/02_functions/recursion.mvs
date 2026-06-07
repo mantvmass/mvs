@@ -1,0 +1,23 @@
+// ============================================================
+//  recursion — ฟังก์ชันเรียกตัวเอง / เรียกสลับกัน
+//  build:  mvs.exe examples/02_functions/recursion.mvs
+//  run:    examples\02_functions\recursion.exe
+// ============================================================
+import { io } from "std";
+
+func fib(n: i32) -> i64 {
+    if (n < 2) { return n as i64; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+// recursion สลับกัน (mutual recursion)
+func is_even(n: i32) -> bool { if (n == 0) { return true; } return is_odd(n - 1); }
+func is_odd(n: i32)  -> bool { if (n == 0) { return false; } return is_even(n - 1); }
+
+func main() -> i8 {
+    io.out("fib(10) = {}", fib(10));        // 55
+    io.out("fib(20) = {}", fib(20));        // 6765
+    io.out("is_even(10) = {}", is_even(10)); // 1
+    io.out("is_odd(7) = {}", is_odd(7));     // 1
+    return 0;
+}

@@ -1,0 +1,17 @@
+// ============================================================
+//  export_lib — export ฟังก์ชัน MVS ให้ภาษา C เรียก (ไม่มี main)
+//  build:  mvs.exe examples/07_c_interop/export_lib.mvs -c
+//          clang caller.c export_lib.obj -o app.exe -llegacy_stdio_definitions
+//  run:    app.exe
+//
+//  export -> ใช้ชื่อสัญลักษณ์ดิบ (mvs_square) ให้ C เรียกตรง ๆ; ฝั่ง C ประกาศ prototype
+//  ให้ตรง (ดู caller.c)
+// ============================================================
+
+export func mvs_square(x: i32) -> i32 { return x * x; }
+
+export func mvs_sum_to(n: i64) -> i64 {
+    let total: i64 = 0;
+    for (let i: i64 = 1; i <= n; i++) { total += i; }
+    return total;
+}

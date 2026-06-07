@@ -1,0 +1,21 @@
+// ============================================================
+//  generics — generic function (monomorphization แบบ Rust/C++)
+//  build:  mvs.exe examples/02_functions/generics.mvs
+//  run:    examples\02_functions\generics.exe
+//  คอมไพเลอร์สร้างสำเนาเฉพาะชนิดที่ถูกเรียกจริง (max__i64, max__f64, ...)
+// ============================================================
+import { io } from "std";
+
+func max<T>(a: T, b: T) -> T { if (a > b) { return a; } return b; }
+func min<T>(a: T, b: T) -> T { if (a < b) { return a; } return b; }
+func clamp<T>(x: T, lo: T, hi: T) -> T { return max(lo, min(x, hi)); } // generic เรียก generic
+func deref<T>(p: *T) -> T { return *p; }                               // generic กับ pointer
+
+func main() -> i8 {
+    io.out("max(3, 7) = {}", max(3, 7));               // 7   (instance i64)
+    io.out("max(2.5, 9.1) = {}", max(2.5, 9.1));        // 9.1 (instance f64)
+    io.out("clamp(15, 0, 10) = {}", clamp(15, 0, 10));  // 10
+    let n: i32 = 42;
+    io.out("deref(&n) = {}", deref(&n));                // 42 (instance *i32)
+    return 0;
+}

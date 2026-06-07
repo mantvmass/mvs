@@ -1,0 +1,17 @@
+// ============================================================
+//  ตัวอย่างขั้นต่ำ — เซิร์ฟเวอร์เส้นทางเดียว ด้วย function-pointer routing
+//  build:  mvs.exe vmass/examples/hello.mvs -o vmass/hello.exe
+//  run:    vmass\hello.exe        แล้ว:  curl http://127.0.0.1:8080/
+// ============================================================
+import { App } from "../vmass.mvs";   // โหลดทั้งเฟรมเวิร์ก — Request/Response เป็น struct global ใช้ได้เลย
+import { String } from "std/string";
+
+// handler: รับ *Request คืนเนื้อหา HTTP response (จาก Response builder ด้วย .render())
+func home(req: *Request) -> String {
+    return Response::ok().html("<h1>Hello from vmass!</h1>").render();
+}
+
+func main() -> i8 {
+    App::new().get("/", home).run();   // ลงทะเบียน handler แล้วรัน (ค่าเริ่มต้น 0.0.0.0:8080)
+    return 0;
+}

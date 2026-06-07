@@ -1,0 +1,20 @@
+// ============================================================
+//  freestanding — โค้ดระดับล่างที่ไม่พึ่ง std/CRT/OS (เขียน OS/bare-metal)
+//  build:  mvs.exe examples/07_c_interop/freestanding.mvs --nostd
+//          -> ได้ freestanding.obj (ไม่มี dependency กับ C runtime) ไปลิงก์/ฝังเองได้
+//
+//  หมายเหตุ: โหมด --nostd ใช้ io.out / import std ไม่ได้ (ไม่มี OS ให้พึ่ง)
+// ============================================================
+
+struct Color { r: u8; g: u8; b: u8; }
+impl Color { func luminance(self: *Color) -> i64 { return self.r + self.g + self.b; } }
+
+// เขียน/อ่านหน่วยความจำโดยตรง (เช่น VGA text buffer 0xB8000)
+export func poke(addr: *u8, value: u8) -> void { *addr = value; }
+export func peek(addr: *u8) -> u8 { return *addr; }
+
+// สาธิต struct + method ในโหมด freestanding
+export func brightness(r: u8, g: u8, b: u8) -> i64 {
+    let c: Color = Color { r: r, g: g, b: b };
+    return c.luminance();
+}

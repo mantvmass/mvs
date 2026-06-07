@@ -1,12 +1,28 @@
-# Generated files
-lex.yy.c
-mvs.tab.c
-mvs.tab.h
-*.o
+# คอมไพเลอร์ที่ build แล้ว
 mvs
-mvs_program
-output.o
+mvs.exe
 
-# Editor and system files
+# ไฟล์กลาง/ผลลัพธ์จากการคอมไพล์ (ทุกโฟลเดอร์)
+*.asm
+*.obj
+*.o
+*.exe
+*.ilk
+*.pdb
+*.lib
+
+# ไฟล์ที่ตัวอย่างสร้างขึ้นตอนรัน
+# (greeting.txt มาจาก examples/08_stdlib/files.mvs)
+greeting.txt
+
+# โฟลเดอร์ทดลอง/ชั่วคราว
+tmp/
+_t/
+
+# editor / IDE / ระบบ
+.vscode/
+.idea/
 *.swp
+*~
 .DS_Store
+Thumbs.db

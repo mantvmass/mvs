@@ -1,0 +1,38 @@
+/*
+ * std/fs.mvs - โมดูล fs (ระบบไฟล์) ของ standard library เขียนด้วย MVS
+ *
+ * ใช้ foreign functions จาก C runtime (fopen/fputs/fgets/fclose)
+ * วิธีใช้:
+ *     import { fs } from "std";
+ *     fs.write("out.txt", "hello");
+ *     let s: str = fs.read("out.txt");
+ */
+
+extern func fopen(path: str, mode: str) -> *u8;     // คืน FILE* (เป็น pointer)
+extern func fputs(s: str, stream: *u8) -> i32;
+extern func fgets(buf: *u8, n: i32, stream: *u8) -> *u8;
+extern func fclose(stream: *u8) -> i32;
+extern func malloc(n: usize) -> *u8;
+
+// เขียนสตริงลงไฟล์ (เขียนทับ) คืน 0 เมื่อสำเร็จ, -1 เมื่อเปิดไฟล์ไม่ได้
+func write(path: str, content: str) -> i32 {
+    let f: *u8 = fopen(path, "w");
+    if (f == 0) {
+        return -1;
+    }
+    fputs(content, f);
+    fclose(f);
+    return 0;
+}
+
+// อ่านไฟล์ (บรรทัดแรก สูงสุด ~4095 ไบต์) คืนเป็นสตริง, คืน "" เมื่อเปิดไฟล์ไม่ได้
+func read(path: str) -> str {
+    let f: *u8 = fopen(path, "r");
+    if (f == 0) {
+        return "";
+    }
+    let buf: *u8 = malloc(4096);
+    fgets(buf, 4096, f);
+    fclose(f);
+    return buf;
+}

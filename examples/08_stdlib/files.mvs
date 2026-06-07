@@ -1,0 +1,18 @@
+// ============================================================
+//  files — โมดูล fs (เขียน/อ่านไฟล์) + io.in (รับ input จากผู้ใช้)
+//  build:  mvs.exe examples/08_stdlib/files.mvs
+//  run:    examples\08_stdlib\files.exe
+// ============================================================
+import { io, fs } from "std";
+
+func main() -> i8 {
+    // เขียนไฟล์แล้วอ่านกลับ
+    fs.write("greeting.txt", "Hello from MVS file IO");
+    let content: str = fs.read("greeting.txt");
+    io.out("file content: {}", content);
+
+    // รับ input จากผู้ใช้ (โต้ตอบ — พิมพ์แล้วกด Enter)
+    let name: str = io.in("Enter your name: ");
+    io.out("Welcome, {}!", name);
+    return 0;
+}

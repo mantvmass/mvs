@@ -1,0 +1,35 @@
+// ============================================================
+//  operators — ตัวดำเนินการครบทุกแบบ + break/continue + args เกิน 4 ตัว
+//  build:  mvs.exe examples/01_language/operators.mvs
+//  run:    examples\01_language\operators.exe
+// ============================================================
+import { io } from "std";
+
+// ฟังก์ชันรับพารามิเตอร์ 6 ตัว (เกิน 4 -> ส่งผ่าน stack)
+func sum6(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) -> i32 {
+    return a + b + c + d + e + f;
+}
+
+func main() -> i8 {
+    io.out("2 + 3 * 4 = {}", 2 + 3 * 4);       // 14 (ลำดับความสำคัญ)
+    io.out("(2 + 3) * 4 = {}", (2 + 3) * 4);   // 20
+    io.out("2 ** 10 = {}", 2 ** 10);           // 1024 (** = ยกกำลัง)
+    io.out("17 % 5 = {}", 17 % 5);             // 2  (มอด — จำนวนเต็มเท่านั้น)
+
+    io.out("5 > 3 = {}", 5 > 3);               // 1 (ผลเปรียบเทียบเป็น bool 1/0)
+    io.out("5 == 3 = {}", 5 == 3);             // 0
+    io.out("true && false = {}", true && false); // 0 (short-circuit)
+    io.out("true || false = {}", true || false); // 1
+    io.out("!false = {}", !false);                // 1
+
+    io.out("sum6 = {}", sum6(1, 2, 3, 4, 5, 6)); // 21
+
+    let s: i32 = 0;
+    for (let i: i32 = 0; i < 10; i++) {
+        if (i == 7) { break; }        // หยุดที่ 7
+        if (i % 2 == 1) { continue; } // ข้ามเลขคี่
+        s += i;                        // 0+2+4+6
+    }
+    io.out("sum even < 7 = {}", s);   // 12
+    return 0;
+}

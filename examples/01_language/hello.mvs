@@ -1,0 +1,12 @@
+// ============================================================
+//  hello — โปรแกรมแรกสุด
+//  build:  mvs.exe examples/01_language/hello.mvs
+//  run:    examples\01_language\hello.exe
+// ============================================================
+import { io } from "std";
+
+func main() -> i8 {
+    let name: str = "MVS";
+    io.out("Hello, {}!", name);
+    return 0;
+}

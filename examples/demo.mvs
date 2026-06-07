@@ -1,0 +1,36 @@
+// ============================================================
+//  demo — โชว์เคสรวมความสามารถหลักของ MVS (จุดเริ่มต้นที่ดีสำหรับมือใหม่)
+//  build:  mvs.exe examples/demo.mvs
+//  run:    examples\demo.exe
+//  ดูตัวอย่างเฉพาะเรื่องในโฟลเดอร์ 01_language .. 08_stdlib
+// ============================================================
+import { io } from "std";
+
+const APP: str = "MVS Demo";
+
+func add(a: i32, b: i32) -> i32 { return a + b; }
+func factorial(n: i32) -> i32 {
+    let r: i32 = 1;
+    for (let i: i32 = 1; i <= n; i++) { r = r * i; }
+    return r;
+}
+
+func main() -> i8 {
+    io.out("=== {} ===", APP);
+    io.out("10 + 20 = {}", add(10, 20));        // 30
+    io.out("(10 - 5) * 3 = {}", (10 - 5) * 3);  // 15
+    io.out("2 ** 8 = {}", 2 ** 8);              // 256
+    io.out("255 in hex = {:x}", 255);           // ff
+
+    let even: i32 = 0;
+    for (let i: i32 = 0; i <= 10; i++) { if (i % 2 == 0) { even += 1; } }
+    io.out("even numbers in 0..10 = {}", even); // 6
+
+    let score: i32 = 75;
+    if (score >= 80) { io.out("grade A"); }
+    elseif (score >= 60) { io.out("grade B"); }
+    else { io.out("grade C"); }
+
+    io.out("factorial(5) = {}", factorial(5));  // 120
+    return 0;
+}

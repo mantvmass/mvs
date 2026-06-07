@@ -1,0 +1,40 @@
+// ============================================================
+//  display — trait Display + fmt.println (formatting แบบ library จริง)
+//  build:  mvs.exe examples/04_traits/display.mvs
+//  run:    examples\04_traits\display.exe
+//
+//  io.out("{}", ..) เป็น compiler intrinsic (รับ arg ไม่จำกัด เหมือน println! ของ Rust)
+//  ส่วน fmt.println เป็นฟังก์ชัน MVS ล้วน — ชนิดที่ impl Display พิมพ์ได้ผ่านมัน (static dispatch)
+// ============================================================
+import { fmt } from "std";              // fmt.println + trait Display
+import { String } from "std/string";    // ชนิด String
+
+struct Point { x: i32; y: i32; }
+impl Display for Point {
+    func fmt(self: *Point) -> String {
+        let s: String = String::from("Point(");
+        let xs: String = String::from_int(self.x as i64);
+        s.push_str(xs.as_str()).push_str(", ");
+        let ys: String = String::from_int(self.y as i64);
+        s.push_str(ys.as_str()).push_str(")");
+        xs.drop(); ys.drop();
+        return s;
+    }
+}
+
+struct Temp { celsius: i32; }
+impl Display for Temp {
+    func fmt(self: *Temp) -> String {
+        let s: String = String::from_int(self.celsius as i64);
+        s.push_str(" C");
+        return s;
+    }
+}
+
+func main() -> i8 {
+    let p: Point = Point { x: 3, y: 4 };
+    let t: Temp = Temp { celsius: 25 };
+    fmt.println(p);    // Point(3, 4)
+    fmt.println(t);    // 25 C
+    return 0;
+}

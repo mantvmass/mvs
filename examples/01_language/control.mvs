@@ -1,0 +1,32 @@
+// ============================================================
+//  control — if/elseif/else, while, for, do-while, switch/case
+//  build:  mvs.exe examples/01_language/control.mvs
+//  run:    examples\01_language\control.exe
+// ============================================================
+import { io } from "std";
+
+func main() -> i8 {
+    // if / elseif / else
+    let g: i32 = 7;
+    if (g < 5) { io.out("low"); } elseif (g < 10) { io.out("mid"); } else { io.out("high"); } // mid
+
+    // switch/case/default — เป็น C-style (ต้องใส่ break ไม่งั้น fallthrough)
+    for (let i: i32 = 0; i < 5; i++) {
+        switch (i) {
+            case 0: io.out("zero"); break;
+            case 1: io.out("one"); break;
+            case 2:
+            case 3: io.out("two/three: {}", i); break;   // 2 และ 3 ใช้ case เดียวกัน
+            default: io.out("other: {}", i);
+        }
+    }
+
+    // while
+    let w: i32 = 0;
+    while (w < 3) { io.out("while {}", w); w++; }
+
+    // do-while — ทำงานอย่างน้อยหนึ่งครั้ง
+    let n: i32 = 3;
+    do { io.out("countdown {}", n); n--; } while (n > 0);
+    return 0;
+}

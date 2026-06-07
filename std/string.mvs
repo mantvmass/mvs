@@ -1,0 +1,68 @@
+/*
+ * std/string.mvs - ชนิด String แบบเป็นเจ้าของหน่วยความจำบน heap (owned, growable)
+ *
+ * วิธีใช้:
+ *     import { string } from "std";
+ *     let s: string.String = string.String::from("hello");
+ *     s.push_str(", world");
+ *     io.out("{}", s.as_str());      // hello, world
+ *     s.drop();                       // คืนหน่วยความจำเมื่อเลิกใช้ (จัดการเอง)
+ *
+ *     let n: string.String = string.String::from_int(42);  // "42"
+ *
+ * หมายเหตุ: String เก็บ buffer แบบ null-terminated บน heap จึงแปลงเป็น `str` (ส่งให้ io.out/printf) ได้ตรง ๆ
+ *           เป็นโมดูล std (พึ่ง malloc/free ของ CRT) — ไม่ใช้ในโหมด --nostd
+ */
+
+// foreign functions จาก C runtime
+extern func malloc(n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+extern func strlen(s: str) -> usize;
+extern func sprintf(buf: *u8, fmt: str, v: i64) -> i32;
+
+// String: buffer บน heap (null-terminated) + ความยาว + ความจุ
+struct String {
+    data: *u8;    // ตัวชี้ไปยัง buffer บน heap (จบด้วย '\0')
+    len:  usize;  // ความยาวของข้อความ (ไม่นับ '\0')
+    cap:  usize;  // ความจุที่จองไว้ (รวม '\0')
+}
+
+impl String {
+    // associated function: สร้าง String โดยคัดลอกข้อความจาก str ลง heap
+    func from(s: str) -> String {
+        let n: usize = strlen(s);
+        let buf: *u8 = malloc(n + 1);
+        memcpy(buf, s, n + 1);                 // คัดลอกรวม null terminator
+        return String { data: buf, len: n, cap: n + 1 };
+    }
+
+    // associated function: สร้าง String จากจำนวนเต็ม (เช่น 42 -> "42")
+    func from_int(v: i64) -> String {
+        let buf: *u8 = malloc(32);
+        sprintf(buf, "%lld", v);               // แปลงเลขเป็นข้อความฐานสิบ
+        return String { data: buf, len: strlen(buf), cap: 32 };
+    }
+
+    func len(self: *String) -> usize { return self.len; }
+
+    // คืน buffer เป็น str (เป็น pointer ตัวเดียวกัน null-terminated) ใช้กับ io.out ได้เลย
+    func as_str(self: *String) -> str { return self.data; }
+
+    // ต่อข้อความท้าย String (จองใหม่แล้วคัดลอก) — คืน *self เพื่อ chain ได้
+    func push_str(self: *String, s: str) -> *String {
+        let slen: usize = strlen(s);
+        let newlen: usize = self.len + slen;
+        let nbuf: *u8 = malloc(newlen + 1);
+        memcpy(nbuf, self.data, self.len);          // ส่วนเดิม
+        memcpy(nbuf + self.len, s, slen + 1);       // ส่วนที่ต่อ (รวม '\0')
+        free(self.data);                            // คืน buffer เก่า
+        self.data = nbuf;
+        self.len = newlen;
+        self.cap = newlen + 1;
+        return self;
+    }
+
+    // คืนหน่วยความจำของ String (เรียกเมื่อเลิกใช้ — ภาษานี้จัดการ memory เอง)
+    func drop(self: *String) -> void { free(self.data); }
+}

@@ -1,0 +1,27 @@
+// ============================================================
+//  overload — ฟังก์ชันชื่อเดียวกัน ต่างชนิด/จำนวนพารามิเตอร์
+//  build:  mvs.exe examples/02_functions/overload.mvs
+//  run:    examples\02_functions\overload.exe
+//  + generic เรียก overload = constraint แบบ duck-typed
+// ============================================================
+import { io } from "std";
+
+struct Point { x: i32; y: i32; }
+
+func show(n: i32)   -> void { io.out("int: {}", n); }
+func show(s: str)   -> void { io.out("str: {}", s); }
+func show(f: f64)   -> void { io.out("float: {}", f); }
+func show(p: Point) -> void { io.out("point: ({}, {})", p.x, p.y); }
+
+func print_all<T>(a: T, b: T) -> void { show(a); show(b); }
+
+func main() -> i8 {
+    show(42);                                  // int: 42
+    show("hello");                             // str: hello
+    show(2.5);                                 // float: 2.5
+    let p: Point = Point { x: 3, y: 4 };
+    show(p);                                   // point: (3, 4)
+    print_all(1, 2);                           // int / int
+    print_all("a", "b");                       // str / str
+    return 0;
+}

@@ -1,25 +1,82 @@
 name: MVS Compiler CI
+
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
   pull_request:
-    branches:
-      - main
-      - develop
+    branches: [main, develop]
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: windows-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y flex bison gcc llvm-18-dev
-    - name: Build and test
-      run: |
-        make clean
-        make build
-        ./run_tests.sh
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ติดตั้ง nasm (ตัวประกอบแอสเซมบลี) — clang/llvm มีให้แล้วบน windows runner
+      - name: Install NASM
+        run: choco install nasm -y
+
+      - name: Add NASM to PATH
+        run: echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      # build ตัวคอมไพเลอร์ด้วย clang (รายชื่อซอร์สตรงกับ Makefile: รวม generic.c + arch/common.c + arch/x86_64/win.c)
+      - name: Build compiler
+        run: clang -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
+
+      # คอมไพล์และรันตัวอย่างที่รันได้โดยไม่ต้องรับ input/เครือข่าย (จัดกลุ่มตามโฟลเดอร์ 01..08)
+      - name: Compile and run examples
+        run: |
+          $exs = @(
+            "examples/demo",
+            "examples/01_language/hello", "examples/01_language/types", "examples/01_language/operators",
+            "examples/01_language/casts", "examples/01_language/control", "examples/01_language/bitwise",
+            "examples/01_language/args",
+            "examples/02_functions/generics", "examples/02_functions/overload",
+            "examples/02_functions/recursion", "examples/02_functions/funcptr",
+            "examples/03_structs/structs", "examples/03_structs/methods", "examples/03_structs/pointers",
+            "examples/04_traits/traits", "examples/04_traits/display",
+            "examples/05_strings/strings",
+            "examples/06_modules/use_import",
+            "examples/08_stdlib/io_demo", "examples/08_stdlib/floats"
+          )
+          foreach ($ex in $exs) {
+            .\mvs.exe "$ex.mvs"
+            if ($LASTEXITCODE -ne 0) { throw "compile $ex failed" }
+            & ".\$ex.exe"
+            if ($LASTEXITCODE -ne 0) { throw "run $ex failed" }
+          }
+
+      # C interop ทิศทาง 1: C เรียกฟังก์ชันที่ export จาก MVS
+      - name: C interop (C calls MVS)
+        run: |
+          .\mvs.exe examples/07_c_interop/export_lib.mvs -c
+          '#include <stdio.h>
+          int mvs_square(int); long long mvs_sum_to(long long);
+          int main(void){ printf("%d %lld\n", mvs_square(9), mvs_sum_to(100)); return 0; }' | Out-File -Encoding ascii uselib.c
+          clang uselib.c examples/07_c_interop/export_lib.obj -o uselib.exe -llegacy_stdio_definitions
+          .\uselib.exe
+          if ($LASTEXITCODE -ne 0) { throw "C interop (C calls MVS) failed" }
+
+      # C interop ทิศทาง 2: MVS เรียกฟังก์ชันจากไฟล์ .c
+      - name: C interop (MVS calls C)
+        run: |
+          .\mvs.exe examples/07_c_interop/use_c.mvs -c
+          clang examples/07_c_interop/use_c.obj examples/07_c_interop/mathops.c -o use_c.exe -llegacy_stdio_definitions
+          .\use_c.exe
+          if ($LASTEXITCODE -ne 0) { throw "C interop (MVS calls C) failed" }
+
+      # คอมไพล์ให้ผ่าน (ไม่รัน): freestanding, extern, และตัวอย่างที่ใช้ input/เครือข่าย
+      - name: Compile-only (freestanding / extern / stdin / network)
+        run: |
+          .\mvs.exe examples/07_c_interop/freestanding.mvs --nostd
+          .\mvs.exe examples/07_c_interop/extern_c.mvs
+          .\mvs.exe examples/08_stdlib/files.mvs
+          .\mvs.exe examples/08_stdlib/net_client.mvs
+          .\mvs.exe examples/08_stdlib/net_server.mvs
+
+      # build เฟรมเวิร์กทดสอบ vmass (สาธิต function-pointer routing — ใช้เครือข่าย จึง build อย่างเดียว)
+      - name: Build vmass framework
+        run: |
+          .\mvs.exe vmass/examples/hello.mvs -o vmass/hello.exe
+          .\mvs.exe vmass/examples/api.mvs -o vmass/api.exe

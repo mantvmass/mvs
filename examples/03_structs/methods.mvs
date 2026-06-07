@@ -1,0 +1,23 @@
+// ============================================================
+//  methods — method ผ่าน impl + associated function (Type::new) + chaining
+//  build:  mvs.exe examples/03_structs/methods.mvs
+//  run:    examples\03_structs\methods.exe
+// ============================================================
+import { io } from "std";
+
+struct Rect { w: i32; h: i32; }
+
+impl Rect {
+    func new(w: i32, h: i32) -> Rect { return Rect { w: w, h: h }; }  // associated (ไม่มี self)
+    func area(self: *Rect) -> i32 { return self.w * self.h; }          // method (มี self)
+    func perimeter(self: *Rect) -> i32 { return 2 * (self.w + self.h); }
+    func scale(self: *Rect, k: i32) -> *Rect { self.w *= k; self.h *= k; return self; } // คืน *self เพื่อ chain
+}
+
+func main() -> i8 {
+    let r: Rect = Rect::new(3, 4);            // เรียก associated function ผ่าน ::
+    io.out("area = {}", r.area());            // 12
+    io.out("perimeter = {}", r.perimeter());  // 14
+    io.out("scaled area = {}", r.scale(2).scale(2).area()); // 12*16 = 192 (method chaining)
+    return 0;
+}

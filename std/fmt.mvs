@@ -1,0 +1,42 @@
+/*
+ * std/fmt.mvs - การจัดรูปแบบที่ผู้ใช้ขยายได้ผ่าน trait Display (เขียนด้วย MVS ล้วน)
+ *
+ * ต่างจาก io.out (เป็น compiler intrinsic เพราะรับ {} จำนวน/ชนิดไม่จำกัด) —
+ * โมดูลนี้เป็น "library จริง" ที่ใช้ trait + generic (static dispatch):
+ * ชนิดใดก็ตามที่ impl Display จะพิมพ์ผ่าน fmt.println ได้
+ *
+ * วิธีใช้:
+ *     import { fmt, string } from "std";
+ *     struct Point { x: i32; y: i32; }
+ *     impl Display for Point {
+ *         func fmt(self: *Point) -> String {
+ *             let s: String = String::from("Point(");
+ *             let xs: String = String::from_int(self.x as i64);
+ *             s.push_str(xs.as_str()).push_str(")"); xs.drop();
+ *             return s;
+ *         }
+ *     }
+ *     fmt.println(p);     // เรียกใช้ Display::fmt ของ Point อัตโนมัติ (เลือกตอนคอมไพล์)
+ */
+import { String } from "std/string";
+
+extern func printf(fmt: str) -> i32;
+
+// trait Display: ชนิดที่ "พิมพ์ได้" ต้องสร้าง String แทนตัวเองได้
+trait Display {
+    func fmt(self: *Self) -> String;
+}
+
+// พิมพ์ค่าใด ๆ ที่ impl Display (ขึ้นบรรทัดใหม่ให้) — generic ผูก trait, static dispatch
+func println<T: Display>(x: T) -> void {
+    let s: String = x.fmt();
+    printf("%s\n", s.as_str());
+    s.drop();
+}
+
+// พิมพ์โดยไม่ขึ้นบรรทัดใหม่
+func print<T: Display>(x: T) -> void {
+    let s: String = x.fmt();
+    printf("%s", s.as_str());
+    s.drop();
+}

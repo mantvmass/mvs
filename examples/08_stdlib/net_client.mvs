@@ -1,0 +1,15 @@
+// ============================================================
+//  net_client — TCP client แบบ Rust (struct + method chaining, ผ่าน Winsock)
+//  build:  mvs.exe examples/08_stdlib/net_client.mvs
+//  run:    examples\08_stdlib\net_client.exe   (ต้องมีเซิร์ฟเวอร์ปลายทาง)
+// ============================================================
+import { io, net } from "std";
+
+func main() -> i8 {
+    let conn: TcpSocket = net.TcpClient("93.184.216.34", 80);  // example.com
+    conn.send("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n");
+    let reply: str = conn.recv();
+    io.out("server replied:\n{}", reply);
+    conn.close();
+    return 0;
+}

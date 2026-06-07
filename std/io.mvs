@@ -1,0 +1,33 @@
+/*
+ * std/io.mvs - โมดูล io ของ standard library (เขียนด้วยภาษา MVS เอง)
+ *
+ * วิธีใช้:
+ *     import { io } from "std";
+ *     io.out("hello");                       // พิมพ์ข้อความ (ขึ้นบรรทัดใหม่ให้อัตโนมัติ)
+ *     io.out("number = {}", 42);             // แทรกค่าแบบ Rust ด้วย {}
+ *     io.out("{} + {} = {}", a, b, a + b);   // หลายค่า
+ *     io.out("hex = {:x}", 255);             // เลขฐานสิบหก
+ *     io.print("no newline");                // พิมพ์ดิบ ไม่ขึ้นบรรทัดใหม่
+ *
+ * หมายเหตุ: io.out เป็น compiler intrinsic (เหมือน println! ของ Rust ที่เป็น macro)
+ *           เพราะต้องแยกวิเคราะห์ {} และเลือกชนิดการพิมพ์ตอนคอมไพล์
+ *           ส่วนฟังก์ชันอื่น ๆ ด้านล่างเป็น MVS ปกติที่เรียก printf ผ่าน extern
+ */
+
+// foreign functions จาก C runtime
+extern func printf(fmt: str) -> i32;
+extern func scanf(fmt: str) -> i32;
+extern func malloc(n: usize) -> *u8;
+
+// พิมพ์สตริงโดยไม่ขึ้นบรรทัดใหม่และไม่มีการ format
+func print(s: str) -> void {
+    printf("%s", s);
+}
+
+// แสดงข้อความชวน (prompt) แล้วอ่านคำหนึ่งคำจากผู้ใช้ (ไม่มีช่องว่าง) คืนเป็นสตริง
+func in(prompt: str) -> str {
+    printf("%s", prompt);
+    let buf: *u8 = malloc(256);
+    scanf("%255s", buf);
+    return buf;
+}

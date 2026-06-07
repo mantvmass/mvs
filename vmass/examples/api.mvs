@@ -1,0 +1,56 @@
+// ============================================================
+//  ตัวอย่างครบเครื่อง — function-pointer routing + query/redirect/put/delete/404
+//  build:  mvs.exe vmass/examples/api.mvs -o vmass/api.exe
+//  run:    vmass\api.exe
+//  test:   curl http://127.0.0.1:8080/api
+//          curl "http://127.0.0.1:8080/echo?msg=hello"
+//          curl -i http://127.0.0.1:8080/old        (302 redirect)
+//          curl -i -X PUT http://127.0.0.1:8080/item
+//          curl -i http://127.0.0.1:8080/nope        (404 เอง)
+// ============================================================
+import { App } from "../vmass.mvs";   // โหลดทั้งเฟรมเวิร์ก — Request/Response เป็น struct global ใช้ได้เลย
+import { String } from "std/string";
+
+// ── handler แต่ละเส้นทาง (function pointer) ──
+func index(req: *Request) -> String {
+    return Response::ok().html("<h1>vmass</h1><p>a tiny HTTP framework in MVS</p>").render();
+}
+func api(req: *Request) -> String {
+    return Response::ok().json("{\"framework\":\"vmass\",\"lang\":\"MVS\",\"ok\":true}").render();
+}
+func echo(req: *Request) -> String {
+    // อ่าน query string ดิบจากคำขอ (req.query = ส่วนหลัง '?')
+    return Response::ok().text(req.query).render();
+}
+func teapot(req: *Request) -> String {
+    return Response::new().status(418).text("I'm a teapot").render();
+}
+func old_path(req: *Request) -> String {
+    return Response::new().redirect("/api").render();      // 302 -> /api
+}
+func put_item(req: *Request) -> String {
+    return Response::created().text("item stored").render();   // 201
+}
+func del_item(req: *Request) -> String {
+    return Response::ok().text("item deleted").render();
+}
+// handler 404 เอง (แสดงว่า .fallback รับ function pointer)
+func my_404(req: *Request) -> String {
+    return Response::not_found().json("{\"error\":\"not found\",\"path\":\"unknown\"}").render();
+}
+
+func main() -> i8 {
+    // สร้าง/ตั้งค่า/ลงทะเบียนเส้นทาง/รัน — ทั้งหมดด้วย builder chain
+    App::new()
+        .host("0.0.0.0").port(8080).name("vmass-api")
+        .get("/", index)
+        .get("/api", api)
+        .get("/echo", echo)
+        .get("/teapot", teapot)
+        .get("/old", old_path)
+        .put("/item", put_item)
+        .delete("/item", del_item)
+        .fallback(my_404)
+        .run();
+    return 0;
+}

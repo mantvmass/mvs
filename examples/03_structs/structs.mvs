@@ -1,0 +1,24 @@
+// ============================================================
+//  structs — struct, สมาชิก, คืน struct, struct literal, io.out struct
+//  build:  mvs.exe examples/03_structs/structs.mvs
+//  run:    examples\03_structs\structs.exe
+// ============================================================
+import { io } from "std";
+
+struct Point { x: i32; y: i32; }
+
+func makePoint(x: i32, y: i32) -> Point { return Point { x: x, y: y }; }
+
+func main() -> i8 {
+    let p: Point = Point { x: 3, y: 4 };       // struct literal
+    io.out("p = ({}, {})", p.x, p.y);          // (3, 4)
+    p.x = 10; p.y += 5;
+    io.out("after update: ({}, {})", p.x, p.y); // (10, 9)
+
+    let q: Point = makePoint(7, 8);            // คืน struct จากฟังก์ชัน
+    io.out("q = {}", q);                       // q = Point { x: 7, y: 8 }  (io.out พิมพ์ struct ได้)
+
+    // ผลลัพธ์ struct จากฟังก์ชันใช้เป็น rvalue ได้โดยตรง
+    io.out("makePoint(1,2).x = {}", makePoint(1, 2).x);   // 1
+    return 0;
+}
