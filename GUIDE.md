@@ -1,275 +1,282 @@
-# GUIDE — คู่มือภาษา MVS แบบละเอียด (โครงสร้าง + กลไกภายใน + สื่อการเรียนรู้)
+# GUIDE — the MVS language, its internals, and project status
 
-> เอกสารนี้คือสื่อการเรียนรู้เชิงลึกของภาษา **MVS** ตั้งแต่ไวยากรณ์ ไปจนถึงกลไกระดับล่าง
-> (การจอง/คืนหน่วยความจำ, การจัดวาง stack frame, calling convention, การแปลงเป็นแอสเซมบลีจริง)
-> เหมาะสำหรับผู้ที่อยากเข้าใจว่า "โค้ดที่เขียนกลายเป็น instruction อะไรบ้าง"
->
-> เอกสารที่เกี่ยวข้อง: [`README.md`](README.md) (เริ่มต้นใช้งาน) · [`Rules.md`](Rules.md) (กฎผู้พัฒนา) · [`Recap.md`](Recap.md) (สถานะ/roadmap)
+This is the deep reference for **MVS**: syntax, the memory model, the calling convention, and
+the actual assembly the compiler emits. The back half covers project status, roadmap, and the
+gotchas worth knowing before you change anything. For the rules you must not break, see
+[RULES.md](RULES.md). To get started, see [README.md](README.md).
 
-สารบัญ
-1. [ภาษา MVS คืออะไร](#1-ภาษา-mvs-คืออะไร)
-2. [เส้นทางจากซอร์สโค้ดสู่โปรแกรม (pipeline)](#2-เส้นทางจากซอร์สโค้ดสู่โปรแกรม)
-3. [โครงสร้างคอมไพเลอร์](#3-โครงสร้างคอมไพเลอร์)
-4. [ไวยากรณ์ภาษาแบบครบ](#4-ไวยากรณ์ภาษาแบบครบ)
-5. [กลไกหน่วยความจำ: stack, heap, การจอง/คืน](#5-กลไกหน่วยความจำ)
-6. [กลไกภายในแบบละเอียด (พร้อม assembly จริง)](#6-กลไกภายในแบบละเอียด)
-7. [ข้อจำกัดปัจจุบัน](#7-ข้อจำกัดปัจจุบัน)
-8. [ลำดับการเรียนรู้ที่แนะนำ](#8-ลำดับการเรียนรู้ที่แนะนำ)
-9. [อภิธานศัพท์](#9-อภิธานศัพท์)
-
----
-
-## 1. ภาษา MVS คืออะไร
-
-MVS เป็นภาษาโปรแกรมมิ่งระดับล่าง (low-level) อยู่ระดับเดียวกับ C แต่ syntax อ่านง่ายกว่า
-(คล้าย Rust) เป้าหมายหลัก:
-
-- **จัดการหน่วยความจำเอง** เหมือน C — ไม่มี garbage collector, ไม่มี runtime ซ่อนอยู่
-- **freestanding by default** — แกนภาษาไม่พึ่ง OS/CRT จึงนำไปเขียน OS / bare-metal ได้
-- คอมไพล์เป็น **แอสเซมบลี x86-64 โดยตรง** (ไม่ใช้ LLVM) แล้วประกอบด้วย `nasm` ลิงก์ด้วย `clang`
-
-ปรัชญาสำคัญ: ทุกอย่างที่แตะ OS (พิมพ์จอ, ไฟล์, เครือข่าย, จองหน่วยความจำ heap) อยู่ใน
-**standard library (`std/*.mvs`) ที่ต้อง `import` เอง** ไม่ได้ฝังในคอมไพเลอร์
+Contents:
+1. What MVS is
+2. Source to executable (pipeline)
+3. Compiler layout
+4. Language reference
+5. Memory model: stack, heap, static
+6. Internals, with real assembly
+7. Recipes
+8. Current limitations
+9. Status and roadmap
+10. Gotchas
+11. Glossary
 
 ---
 
-## 2. เส้นทางจากซอร์สโค้ดสู่โปรแกรม
+## 1. What MVS is
+
+MVS is a low-level language, roughly C's level but with a friendlier (Rust-ish) syntax. The goals:
+
+- **Manual memory management like C** — no garbage collector, no hidden runtime.
+- **Freestanding by default** — the core depends on no OS/CRT, so you can write an OS or bare-metal
+  code with it.
+- **Compiles straight to x86-64 assembly** (no LLVM), assembled by `nasm`, linked by `clang`.
+
+The guiding rule: anything that touches the OS (printing, files, networking, heap allocation) lives
+in the standard library (`std/*.mvs`) and must be imported. None of it is baked into the compiler.
+
+## 2. Source to executable
 
 ```
-ไฟล์ .mvs
-   │  lexer   (src/lexer.c)      แปลงตัวอักษร -> token
+file.mvs
+   │  lexer   (src/lexer.c)      characters  -> tokens
    ▼
  tokens
-   │  parser  (src/parser.c)     ประกอบ token -> ต้นไม้ไวยากรณ์ (AST)
+   │  parser  (src/parser.c)     tokens      -> AST
    ▼
   AST
-   │  module  (src/module.c)     รวมไฟล์ที่ import เข้าด้วยกัน
+   │  module  (src/module.c)     merge imported files
    ▼
- AST รวม
-   │  codegen (src/arch/...)     เดิน AST -> แอสเซมบลี NASM (.asm)
+ merged AST
+   │  codegen (src/arch/...)     walk AST    -> NASM assembly (.asm)
    ▼
  .asm
-   │  nasm -f win64              ประกอบ -> ไฟล์อ็อบเจกต์ (.obj)
+   │  nasm -f win64              assemble    -> object file (.obj)
    ▼
  .obj
-   │  clang (linker)             ลิงก์ + ผูก C runtime -> ไฟล์ปฏิบัติการ
+   │  clang (linker)             link + C runtime -> executable
    ▼
  .exe
 ```
 
-โหมดการสร้าง:
-| คำสั่ง | ได้อะไร | ใช้เมื่อ |
-|--------|---------|---------|
-| `mvs file.mvs` | `.exe` | โปรแกรมปกติ |
-| `mvs file.mvs -S` | `.asm` | อยากดูแอสเซมบลีที่ gen |
-| `mvs file.mvs -c` | `.obj` | เอาไปลิงก์กับโปรแกรม C |
-| `mvs file.mvs --nostd` | `.obj` (freestanding) | เขียน OS / bare-metal |
+Build modes:
 
----
+| Command | Output | When |
+|---------|--------|------|
+| `mvs file.mvs` | `.exe` | normal program |
+| `mvs file.mvs -S` | `.asm` | inspect the generated assembly |
+| `mvs file.mvs -c` | `.obj` | link against a C program |
+| `mvs file.mvs --nostd` | `.obj` (freestanding) | OS / bare-metal |
 
-## 3. โครงสร้างคอมไพเลอร์
+## 3. Compiler layout
 
 ```
 src/
-  token.h            ชนิดของ token ทั้งหมด
-  lexer.{h,c}        ตัวตัดคำ (เขียนมือ ไม่ใช้ flex)
-  ast.{h,c}          นิยาม Node ของ AST (ใช้ Node เดียวแยกด้วย kind)
-  parser.{h,c}       recursive-descent parser (ไม่ใช้ bison)
-  module.{h,c}       ระบบโมดูล: resolve import ข้ามไฟล์ + package std
-  codegen.{h,c}      ตัวขับ เลือก backend ตาม TargetArch
+  token.h            all token kinds
+  lexer.{h,c}        tokenizer (hand-written, no flex)
+  ast.{h,c}          AST node (one Node tagged by kind)
+  parser.{h,c}       recursive-descent parser (no bison)
+  module.{h,c}       module system: resolve imports across files + std package
+  codegen.{h,c}      driver: picks the backend by TargetArch
   arch/
-    common.{h,c}     ★ ส่วนกลาง (ไม่ขึ้นกับ arch): ระบบชนิด, struct layout,
-                        symbol table, จองตัวแปร, reachability, format string
-    x86_64/win.c     ★ เฉพาะ x86-64 win64: ปล่อย instruction จริง + ABI
-  main.c             CLI ขับ pipeline
-std/                 standard library เขียนด้วย MVS (io, fs, net)
+    common.{h,c}     arch-independent: type system, struct layout, symbol table,
+                     variable allocation, reachability, format strings
+    x86_64/win.c     x86-64 win64 only: real instructions + ABI
+  main.c             CLI driving the pipeline
+std/                 standard library written in MVS (io, fs, net, string, fmt)
 ```
 
-หัวใจอยู่ที่การแยก **"ตรรกะ" (common.c)** ออกจาก **"การปล่อย instruction" (win.c)**
-เพิ่ม backend ใหม่ (เช่น `arch/x86_64/sysv.c` สำหรับ ELF/Linux) ทำได้โดย reuse `common.c`
+The whole design hinges on keeping "logic" (`common.c`) separate from "instruction emission" (`win.c`).
+A new backend (say `arch/x86_64/sysv.c` for ELF/Linux) reuses `common.c` and only rewrites emission.
 
----
+## 4. Language reference
 
-## 4. ไวยากรณ์ภาษาแบบครบ
+### 4.1 Comments
 
-### 4.1 คอมเมนต์
 ```rust
-// คอมเมนต์บรรทัดเดียว
-/* คอมเมนต์
-   หลายบรรทัด */
+// single line
+/* multi
+   line */
 ```
 
-### 4.2 ชนิดข้อมูล (data types)
+### 4.2 Data types
 
-| ชนิด | ความหมาย | ขนาดจริง (ไบต์) | signed? |
-|------|----------|-----------------|---------|
-| `i8` `i16` `i32` `i64` | จำนวนเต็มมีเครื่องหมาย (signed: idiv, setl/setg) | 1, 2, 4, 8 | ✅ |
-| `u8` `u16` `u32` `u64` | จำนวนเต็มไม่มีเครื่องหมาย (unsigned: div, setb/seta, wrap จริง) | 1, 2, 4, 8 | ❌ |
-| `i128` `u128` | จำนวนเต็ม 128-bit (เก็บ/ส่ง 16 ไบต์ แต่คำนวณยังเป็น 64-bit) | 16 | — |
-| `isize` `usize` | ขนาดเท่า pointer | 8 | i/u |
-| `bool` | `true` / `false` | 1 | ❌ |
-| `char` | อักขระ ใช้ `''` เท่านั้น เช่น `'A'` | 1 | ❌ |
-| `f32` | ทศนิยม single-precision (เก็บ 4 ไบต์จริง, คำนวณเป็น double) | 4 | — |
-| `f64` | ทศนิยม double-precision | 8 | — |
-| `str` | สตริง ใช้ `""` เท่านั้น (ตัวชี้ไปยังไบต์ + 0) | 8 | — |
-| `void` | ไม่มีค่า (ชนิดคืนของฟังก์ชัน) | 0 | — |
-| `*T` | pointer ไปยังชนิด T | 8 | — |
-| `struct` | โครงสร้างข้อมูล | ผลรวมของฟิลด์ | — |
+| Type | Meaning | Real size (bytes) | Signed? |
+|------|---------|-------------------|---------|
+| `i8` `i16` `i32` `i64` | signed integer (idiv, setl/setg) | 1, 2, 4, 8 | yes |
+| `u8` `u16` `u32` `u64` | unsigned integer (div, setb/seta, real wrap) | 1, 2, 4, 8 | no |
+| `i128` `u128` | 128-bit integer (stored/passed as 16 bytes, computed as 64-bit for now) | 16 | — |
+| `isize` `usize` | pointer-sized | 8 | i/u |
+| `bool` | `true` / `false` | 1 | no |
+| `char` | a character, `'A'` (single quotes only) | 1 | no |
+| `f32` | single precision (stored in a real 4 bytes, computed as double) | 4 | — |
+| `f64` | double precision | 8 | — |
+| `str` | string literal `"..."` (pointer to bytes + 0) | 8 | — |
+| `void` | no value (a function return type) | 0 | — |
+| `*T` | pointer to T | 8 | — |
+| `struct` | a struct | sum of fields | — |
 
-> หมายเหตุ: คอมไพเลอร์เก็บค่า **คำนวณใน register 64-bit เสมอ** แต่เคารพความกว้างจริง
-> ตอน **เก็บลงตัวแปร** (ตัดให้เหลือ N ไบต์) และตอน **โหลด** (ขยายกลับด้วย sign/zero-extend)
-> ดังนั้น `u8` จึง wrap-around จริง เช่น `200 + 100 = 44` (ระหว่างคำนวณยังเป็น 64-bit)
+Values are always computed in 64-bit registers, but the real width is respected when **storing**
+(truncate to N bytes) and **loading** (sign/zero-extend back). So `u8` really wraps: `200 + 100 = 44`
+when stored (mid-computation it's still 64-bit).
 
-#### `str` ต่างกับ `String` อย่างไร
+#### `str` vs `String`
 
-| | `str` (ชนิดในตัว) | `String` (จาก `std/string`) |
+| | `str` (built-in) | `String` (from `std/string`) |
 |--|------------------|------------------------------|
-| คืออะไร | **ตัวชี้** ไปยังข้อความคงที่ (null-terminated) | **บัฟเฟอร์บน heap** ที่เป็นเจ้าของข้อมูล |
-| เปลี่ยน/ต่อได้ไหม | ❌ อ่านอย่างเดียว | ✅ `push_str`, สร้างจากเลขด้วย `from_int` |
-| หน่วยความจำ | อยู่ใน `.data` (ไม่ต้องจัดการ) | จองด้วย malloc — ต้อง `drop()` เอง (ไม่มี GC) |
-| สร้างอย่างไร | `let s: str = "hi";` | `let s: String = String::from("hi");` |
-| ใช้กับ io.out | `io.out("{}", s)` ได้ตรง | ใช้ `s.as_str()` → คืน `str` |
+| What | a **pointer** to fixed text (null-terminated) | a **heap buffer** that owns its data |
+| Mutable? | no, read-only | yes (`push_str`, `from_int`) |
+| Memory | in `.data`, nothing to manage | malloc'd — you must `drop()` it (no GC) |
+| Create | `let s: str = "hi";` | `let s: String = String::from("hi");` |
+| With io.out | `io.out("{}", s)` directly | `s.as_str()` → returns `str` |
 
 ```rust
 import { io } from "std";
 import { String } from "std/string";
-let lit: str = "hello";                 // คงที่ อ่านอย่างเดียว
-let owned: String = String::from("hi"); // บน heap
-owned.push_str(", world");              // ต่อได้
+let lit: str = "hello";                 // fixed, read-only
+let owned: String = String::from("hi"); // on the heap
+owned.push_str(", world");              // can append
 io.out("{} / {}", lit, owned.as_str()); // hello / hi, world
-owned.drop();                           // คืนหน่วยความจำ
+owned.drop();                           // free it yourself
 ```
-> โดยทั่วไป: ใช้ `str` สำหรับข้อความคงที่/พารามิเตอร์ที่แค่อ่าน; ใช้ `String` เมื่อต้องสร้าง/ต่อข้อความตอน runtime
 
-### 4.3 ตัวแปร
+Rule of thumb: `str` for fixed text and read-only parameters; `String` when you build or append at runtime.
+
+### 4.3 Variables
+
 ```rust
-let name: type = value;     // เปลี่ยนค่าได้
-const NAME: type = value;   // ค่าคงที่ (โดยตั้งใจให้คงที่)
-let x: i32;                 // ประกาศโดยไม่กำหนดค่า (ค่าเริ่มต้นเป็น 0 บน stack ไม่รับประกัน)
+let name: type = value;     // mutable
+const NAME: type = value;   // intended constant
+let x: i32;                 // declared, uninitialized (stack value not guaranteed)
 ```
-ประกาศได้ทั้งระดับ **global** (นอกฟังก์ชัน) และ **local** (ในฟังก์ชัน)
 
-### 4.4 ตัวดำเนินการ (operators)
+Declarable at **global** scope (outside functions) and **local** scope (inside functions).
 
-| กลุ่ม | ตัวดำเนินการ | หมายเหตุ |
-|-------|-------------|----------|
-| เลขคณิต | `+ - * / % **` | `**` = ยกกำลัง (right-assoc), `%` = มอด |
-| เปรียบเทียบ | `== != < > <= >=` | ผลเป็น bool (1/0); unsigned ใช้ setb/seta |
-| ตรรกะ | `&& \|\| !` | short-circuit |
-| ระดับบิต | `& \| ^ ~ << >>` | AND / OR / **XOR** / NOT / เลื่อนซ้าย / เลื่อนขวา |
-| กำหนดค่า | `= += -= *= /=` | |
-| เพิ่ม/ลด | `++ --` | แบบ postfix |
-| pointer | `&x` `*p` `**p` | address-of / dereference (เลขคณิต pointer scale ตาม sizeof) |
+### 4.4 Operators
 
-ลำดับความสำคัญ (สูง→ต่ำ): `unary` → `as` → `**` → `* / %` → `+ -` → `<< >>` → เปรียบเทียบ →
-`== !=` → `&`(bit) → `^`(bit) → `\|`(bit) → `&&` → `\|\|` → `=`  · ใช้วงเล็บ `()` จัดลำดับได้
+| Group | Operators | Notes |
+|-------|-----------|-------|
+| arithmetic | `+ - * / % **` | `**` = power (right-assoc), `%` = modulo |
+| comparison | `== != < > <= >=` | result is bool (1/0); unsigned uses setb/seta |
+| logical | `&& \|\| !` | short-circuit |
+| bitwise | `& \| ^ ~ << >>` | AND / OR / XOR / NOT / shifts |
+| assignment | `= += -= *= /=` | |
+| inc/dec | `++ --` | postfix |
+| pointer | `&x` `*p` `**p` | address-of / dereference (pointer math scales by sizeof) |
 
-> หมายเหตุ: `&` เป็นได้ทั้ง **address-of** (นำหน้า เช่น `&x`) และ **bitwise AND** (อยู่ระหว่างค่า เช่น `a & b`)
-> แยกตามตำแหน่ง; `**` เป็นได้ทั้ง **ยกกำลัง** (`a ** b`) และ **deref สองชั้น** (`**ptr`) แยกตามตำแหน่งเช่นกัน
+Precedence (high → low): `unary` → `as` → `**` → `* / %` → `+ -` → `<< >>` → comparison →
+`== !=` → `&` → `^` → `|` → `&&` → `||` → `=`. Use `()` to override.
 
-#### การตรวจชนิดเวลาคอมไพล์ (type checking)
+`&` is both address-of (prefix `&x`) and bitwise AND (infix `a & b`), told apart by position; `**`
+is both power (`a ** b`) and double-deref (`**ptr`), likewise by position.
 
-ภาษานี้ **ไม่ยอมให้ชนิดมั่ว** — ตรวจตั้งแต่ตอนคอมไพล์ (สำคัญสำหรับงาน low-level/OS/embedded
-ที่ความผิดพลาดชนิดอาจพังเงียบ ๆ ตอนรัน) ตัวอย่างที่จะเป็น **error ทันที**:
+#### Compile-time type checking
+
+The language won't let types slide — it catches mismatches at compile time, which matters for
+low-level/OS/embedded work where a type bug can fail silently at runtime. Immediate errors:
+
 ```rust
 let x: i32 = 50 + "50";   // error: cannot apply '+'/'-' to 'i64' and 'str'
 let y: u8  = "hello";     // error: cannot initialize variable: ... 'u8' and 'str'
-let z: i32 = pt * 2;      // error (pt เป็น struct): cannot apply arithmetic to 'Point' and 'i64'
-let w: i32 = f & 3;       // error (f เป็น float): bitwise/shift requires integer operands
+let z: i32 = pt * 2;      // error (pt is a struct): cannot apply arithmetic to 'Point' and 'i64'
+let w: i32 = f & 3;       // error (f is float): bitwise/shift requires integer operands
 f("hello");               // error: argument 1 to 'f': cannot pass 'str' where 'i32' is expected
 f(1, 2, 3);               // error: function 'f' expects N argument(s) but got 3
 ```
-กฎโดยสรุป: เลขคณิต/ยกกำลังต้องเป็น**ตัวเลข**, บิต/เลื่อนต้องเป็น**จำนวนเต็ม**, เทียบ/ตรรกะห้ามใช้กับ
-**struct**, การกำหนดค่า/คืนค่า/ฟิลด์ต้อง**ชนิดเข้ากันได้**, และ **argument ของการเรียกฟังก์ชัน/method**
-ต้องตรงชนิด+จำนวน — แต่ยัง**ผ่อนปรนกับงานระดับล่างที่ถูกต้อง**
-(เช่น `ptr +/- int`, เทียบ pointer กับ `0` เพื่อเช็ค null, ผสมความกว้างของ int, ส่ง `str`↔`*u8`)
 
-#### การแปลงชนิดด้วย `as` (explicit cast)
+In short: arithmetic/power needs **numbers**, bitwise/shift needs **integers**, comparison/logic can't
+take **structs**, assignment/return/field must be **compatible**, and call arguments (functions and
+methods) must match in type and count. It stays lenient about correct low-level work, though —
+`ptr +/- int`, comparing a pointer to `0` for null, mixing int widths, passing `str`↔`*u8`.
 
-เมื่อต้องการแปลงชนิดจริง ๆ ใช้ `as` เพื่อบอกเจตนา (เหมือน Rust) — `as` ผูกแน่นกว่าตัวดำเนินการคณิต:
+#### Explicit cast with `as`
+
+To convert for real, use `as` (binds tighter than arithmetic):
+
 ```rust
 let a: i32 = 7;
-a as f64 / 2.0     // 3.5   (int -> float; ถ้าไม่ cast: 7/2 = 3)
-3.9 as i32         // 3     (float -> int: ตัดเศษทิ้ง ไม่ปัด)
-300 as u8          // 44    (ลดความกว้าง: 300 mod 256)
-(255 as u8) as i8  // -1    (ตีความบิตใหม่แบบมีเครื่องหมาย)
+a as f64 / 2.0     // 3.5   (int -> float; without the cast: 7/2 = 3)
+3.9 as i32         // 3     (float -> int: truncates, no rounding)
+300 as u8          // 44    (narrow: 300 mod 256)
+(255 as u8) as i8  // -1    (reinterpret bits as signed)
 65 as char         // 'A'   (int -> char)
-ptr as usize       // ที่อยู่เป็นจำนวนเต็ม (pointer <-> integer)
+ptr as usize       // address as integer (pointer <-> integer)
 ```
-> ดูตัวอย่างเต็มที่ [`examples/01_language/casts.mvs`](examples/01_language/casts.mvs)
 
-### 4.5 การควบคุมการทำงาน (control flow)
+### 4.5 Control flow
+
 ```rust
 if (cond) { ... } elseif (cond) { ... } else { ... }
-
 while (cond) { ... }
-
 for (let i: i32 = 0; i < 10; i++) { ... }
+do { ... } while (cond);            // runs at least once
 
-do { ... } while (cond);          // ทำอย่างน้อย 1 ครั้ง
-
-switch (x) {                       // fallthrough แบบ C (ต้อง break เอง)
+switch (x) {                        // C-style fallthrough (break it yourself)
     case 1: ...; break;
     case 2:
-    case 3: ...; break;            // 2 และ 3 ใช้โค้ดเดียวกัน
+    case 3: ...; break;             // 2 and 3 share code
     default: ...;
 }
 
-break;     // ออกจากลูป/switch
-continue;  // ข้ามไปรอบถัดไป (ใน switch จะข้ามไป loop ที่ครอบอยู่)
+break;     // leave loop/switch
+continue;  // next iteration (inside switch, jumps to the enclosing loop)
 ```
 
-### 4.6 ฟังก์ชัน
-```rust
-func add(a: i32, b: i32) -> i32 {
-    return a + b;
-}
-func greet() -> void { ... }       // ไม่คืนค่า
-```
-- รองรับ **การเรียกซ้ำ (recursion)**
-- รองรับ **พารามิเตอร์เกิน 4 ตัว** (ตัวที่ 5+ ส่งผ่าน stack)
-- `func main() -> i8` คือจุดเริ่มโปรแกรม; ค่าที่ return เป็น exit code
+### 4.6 Functions
 
-#### Generic function (monomorphization)
 ```rust
-func max<T>(a: T, b: T) -> T {   // T = ชนิดใดก็ได้
+func add(a: i32, b: i32) -> i32 { return a + b; }
+func greet() -> void { ... }        // no return value
+```
+
+- Recursion is supported.
+- More than 4 parameters supported (arg 5+ passed on the stack).
+- `func main() -> i8` is the entry point; its return is the exit code.
+
+#### Generic functions (monomorphization)
+
+```rust
+func max<T>(a: T, b: T) -> T {
     if (a > b) { return a; }
     return b;
 }
-max(3, 7);       // คอมไพเลอร์สร้าง max__i64 อัตโนมัติ
-max(2.5, 9.1);   // และ max__f64 (อนุมานชนิดจาก argument)
+max(3, 7);       // compiler emits max__i64
+max(2.5, 9.1);   // and max__f64 (type inferred from the argument)
 ```
-- คอมไพเลอร์อนุมานชนิดจริงจาก argument แล้ว **สร้างสำเนาเฉพาะชนิด** (เหมือน Rust/C++) — ดู `src/generic.c`
-- รองรับ generic กับ pointer (`*T`), generic เรียก generic, และใช้ instance ซ้ำ
 
-#### Function overloading (ชื่อซ้ำต่างชนิด)
+The compiler infers the real type from arguments and emits a per-type copy (like Rust/C++) — see
+`src/generic.c`. Works with pointers (`*T`), generics calling generics, and reused instances.
+
+#### Function overloading
+
 ```rust
 func show(n: i32) -> void { io.out("int: {}", n); }
 func show(s: str) -> void { io.out("str: {}", s); }
 func show(p: Point) -> void { io.out("point: ({}, {})", p.x, p.y); }
 
-show(42);       // เลือก show(i32)
-show("hi");     // เลือก show(str)
+show(42);       // picks show(i32)
+show("hi");     // picks show(str)
 ```
-- คอมไพเลอร์เลือก overload ตาม **หมวดชนิด** ของ argument (int/float/str/char/bool/pointer/struct)
-  แล้วเปลี่ยนชื่อภายในตาม signature (เช่น `show__i`, `show__s`) — ดู `resolve_overloads` ใน `src/generic.c`
 
-#### Generic + overload = constraint แบบ duck-typed (คล้าย trait)
+The overload is chosen by the **type category** of the argument (int/float/str/char/bool/pointer/struct),
+then renamed internally by signature (`show__i`, `show__s`) — see `resolve_overloads`.
+
+#### Generic + overload = a duck-typed constraint
+
 ```rust
-func print_all<T>(a: T, b: T) -> void { show(a); show(b); }  // T ต้องมี show รองรับ
-print_all(1, 2);      // ใช้ show(i32)
-print_all("a", "b");  // ใช้ show(str)
+func print_all<T>(a: T, b: T) -> void { show(a); show(b); }  // T must have a matching show
+print_all(1, 2);      // uses show(i32)
+print_all("a", "b");  // uses show(str)
 ```
-generic ทำงานได้กับ "ชนิดใดก็ตามที่มี overload/operation ที่ใช้ในตัวมันรองรับ" — เป็น constraint โดยปริยาย
-(แบบ duck-typed; ถ้าต้องการ constraint **ชัดเจนและตรวจสอบได้** ใช้ `trait` — ดูหัวข้อถัดไป)
 
-#### Trait + associated function + generic ผูก trait (constraint ชัดเจน)
+A generic works with "any type that supports the operations it uses" — an implicit constraint. For an
+explicit, checked constraint, use `trait`.
+
+#### Trait + associated function + generic bound
+
 ```rust
 struct Point { x: i32; y: i32; }
 struct Circle { r: i32; }
 
 trait Area {
-    func area(self: *Self) -> i32;       // signature เท่านั้น (ไม่มี body); Self = ชนิดที่ impl
+    func area(self: *Self) -> i32;       // signature only; Self = the implementing type
 }
 
 impl Point {                              // inherent impl
@@ -278,245 +285,238 @@ impl Point {                              // inherent impl
 impl Area for Point  { func area(self: *Point)  -> i32 { return self.x * self.y; } }
 impl Area for Circle { func area(self: *Circle) -> i32 { return 3 * self.r * self.r; } }
 
-// generic ผูก trait: T ต้อง impl Area เท่านั้น ถึงเรียก .area() ได้
-func describe<T: Area>(s: T) -> i32 { return s.area(); }
+func describe<T: Area>(s: T) -> i32 { return s.area(); }   // T must impl Area
 
-let p: Point = Point::new(3, 4);    // เรียก associated function ผ่าน ::
+let p: Point = Point::new(3, 4);    // call the associated function via ::
 let c: Circle = Circle::new(5);
-describe(p);                         // 12  — เลือก Point::area ตอนคอมไพล์ (static dispatch)
-describe(c);                         // 75  — เลือก Circle::area
+describe(p);                         // 12  — Point::area chosen at compile time (static dispatch)
+describe(c);                         // 75  — Circle::area
 ```
-- **associated function** = ฟังก์ชันใน `impl` ที่**ไม่มี `self`** เรียกด้วย `Type::func(...)` (เหมือน constructor / `Type::from`)
-- **trait** = สัญญา; **`impl Trait for Type`** ผูกชนิดเข้ากับ trait
-- **`<T: Trait>`** บังคับชนิดให้ impl trait — ถ้าไม่ impl จะ **error ตอนคอมไพล์** (`type 'X' does not implement trait 'Area'`)
-- dispatch เป็น **static** (ผ่าน monomorphization) — ไม่มี vtable/overhead ตอนรัน เหมาะกับงาน low-level
-- คอมไพเลอร์ยังตรวจด้วยว่า `impl` ทำ method ครบตาม trait (ขาด → error) และ trait ที่อ้างถึงมีจริง
-> ดูตัวอย่างเต็มที่ [`examples/04_traits/traits.mvs`](examples/04_traits/traits.mvs)
 
-### 4.7 struct และ method (แบบ Rust)
+- **Associated function** = a func in `impl` with no `self`, called as `Type::func(...)` (like a constructor).
+- **trait** is a contract; **`impl Trait for Type`** binds a type to it.
+- **`<T: Trait>`** requires the type to implement the trait — otherwise a compile error
+  (`type 'X' does not implement trait 'Area'`).
+- Dispatch is **static** (via monomorphization) — no vtable, no runtime overhead. The compiler also checks
+  that an `impl` provides every trait method and that the trait exists.
+- Trait default methods are supported (the body is cloned and `Self` replaced for types that don't override).
+
+### 4.7 struct and methods (Rust-style)
+
 ```rust
-struct Rect { w: i32; h: i32; }    // ฟิลด์คั่นด้วย ; หรือ ,
+struct Rect { w: i32; h: i32; }    // fields separated by ; or ,
 
 impl Rect {
     func area(self: *Rect) -> i32 { return self.w * self.h; }
-    func scale(self: *Rect, k: i32) -> *Rect {   // คืน *self เพื่อ chain
+    func scale(self: *Rect, k: i32) -> *Rect {   // return *self to chain
         self.w *= k; self.h *= k; return self;
     }
 }
 
 let r: Rect = Rect { w: 3, h: 4 };  // struct literal
-let a: i32 = r.area();              // method call (ฉีด &r เป็น self อัตโนมัติ)
-let b: i32 = r.scale(2).scale(2).area();  // method chaining
-r.w = 10;                          // เข้าถึง/แก้สมาชิก
+let a: i32 = r.area();              // method call (&r injected as self)
+let b: i32 = r.scale(2).scale(2).area();  // chaining
+r.w = 10;                          // member access
 ```
-- ฟังก์ชันคืนค่า struct ได้ (`func make() -> Rect { return Rect{...}; }`)
-- เข้าถึง struct ซ้อน (`a.b.c`) และผ่าน pointer (`p.field` เมื่อ p เป็น `*Struct`)
 
-### 4.8 pointer
+Functions can return structs, and you can reach nested structs (`a.b.c`) and go through a pointer
+(`p.field` when p is `*Struct`).
+
+### 4.8 Pointers
+
 ```rust
 let y: i32 = 42;
-let p: *i32 = &y;     // p ชี้ไปที่ y
-let v: i32 = *p;      // อ่านค่าที่ p ชี้ (= 42)
-*p = 99;              // เขียนผ่าน p (y กลายเป็น 99)
+let p: *i32 = &y;     // p points at y
+let v: i32 = *p;      // read what p points to (= 42)
+*p = 99;              // write through p (y becomes 99)
 ```
 
-### 4.8.1 function pointer
-ชนิด `func(P1, P2, ...) -> R` ใช้เป็น **ค่า** ได้ — ชี้ไปยังฟังก์ชัน แล้วเรียกผ่านตัวแปร/ฟิลด์ (indirect call)
+#### Function pointers
+
+The type `func(P1, P2, ...) -> R` is a value — it points at a function you call through a variable or field.
+
 ```rust
 func add(a: i32, b: i32) -> i32 { return a + b; }
 func mul(a: i32, b: i32) -> i32 { return a * b; }
 
-// ค่าของ function pointer = "ชื่อฟังก์ชันเปล่า ๆ" (ไม่ต้องมี &)
-let f: func(i32, i32) -> i32 = add;
-io.out("{}", f(3, 4));        // 7   (เรียกผ่านตัวแปร)
+let f: func(i32, i32) -> i32 = add;   // value = the bare function name (no &)
+io.out("{}", f(3, 4));        // 7
 f = mul;
 io.out("{}", f(3, 4));        // 12
 
-// ส่งเป็น argument (higher-order function)
 func apply(op: func(i32, i32) -> i32, a: i32, b: i32) -> i32 { return op(a, b); }
-io.out("{}", apply(add, 10, 20));   // 30
+io.out("{}", apply(add, 10, 20));   // 30   (higher-order function)
 
-// เก็บเป็นฟิลด์ของ struct (ใช้ทำ dispatch table / callback)
-struct Op { name: str; fn: func(i32, i32) -> i32; }
+struct Op { name: str; fn: func(i32, i32) -> i32; }   // store as a field (dispatch table / callback)
 let plus: Op = Op { name: "plus", fn: add };
 io.out("{}", plus.fn(5, 6));        // 11
 ```
-- คืนค่าเป็น struct ผ่าน function pointer ได้ (ใช้ sret) · ใช้กับ generic ได้ (`f: func(T) -> T` หรือ `T` ผูกกับค่า function)
-- โค้ดที่ gen: ค่า = `lea rax, [rel <label>]`; เรียก = `call rax` (ดู 6.2)
-- ตัวอย่างเต็ม: [`examples/02_functions/funcptr.mvs`](examples/02_functions/funcptr.mvs)
 
-### 4.9 ทศนิยม
+Returning a struct through a function pointer works (uses sret), and it works with generics. The emitted
+code is `lea rax, [rel <label>]` for the value and `call rax` for the call (see 6.2).
+
+### 4.9 Floats
+
 ```rust
 let pi: f64 = 3.14159;
 let area: f64 = pi * 2.0 * 2.0;
-io.out("{}", 1.5 + 2);     // แปลง int -> float อัตโนมัติ -> 3.500000
+io.out("{}", 1.5 + 2);     // int -> float automatically -> 3.500000
 ```
 
-### 4.10 การแสดงผล io.out (แบบ Rust)
+### 4.10 Printing with io.out (Rust-style)
+
 ```rust
 import { io } from "std";
 io.out("hello");                  // hello
-io.out("x = {}", 42);             // x = 42      ({} = แทรกค่า, ขึ้นบรรทัดใหม่ให้)
-io.out("{} + {} = {}", a, b, a+b);// หลายค่า
+io.out("x = {}", 42);             // x = 42      ({} = a value, newline appended)
+io.out("{} + {} = {}", a, b, a+b);// several values
 io.out("hex = {:x}", 255);        // hex = ff
-io.out("pct {{}}");               // pct {}      ({{ }} = วงเล็บปีกกาจริง)
-io.out("{}", p);                  // p เป็น struct -> Point { x: 3, y: 4 }  (แบบ {:?} ของ Rust)
+io.out("pct {{}}");               // pct {}      ({{ }} = literal braces)
+io.out("{}", p);                  // p is a struct -> Point { x: 3, y: 4 }  (like Rust's {:?})
 ```
-> `io.out` เป็น **compiler intrinsic** (เหมือน `println!` ของ Rust) — แยกวิเคราะห์ `{}` ตอนคอมไพล์
-> แล้วเลือกชนิดการพิมพ์ตาม argument; ต้อง `import { io }` ก่อนใช้
-> รองรับ **struct** (ขยายเป็น `Name { field: ค่า, ... }` รวมถึง struct ซ้อน) และ **argument ไม่จำกัดจำนวน**
->
-> **ทำไม io.out เป็น intrinsic ไม่ใช่ฟังก์ชันใน io.mvs?** เพราะรูป `{}` ที่รับ argument **จำนวนและชนิดไม่จำกัด**
-> ต้องมี (ก) variadic ฝั่งรับ + (ข) การ dispatch ตามชนิดของแต่ละ argument ซึ่งต้องใช้ macro (ขยายตอนคอมไพล์)
-> หรือ runtime type info (tagged value/dynamic dispatch) — ภาษานี้ยังไม่มี จึงทำเป็น intrinsic เหมือน `println!`
-> **ทางเลือกที่เป็น library จริง:** ใช้ trait `Display` + `fmt.println(x)` (โมดูล `fmt`) สำหรับชนิดที่ผู้ใช้ impl เอง
-> (static dispatch ผ่าน generic+trait) — ดู [`examples/04_traits/display.mvs`](examples/04_traits/display.mvs)
 
-### 4.11 ระบบโมดูล (import) — 3 รูปแบบ ("path เป็นตัวกำหนด")
+`io.out` is a **compiler intrinsic** (like Rust's `println!`): it parses `{}` at compile time and picks the
+print format per argument. It needs `import { io }`, and it handles structs (expanded to
+`Name { field: value, ... }`, including nested) and any number of arguments.
+
+Why an intrinsic and not a function in io.mvs? The `{}` form takes an unbounded number and mix of argument
+types, which needs either a macro (compile-time expansion) or runtime type info — neither exists yet. The
+library alternative is the `Display` trait + `fmt.println(x)` (static dispatch) for types you `impl` yourself.
+
+### 4.11 Module system — three forms (the path decides)
 
 ```rust
-// A) namespace ของ submodule: path เป็น "package เปล่า" -> ชื่อใน {} คือ submodule -> เรียกแบบ io.xxx
+// A) submodule namespace: path is a bare package -> names in {} are submodules -> call as io.xxx
 import { io, fs, net } from "std";        // io.out(...), net.TcpServer(...)
 
-// B) symbol import: path ชี้ "โมดูลเจาะจง" -> ชื่อใน {} คือสัญลักษณ์ -> ดึงเข้ามาตรง ๆ
+// B) symbol import: path is a specific module -> names in {} are symbols -> pulled in directly
 import { String } from "std/string";      // String::from(...)
 import { factorial } from "./mathlib.mvs"; // factorial(...)
 
-// C) alias ทั้งโมดูลเป็น namespace: ไม่มี {} -> ใช้ชื่อ alias นำหน้า
+// C) whole-module alias as a namespace: no {} -> use the alias prefix
 import math from "./mathlib.mvs";          // math.factorial(...)
 import str  from "std/string";             // str.<freefunc>(...)
 ```
 
-| รูปแบบ path | ความหมายของ `{ }` | การเข้าถึง |
-|-------------|-------------------|-----------|
-| `"std"` (package เปล่า) | submodule → namespace | `io.out` |
-| `"std/x"` หรือ `"./f.mvs"` + `{...}` | สัญลักษณ์ → ดึงตรง ๆ | `String::from` |
-| `"std/x"` หรือ `"./f.mvs"` + alias | ทั้งโมดูล → namespace alias | `math.factorial` |
+| Path form | Meaning of `{ }` | Access |
+|-----------|------------------|--------|
+| `"std"` (bare package) | submodule → namespace | `io.out` |
+| `"std/x"` or `"./f.mvs"` + `{...}` | symbol → pulled in directly | `String::from` |
+| `"std/x"` or `"./f.mvs"` + alias | whole module → namespace alias | `math.factorial` |
 
-**กฎ:** อ้างทั้ง package/โมดูล → ใช้ namespace; เจาะจงสัญลักษณ์ → ดึงตรง ๆ (ไฟล์ relative ต้องลงท้าย `.mvs`)
+Rule: referring to a whole package/module → use a namespace; naming a specific symbol → pull it in directly
+(a relative file must end in `.mvs`).
 
-**ตัวตรวจของระบบ import (error ทันที):**
-- สัญลักษณ์ที่ import แบบ B ต้องมีจริงในโมดูล → ไม่งั้น `module 'x' has no exported symbol 'name'`
-- ชื่อซ้ำ (struct/trait/ฟังก์ชัน ns+ชื่อ+ชนิดเดียวกัน) → `duplicate ...` (overload ต่างชนิดไม่นับ)
-- namespace/alias ผูกซ้ำคนละโมดูล → `namespace 'x' is already bound to a different module`
-- import วนกลับ (A→B→A) → `circular import detected`
+Import checks (immediate errors):
+
+- a symbol imported with form B must exist → otherwise `module 'x' has no exported symbol 'name'`.
+- duplicate name (same ns+name+type for struct/trait/func) → `duplicate ...` (different-type overloads don't count).
+- a namespace/alias bound to two different modules → `namespace 'x' is already bound to a different module`.
+- a cycle (A→B→A) → `circular import detected`.
 
 ```rust
-extern func printf(fmt: str) -> i32;          // เรียกฟังก์ชัน C (MVS -> C)
-export func mvs_add(a: i32, b: i32) -> i32 {  // ให้ C เรียก MVS (ชื่อสัญลักษณ์ดิบ)
+extern func printf(fmt: str) -> i32;          // call C (MVS -> C)
+export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name)
     return a + b;
 }
 ```
 
-### 4.12 standard library
-| โมดูล | ฟังก์ชันหลัก |
-|-------|--------------|
+### 4.12 Standard library
+
+| Module | Main functions |
+|--------|----------------|
 | `io` | `io.out(fmt, ...)`, `io.print(s)`, `io.in(prompt) -> str` |
 | `fs` | `fs.write(path, content)`, `fs.read(path) -> str` |
-| `net` | `net.TcpClient(ip, port)`, `net.TcpServer(ip, port)` + method `accept`/`send`/`recv`/`close` |
-| `string` | `String` (สตริงบน heap): `String::from(s)`, `String::from_int(n)`, `.push_str(s)` (chain), `.as_str() -> str`, `.len()`, `.drop()` |
-| `fmt` | trait `Display { fmt(self) -> String }` + `fmt.println(x)` / `fmt.print(x)` — พิมพ์ชนิดที่ impl Display (library, static dispatch) |
+| `net` | `net.TcpClient(ip, port)`, `net.TcpServer(ip, port)` + `accept`/`send`/`recv`/`close` |
+| `string` | `String` (heap string): `String::from(s)`, `String::from_int(n)`, `.push_str(s)` (chain), `.as_str() -> str`, `.len()`, `.drop()` |
+| `fmt` | trait `Display { fmt(self) -> String }` + `fmt.println(x)` / `fmt.print(x)` (library, static dispatch) |
 
 ```rust
 import { io, string } from "std";
-let s: String = String::from("hello");      // ชนิด String ใช้ชื่อตรง ๆ (struct เป็น global)
-s.push_str(", world");                       // ต่อข้อความบน heap (จองใหม่ให้)
+let s: String = String::from("hello");
+s.push_str(", world");                       // append on the heap (reallocates)
 io.out("{} (len {})", s.as_str(), s.len());  // hello, world (len 12)
 let n: String = String::from_int(42);        // "42"
-s.drop(); n.drop();                          // คืนหน่วยความจำเอง (ไม่มี GC)
+s.drop(); n.drop();                          // free it yourself (no GC)
 ```
-> `str` = ตัวชี้ข้อความคงที่ (อ่านอย่างเดียว) · `String` = บัฟเฟอร์บน heap ที่ต่อ/แก้ได้และต้อง `drop()` เอง
 
 ---
 
-## 5. กลไกหน่วยความจำ
+## 5. Memory model
 
-นี่คือหัวใจของภาษา low-level — MVS จัดการหน่วยความจำ **ด้วยมือเหมือน C ทุกประการ**
-ไม่มี garbage collector, ไม่มี reference counting, ไม่มี destructor/RAII
+This is the heart of a low-level language — MVS manages memory by hand, exactly like C. No garbage
+collector, no reference counting, no destructors/RAII. Memory has three regions.
 
-หน่วยความจำมี 3 บริเวณ:
+### 5.1 Stack — automatic (locals)
 
-### 5.1 Stack — อัตโนมัติ (ตัวแปร local)
+Every local lives on the function's stack frame, automatically:
 
-ตัวแปร local ทุกตัว "จอง" อยู่บน stack frame ของฟังก์ชัน **โดยอัตโนมัติ**:
+- **On entry (prologue):** reserve the whole frame with `sub rsp, <frame size>`.
+- **On exit (epilogue):** release it with `leave` (= `mov rsp, rbp; pop rbp`).
 
-- **ตอนเข้าฟังก์ชัน (prologue):** จองพื้นที่ทั้งก้อนด้วย `sub rsp, <ขนาดเฟรม>`
-- **ตอนออกฟังก์ชัน (epilogue):** คืนทั้งก้อนด้วย `leave` (= `mov rsp, rbp; pop rbp`)
+Frame size is computed ahead of time (a `collect_locals` pre-pass). Each variable gets at least 8 bytes
+(rounded up to a multiple of 8) at `[rbp - offset]`.
 
-ขนาดเฟรมคำนวณล่วงหน้า (pre-pass `collect_locals`) โดยเดินดูการประกาศตัวแปรทั้งหมด
-ตัวแปรแต่ละตัวจองพื้นที่ **อย่างน้อย 8 ไบต์** (ปัดขึ้นเป็นพหุคูณของ 8) อยู่ที่ `[rbp - offset]`
+Lifetime: a stack variable lives for the whole function call, then is released on return. So never return
+a pointer to a local (`return &local;`) — that memory is gone (dangling).
 
-> **อายุ (lifetime):** ตัวแปร stack มีชีวิตตลอดการทำงานของฟังก์ชัน แล้วถูกคืนอัตโนมัติเมื่อ return
-> — **ห้ามคืน pointer ไปยังตัวแปร local** (`return &local;`) เพราะหน่วยความจำถูกคืนแล้ว (dangling)
+### 5.2 Heap — by hand (extern malloc/free)
 
-ดูตัวอย่าง assembly จริงในข้อ 6.1
-
-### 5.2 Heap — ด้วยมือ (ผ่าน extern malloc/free)
-
-หน่วยความจำที่ต้องอยู่นานกว่า scope ฟังก์ชัน หรือขนาดไม่รู้ล่วงหน้า ต้องจองบน heap
-MVS **ไม่มี `new`/`malloc` ในตัวภาษา** — ใช้ผ่าน `extern` เรียก C runtime:
+For memory that must outlive a function or whose size is unknown, use the heap. MVS has no built-in
+`new`/`malloc` — call the C runtime via `extern`:
 
 ```rust
-extern func malloc(n: usize) -> *u8;   // จองหน่วยความจำ n ไบต์ คืน pointer
-extern func free(p: *u8) -> void;      // คืนหน่วยความจำที่จองไว้
+extern func malloc(n: usize) -> *u8;
+extern func free(p: *u8) -> void;
 
 func main() -> i8 {
-    let buf: *u8 = malloc(64);   // จอง 64 ไบต์บน heap
-    *buf = 65;                   // เขียนผ่าน pointer
-    let v: u8 = *buf;            // อ่านกลับ (= 65)
-    free(buf);                   // ★ ต้องคืนเอง ไม่งั้น memory leak
-    return v;
+    let buf: *u8 = malloc(64);
+    *buf = 65;
+    let v: u8 = *buf;
+    free(buf);                   // free it yourself, or you leak
+    return v;                    // exit code 65
 }
 ```
-(โปรแกรมนี้คืน exit code 65 — ทดสอบแล้วใช้งานได้จริง)
 
-**กฎการจัดการ heap (เหมือน C):**
-- ทุก `malloc` ต้องมี `free` คู่กัน 1 ครั้ง ไม่งั้น **memory leak**
-- ห้ามใช้ pointer หลัง `free` แล้ว (**use-after-free**)
-- ห้าม `free` ซ้ำสอง (**double-free**)
-- ไม่มีการตรวจขอบเขต (no bounds checking) — เขียนเกินที่จองไว้ = พฤติกรรมไม่กำหนด
+Heap rules (same as C): every `malloc` needs one matching `free` (else a leak); no use-after-free; no
+double-free; no bounds checking (writing past your allocation is undefined behavior).
 
-> std lib บางตัว (`io.in`, `fs.read`, `net.*recv`) เรียก `malloc` ภายในและ **ยังไม่ได้ free**
-> (ยอมให้ leak เพื่อความง่ายของ subset) — โปรแกรมจริงควร wrap แล้ว free เอง
+Some std functions (`io.in`, `fs.read`, `net.*recv`) malloc internally and don't free yet (leaking for
+simplicity in this subset) — real programs should wrap and free.
 
-### 5.3 Heap ในโหมด `--nostd` (เขียน OS เอง)
+### 5.3 Heap under `--nostd`
 
-ในโหมด freestanding **ไม่มี `malloc`** (ไม่มี C runtime) — ต้องเขียน allocator เอง
-เหมือนตอนเขียน kernel จริง วิธีพื้นฐานคือ **bump allocator** บนพื้นที่หน่วยความจำที่เรารู้ที่อยู่:
+In freestanding mode there is no `malloc` (no C runtime) — write your own allocator, like in a real
+kernel. The basic approach is a bump allocator over memory whose address you know:
 
 ```rust
-// ตัวอย่างแนวคิด allocator ง่าย ๆ แบบ freestanding (ยังไม่มี global mut array จึงสาธิตผ่าน pointer)
-// สมมติเรามี pointer ไปยังหน่วยความจำว่างที่ OS/bootloader เตรียมไว้
-
 func bump_alloc(heap_ptr: *usize, current: usize, size: usize) -> usize {
-    // คืน address เดิม แล้วเลื่อน current ไปข้างหน้า size ไบต์ (ผู้เรียกเก็บ current ใหม่)
-    return current + size;
+    return current + size;   // hand back the old address, advance current by size
 }
 
-// เขียนค่าลงที่อยู่หน่วยความจำตรง ๆ (เช่น VGA buffer 0xB8000)
-export func poke(addr: *u8, value: u8) -> void {
+export func poke(addr: *u8, value: u8) -> void {   // write to a raw address, e.g. VGA at 0xB8000
     *addr = value;
 }
 ```
-ใน OS จริง: คุณคุม physical/virtual memory เอง, จัดสรรหน้า (page) เอง, ไม่มีใครมา `free` ให้
 
-### 5.4 หน่วยความจำคงที่ (static): global และ string
+In a real OS you own physical/virtual memory and page allocation; nobody frees for you.
 
-- **ตัวแปร global** อยู่ในส่วน `.bss` (จองด้วย `resb <size>` เริ่มต้นเป็น 0)
-  ค่าเริ่มต้นถูกตั้ง **ตอนต้นฟังก์ชัน `main`** (ไม่ใช่ฝังในไฟล์)
-- **สตริงค่าคงที่** อยู่ในส่วน `.data` (ประกาศเป็นไบต์ + ปิดท้าย 0); ตัวแปร `str` คือ pointer ไปยังไบต์เหล่านั้น
+### 5.4 Static memory: globals and strings
 
-> **ไม่มีชนิด array** ในภาษา — บัฟเฟอร์ทำผ่าน `malloc` + pointer + เลขคณิต pointer (`*(buf + i)`)
+- **Globals** live in `.bss` (`resb <size>`, zero-initialized). Their initial values are set at the start of
+  `main` (not baked into the file).
+- **String constants** live in `.data` (bytes + trailing 0); a `str` variable is a pointer to those bytes.
+
+There is **no array type** — buffers are made with `malloc` + pointer + pointer arithmetic (`*(buf + i)`).
 
 ---
 
-## 6. กลไกภายในแบบละเอียด
+## 6. Internals, with real assembly
 
-ทุกตัวอย่าง assembly ด้านล่างเป็น **เอาต์พุตจริง** จากคอมไพเลอร์ (ดูเองได้ด้วย `mvs file.mvs -S`)
+Every snippet below is **real compiler output** — reproduce it with `mvs file.mvs -S`.
 
-### 6.1 ตัวแปร + เลขคณิต
+### 6.1 Variables + arithmetic
 
-ซอร์ส:
 ```rust
 func main() -> i8 {
     let a: i32 = 5;
@@ -524,83 +524,83 @@ func main() -> i8 {
     return b;
 }
 ```
-แอสเซมบลีที่ได้ (พร้อมคำอธิบาย):
+
 ```asm
 main:
-    push rbp                  ; เก็บ base pointer เดิม
-    mov rbp, rsp              ; ตั้ง frame ใหม่
-    sub rsp, 16               ; จองเฟรม 16 ไบต์ (a อยู่ [rbp-8], b อยู่ [rbp-16])
+    push rbp                  ; save old base pointer
+    mov rbp, rsp              ; set up the new frame
+    sub rsp, 16               ; reserve 16 bytes (a at [rbp-8], b at [rbp-16])
     ; --- let a: i32 = 5 ---
-    mov rax, 5                ; ประเมินค่า 5 -> rax
-    mov [rbp - 8], eax        ; เก็บลง a (eax = 32-bit เพราะ i32 ตัดเหลือ 4 ไบต์)
+    mov rax, 5
+    mov [rbp - 8], eax        ; store a (eax = 32-bit, i32 truncated to 4 bytes)
     ; --- let b: i32 = a + 3 ---
-    lea rax, [rbp - 8]        ; หาที่อยู่ของ a
-    movsxd rax, dword [rax]   ; โหลดค่า a ขยายเครื่องหมายจาก 32->64 bit (i32 = signed)
-    sub rsp, 16               ; ดันค่า a เก็บใน stack ชั่วคราว (ใช้ 16 ไบต์รักษาการจัดเรียง)
+    lea rax, [rbp - 8]        ; address of a
+    movsxd rax, dword [rax]   ; load a, sign-extend 32->64 (i32 is signed)
+    sub rsp, 16               ; push a to the temp stack (16 bytes to keep alignment)
     mov [rsp], rax
-    mov rax, 3                ; ประเมิน 3 -> rax
+    mov rax, 3
     mov rcx, rax              ; rhs (3) -> rcx
-    mov rax, [rsp]            ; ดึง a กลับ -> rax (lhs)
+    mov rax, [rsp]            ; bring a back -> rax (lhs)
     add rsp, 16
     add rax, rcx              ; a + 3
-    mov [rbp - 16], eax       ; เก็บลง b (ตัดเหลือ 32 บิต)
+    mov [rbp - 16], eax       ; store b (truncated to 32 bits)
     ; --- return b ---
     lea rax, [rbp - 16]
-    movsxd rax, dword [rax]   ; โหลด b
-    leave                     ; คืนเฟรม (mov rsp,rbp; pop rbp)
-    ret                       ; ค่าใน rax/al = exit code
+    movsxd rax, dword [rax]
+    leave
+    ret                       ; rax/al = exit code
 ```
-**บทเรียน:**
-- ทุกนิพจน์ประเมินลง `rax` (stack machine ง่าย ๆ)
-- การดำเนินการสองตัว = ประเมินซ้าย ดันลง stack ชั่วคราว ประเมินขวา แล้วนำกลับมาคำนวณ
-- `i32` เก็บด้วย `eax` (4 ไบต์) โหลดด้วย `movsxd` (sign-extend) — นี่คือ "ความกว้างชนิดจริง"
-- temp stack ใช้ทีละ **16 ไบต์** เพื่อรักษา 16-byte alignment (สำคัญต่อการเรียกฟังก์ชัน)
 
-### 6.2 การเรียกฟังก์ชัน (win64 ABI)
+Takeaways: every expression evaluates into `rax` (a simple stack machine); a binary op evaluates the left,
+pushes it to a temp, evaluates the right, then combines; `i32` stores via `eax` and loads via `movsxd`
+(that's "real type width"); temp pushes use 16 bytes to keep 16-byte alignment.
 
-ซอร์ส:
+### 6.2 Calling a function (win64 ABI)
+
 ```rust
 func add(x: i32, y: i32) -> i32 { return x + y; }
 func main() -> i8 { return add(7, 8); }
 ```
-ฝั่ง callee (`add`):
+
+Callee (`add`):
+
 ```asm
 mvs_add:
     push rbp
     mov rbp, rsp
     sub rsp, 16
-    mov [rbp - 8], rcx        ; พารามิเตอร์ตัวที่ 1 (x) มาจาก rcx
-    mov [rbp - 16], rdx       ; พารามิเตอร์ตัวที่ 2 (y) มาจาก rdx
+    mov [rbp - 8], rcx        ; param 1 (x) from rcx
+    mov [rbp - 16], rdx       ; param 2 (y) from rdx
     ... (x + y) ...
     leave
-    ret                       ; ผลลัพธ์อยู่ใน rax
+    ret                       ; result in rax
 ```
-ฝั่ง caller (`main`) เรียก `add(7, 8)`:
+
+Caller (`main`) calling `add(7, 8)`:
+
 ```asm
     mov rax, 7
-    sub rsp, 16               ; ดันค่า arg ลง temp stack
+    sub rsp, 16               ; push args to the temp stack
     mov [rsp], rax
     mov rax, 8
     sub rsp, 16
     mov [rsp], rax
-    sub rsp, 32               ; จอง "shadow space" 32 ไบต์ (กฎ win64)
-    mov rax, [rsp + 48]       ; ดึง arg0 (7) -> rcx
+    sub rsp, 32               ; reserve 32 bytes of shadow space (win64 rule)
+    mov rax, [rsp + 48]       ; arg0 (7) -> rcx
     mov rcx, rax
-    mov rax, [rsp + 32]       ; ดึง arg1 (8) -> rdx
+    mov rax, [rsp + 32]       ; arg1 (8) -> rdx
     mov rdx, rax
-    call mvs_add              ; เรียก (ผลลัพธ์กลับมาใน rax)
-    add rsp, 32               ; คืน shadow space
-    add rsp, 32               ; คืน temp stack ของ args
+    call mvs_add              ; result comes back in rax
+    add rsp, 32               ; release shadow space
+    add rsp, 32               ; release the arg temp stack
 ```
-**กฎ win64 ABI ที่เห็นในโค้ด:**
-- อาร์กิวเมนต์จำนวนเต็ม 4 ตัวแรกส่งผ่าน **rcx, rdx, r8, r9** (ตัวที่ 5+ วางบน stack)
-- ต้องจอง **shadow space 32 ไบต์** ก่อน `call` ทุกครั้ง
-- ค่าคืนอยู่ใน **rax**
-- `rsp` ต้องจัดเรียง **16 ไบต์** ณ จุด `call`
 
-### 6.3 struct: การจัดวางและการเข้าถึงสมาชิก
+win64 ABI as seen here: the first four integer args go in **rcx, rdx, r8, r9** (5+ on the stack); reserve
+**32 bytes of shadow space** before every `call`; the return is in **rax**; `rsp` must be 16-byte aligned
+at the `call`.
 
-ซอร์ส:
+### 6.3 struct layout and member access
+
 ```rust
 struct P { x: i32; y: i32; }
 func main() -> i8 {
@@ -608,191 +608,193 @@ func main() -> i8 {
     return p.x;
 }
 ```
-**Layout ของ `P`** (แบบ packed, ปัดขนาดรวมเป็นพหุคูณ 8):
-| ฟิลด์ | offset | ขนาด |
-|-------|--------|------|
-| `x` (i32) | 0 | 4 |
-| `y` (i32) | 4 | 4 |
-| รวม | | 8 |
 
-แอสเซมบลี (เขียนค่าลง struct literal):
+Layout of `P` (packed, total rounded to a multiple of 8): `x` (i32) at offset 0, `y` (i32) at offset 4,
+total 8.
+
 ```asm
     sub rsp, 16
-    lea rax, [rbp - 8]        ; ที่อยู่ฐานของ p
+    lea rax, [rbp - 8]        ; base address of p
     sub rsp, 16
-    mov [rsp], rax            ; เก็บที่อยู่ฐานไว้ชั่วคราว
-    mov rax, 10               ; ค่าของ x
-    mov rcx, rax
-    mov rax, [rsp]            ; ที่อยู่ฐาน
-    mov [rax], ecx            ; เก็บ x ที่ offset 0
-    mov rax, 20               ; ค่าของ y
+    mov [rsp], rax            ; stash the base
+    mov rax, 10               ; x
     mov rcx, rax
     mov rax, [rsp]
-    add rax, 4                ; เลื่อนไป offset 4 (ฟิลด์ y)
-    mov [rax], ecx            ; เก็บ y
+    mov [rax], ecx            ; store x at offset 0
+    mov rax, 20               ; y
+    mov rcx, rax
+    mov rax, [rsp]
+    add rax, 4                ; offset 4 (field y)
+    mov [rax], ecx            ; store y
     ...
     lea rax, [rbp - 8]
-    movsxd rax, dword [rax]   ; อ่าน p.x (offset 0)
+    movsxd rax, dword [rax]   ; read p.x (offset 0)
 ```
-**บทเรียน:**
-- การเข้าถึงสมาชิก = หา **ที่อยู่ฐานของ struct** แล้ว **บวก offset ของฟิลด์**
-- struct ที่ใหญ่กว่า 8 ไบต์จองหลาย slot บน stack
-- **คัดลอก struct** (`a = b`) ใช้ `rep movsb` (คัดลอกทีละไบต์)
-- **คืน struct จากฟังก์ชัน** ใช้เทคนิค *sret*: ผู้เรียกจองที่ว่างไว้ แล้วส่ง pointer ไปยังที่นั้น
-  เป็นอาร์กิวเมนต์ซ่อน (rcx) ฟังก์ชันเขียนผลลงไปตรง ๆ
 
-### 6.4 pointer
+Takeaways: member access = base address + field offset; a struct larger than 8 bytes uses several stack
+slots; copying a struct (`a = b`) uses a byte loop; returning a struct uses *sret* — the caller reserves
+space and passes a hidden pointer (rcx) the function writes through.
 
-- `&x` → `lea rax, [rbp - offset]` (เอาที่อยู่ใส่ rax)
-- `*p` (อ่าน) → โหลดค่าของ p (= ที่อยู่) แล้ว `mov rax, [rax]` ตามขนาดชนิดที่ชี้
-- `*p = v` (เขียน) → คำนวณ v, เอาที่อยู่จาก p, แล้ว `mov [rax], <reg>`
+### 6.4 Pointers
 
-### 6.5 ทศนิยม (float)
+- `&x` → `lea rax, [rbp - offset]`.
+- `*p` (read) → load p (its address), then `mov rax, [rax]` at the pointee's size.
+- `*p = v` (write) → evaluate v, take the address from p, then `mov [rax], <reg>`.
 
-เก็บค่า double เป็น **bit-pattern ใน rax** เหมือนจำนวนเต็ม ย้ายเข้า `xmm` เฉพาะตอนคำนวณ:
+### 6.5 Floats
+
+The double's bit-pattern lives in rax like an integer, moving into xmm only for math:
+
 ```asm
-    movq xmm1, rax           ; ตัวขวา -> xmm1
+    movq xmm1, rax           ; rhs -> xmm1
     ...
-    movq xmm0, rax           ; ตัวซ้าย -> xmm0
-    addsd xmm0, xmm1         ; บวกแบบ double
-    movq rax, xmm0           ; ผลกลับมาเก็บใน rax
+    movq xmm0, rax           ; lhs -> xmm0
+    addsd xmm0, xmm1         ; add as double
+    movq rax, xmm0           ; result back to rax
 ```
-ถ้าฝั่งใดเป็น int จะแปลงด้วย `cvtsi2sd` ก่อน
+
+If a side is an int it's converted first with `cvtsi2sd`.
 
 ### 6.6 io.out (compiler intrinsic)
 
-ตอนคอมไพล์ `io.out("x = {}", n)` คอมไพเลอร์:
-1. แยกวิเคราะห์ format string หา `{}` → นับ placeholder
-2. เลือก specifier ตามชนิดของแต่ละ arg (`{}` + int → `%lld`, str → `%s`, char → `%c`, float → `%f`, `{:x}` → `%llx`)
-3. สร้าง C format string `"x = %lld\n"` แล้วเรียก `printf`
+Compiling `io.out("x = {}", n)`, the compiler: (1) scans the format string for `{}` and counts placeholders;
+(2) picks a specifier per arg (`{}` + int → `%lld`, str → `%s`, char → `%c`, float → `%f`, `{:x}` → `%llx`);
+(3) builds the C format `"x = %lld\n"` and calls `printf`.
 
-### 6.7 การตั้งชื่อสัญลักษณ์ (symbol naming)
+### 6.7 Symbol naming
 
-| สิ่ง | label | เหตุผล |
-|------|-------|--------|
-| `main` | `main` | ให้ C runtime เรียก |
-| ฟังก์ชันทั่วไป | `mvs_<name>` | กันชนกับ libc |
-| ฟังก์ชันในโมดูล | `mvs_<module>_<name>` | เช่น `mvs_io_print` |
-| method | `mvs_<Struct>_<method>` | เช่น `mvs_Rect_area` |
-| `extern` / `export` | `<name>` (ดิบ) | ตรงกับสัญลักษณ์ภาษา C |
-| ตัวแปร global | `mvs_g_<name>` | |
+| Thing | Label | Why |
+|-------|-------|-----|
+| `main` | `main` | so the CRT calls it |
+| ordinary function | `mvs_<name>` | avoid clashing with libc |
+| function in a module | `mvs_<module>_<name>` | e.g. `mvs_io_print` |
+| method | `mvs_<Struct>_<method>` | e.g. `mvs_Rect_area` |
+| `extern` / `export` | `<name>` (raw) | matches the C symbol |
+| global variable | `mvs_gv_<name>` | |
 
-### 6.8 tree-shaking
-คอมไพเลอร์เริ่มจาก `main` (และฟังก์ชันที่ `export`) แล้วไล่ตามการเรียก (`reach_func`)
-**ฟังก์ชันที่ไม่ถูกเรียกจะไม่ถูก gen** — ลดขนาดเอาต์พุต
+### 6.8 Tree-shaking
+
+Starting from `main` (and `export`ed functions), the compiler follows calls (`reach_func`). Functions never
+reached are never emitted, shrinking the output.
 
 ---
 
-## 6.9 How-to / สูตรสำเร็จ (recipes)
+## 7. Recipes
 
-รวมวิธีทำงานที่พบบ่อย — คัดลอกไปปรับใช้ได้เลย
+Common tasks, copy-and-adjust.
 
-### จองและคืนหน่วยความจำ heap
+### Allocate and free heap memory
+
 ```rust
 extern func malloc(n: usize) -> *u8;
 extern func free(p: *u8) -> void;
 let buf: *u8 = malloc(256);
 *buf = 65;
-free(buf);                       // ★ ต้อง free เองเสมอ
+free(buf);                       // always free yourself
 ```
 
-### ทำ "อาเรย์" ด้วย pointer (ภาษาไม่มีชนิด array)
+### "Arrays" via pointers (there's no array type)
+
 ```rust
 extern func malloc(n: usize) -> *u8;
-let arr: *i32 = malloc(40);      // 10 ช่อง i32 (10 * 4 ไบต์)
+let arr: *i32 = malloc(40);      // 10 i32 slots (10 * 4 bytes)
 let i: i32 = 0;
 while (i < 10) {
-    *(arr + i) = i * i;          // pointer arithmetic scale ตาม sizeof(i32) อัตโนมัติ
+    *(arr + i) = i * i;          // pointer math scales by sizeof(i32) automatically
     i++;
 }
 io.out("arr[3] = {}", *(arr + 3));   // 9
 ```
 
-### รับ command-line arguments (argc/argv)
+### Command-line arguments (argc/argv)
+
 ```rust
 extern func atoi(s: str) -> i32;
-func main(argc: i32, argv: **u8) -> i32 {   // ประกาศ main แบบมีพารามิเตอร์ได้เลย
-    let prog: *u8 = *(argv + 0);            // argv[0] = ชื่อโปรแกรม; argv[i] = *(argv + i)
+func main(argc: i32, argv: **u8) -> i32 {   // declare main with parameters
+    let prog: *u8 = *(argv + 0);            // argv[0] = program name; argv[i] = *(argv + i)
     if (argc >= 2) { let n: i32 = atoi(*(argv + 1)); }
     return 0;
 }
 ```
-> CRT เรียก `main(argc, argv)` ตาม C ABI อยู่แล้ว (main เป็นสัญลักษณ์ดิบ) — `argv` เป็นอาเรย์ของ `*u8` (สตริง C)
-> ดู [`examples/01_language/args.mvs`](examples/01_language/args.mvs)
 
-### อาเรย์ของ struct (malloc + pointer)
+The CRT already calls `main(argc, argv)` per the C ABI; `argv` is an array of `*u8` (C strings).
+
+### Array of structs (malloc + pointer)
+
 ```rust
 extern func malloc(n: usize) -> *u8;
 struct Pt { x: i32; y: i32; }
-let pts: *Pt = malloc(80);           // 10 ช่อง (sizeof(Pt)=8)
+let pts: *Pt = malloc(80);           // 10 slots (sizeof(Pt) = 8)
 let i: i32 = 0;
 while (i < 10) {
-    (*(pts + i)).x = i;              // เข้าถึงสมาชิกผ่าน pointer ที่เลื่อนแล้ว
+    (*(pts + i)).x = i;
     (*(pts + i)).y = i * 10;
     i++;
 }
 io.out("pts[3] = ({}, {})", (*(pts + 3)).x, (*(pts + 3)).y);   // 3 30
 ```
 
-### โครงสร้างเชื่อมโยง (linked list / tree) ด้วย self-referential struct
+### Linked list / tree via a self-referential struct
+
 ```rust
-struct Node { val: i32; next: *Node; }   // ชี้หาตัวเองได้ผ่าน pointer
+struct Node { val: i32; next: *Node; }   // points to itself through a pointer
 let n2: Node;  n2.val = 20;  n2.next = 0;     // 0 = NULL
 let n1: Node;  n1.val = 10;  n1.next = &n2;
 io.out("{} -> {}", n1.val, (*n1.next).val);   // 10 -> 20
 ```
-> โครงสร้าง struct อ้างถึงกันไปมาได้ (คอมไพเลอร์คำนวณ layout แบบ fixpoint) — ลำดับการประกาศไม่สำคัญ
 
-### เปรียบเทียบสตริง (ห้ามใช้ ==)
+Structs can reference each other freely (layout is computed by fixpoint) — declaration order doesn't matter.
+
+### Compare strings (not with ==)
+
 ```rust
 extern func strcmp(a: str, b: str) -> i32;
-// s == "x" เทียบ "ที่อยู่" ไม่ใช่เนื้อหา! ใช้ strcmp แทน
+// s == "x" compares addresses, not contents! use strcmp.
 if (strcmp(name, "admin") == 0) { io.out("welcome admin"); }
 ```
 
-### เรียกฟังก์ชันคณิตศาสตร์ของ C
+### Call C math functions
+
 ```rust
-extern func sqrt(x: f64) -> f64;     // double
+extern func sqrt(x: f64) -> f64;
 extern func pow(b: f64, e: f64) -> f64;
 io.out("sqrt(2)={}", sqrt(2.0));
 ```
 
-### ฟังก์ชันทั่วไป (generic) + เลือกตามชนิด (overload)
-```rust
-func max<T>(a: T, b: T) -> T { if (a > b) { return a; } return b; }
-func show(n: i32) -> void { io.out("int {}", n); }
-func show(s: str) -> void { io.out("str {}", s); }
-func dump<T>(v: T) -> void { show(v); }   // ทำงานกับชนิดที่มี show รองรับ
-```
+### Let C call MVS code (produce a .obj)
 
-### ให้ภาษา C เรียกโค้ด MVS (ผลิต .obj)
 ```rust
-// lib.mvs (ไม่ต้องมี main)
+// lib.mvs (no main needed)
 export func mvs_add(a: i32, b: i32) -> i32 { return a + b; }
 ```
+
 ```
-mvs.exe lib.mvs -c          # ได้ lib.obj
-clang main.c lib.obj -o app # ลิงก์เข้ากับโปรแกรม C
+mvs.exe lib.mvs -c          # produces lib.obj
+clang main.c lib.obj -o app # link into a C program
 ```
 
-### เขียนโค้ด freestanding (ไม่มี OS — เขียน kernel/bare-metal)
+### Freestanding code (no OS — kernel/bare-metal)
+
 ```rust
-// ห้าม import std / ห้ามใช้ io.out ในโหมดนี้
-export func poke(addr: *u8, value: u8) -> void { *addr = value; }  // เขียน VGA buffer ฯลฯ
-```
-```
-mvs.exe kernel.mvs --nostd  # ได้ kernel.obj ที่ไม่พึ่ง CRT (ลิงก์/ฝังเอง)
+// no std import / no io.out in this mode
+export func poke(addr: *u8, value: u8) -> void { *addr = value; }  // write VGA buffer, etc.
 ```
 
-### อ่าน/เขียนไฟล์ และรับ input
+```
+mvs.exe kernel.mvs --nostd  # kernel.obj with no CRT dependency (link/embed yourself)
+```
+
+### Files and input
+
 ```rust
 import { io, fs } from "std";
 fs.write("out.txt", "hello");
 let text: str = fs.read("out.txt");
-let name: str = io.in("your name: ");   // รับหนึ่งคำ
+let name: str = io.in("your name: ");   // reads one word
 ```
 
 ### TCP echo server
+
 ```rust
 import { io, net } from "std";
 let server: TcpServer = net.TcpServer("0.0.0.0", 8080);
@@ -802,33 +804,31 @@ conn.send("HTTP/1.0 200 OK\r\n\r\nhi");
 conn.close(); server.close();
 ```
 
-### bitmask / flags ด้วย bitwise
+### Bitmask / flags (with XOR)
+
 ```rust
 let READ: u32 = 1;  let WRITE: u32 = 2;
 let perm: u32 = READ | WRITE;
 if ((perm & WRITE) != 0) { io.out("writable"); }
-perm = perm & ~WRITE;            // ลบบิต WRITE
-```
+perm = perm & ~WRITE;            // clear the WRITE bit
 
-### bitmask / flags ด้วย bitwise (รวม XOR)
-```rust
 let a: u32 = 12;  let b: u32 = 10;
-io.out("xor = {}", a ^ b);       // 6  (^ = XOR; ยกกำลังใช้ **)
-io.out("toggle bit2: {}", a ^ 4);
+io.out("xor = {}", a ^ b);       // 6   (^ = XOR; power is **)
 ```
 
-### วนลูปผ่านบัฟเฟอร์ด้วย pointer (เหมือน C)
+### Walk a buffer with a pointer (like C)
+
 ```rust
 extern func malloc(n: usize) -> *u8;
 let buf: *i32 = malloc(40);
 let p: *i32 = buf;
 let i: i32 = 0;
-while (i < 10) { *p = i * i; p++; i++; }   // p++ เลื่อนทีละ sizeof(i32)=4 ไบต์
-// นับจำนวน element ระหว่าง pointer สองตัว
-io.out("count = {}", p - buf);   // 10  (ptr - ptr หารด้วย sizeof ให้อัตโนมัติ)
+while (i < 10) { *p = i * i; p++; i++; }   // p++ advances by sizeof(i32) = 4
+io.out("count = {}", p - buf);   // 10   (ptr - ptr divides by sizeof automatically)
 ```
 
-### คืนค่าหลายค่าด้วย out-pointer (ภาษาไม่มี tuple)
+### Return multiple values via out-pointers (no tuples)
+
 ```rust
 func divmod(a: i32, b: i32, q: *i32, r: *i32) -> void {
     *q = a / b;
@@ -836,143 +836,236 @@ func divmod(a: i32, b: i32, q: *i32, r: *i32) -> void {
 }
 let q: i32 = 0;  let r: i32 = 0;
 divmod(17, 5, &q, &r);
-io.out("17/5 = {} เศษ {}", q, r);   // 3 เศษ 2
+io.out("17/5 = {} rem {}", q, r);   // 3 rem 2
 ```
 
-### overloading: กฎย่อ
-- เลือกตาม **หมวดชนิด** ของ argument: `int / float / str / char / bool / pointer / struct`
-- ต่าง**หมวด**ได้ (`show(i32)` vs `show(str)`); ต่างแค่**ความกว้าง**ไม่ได้ (`show(i32)` vs `show(i64)` → error ชัด)
-- ผสมกับ generic ได้: `func dump<T>(v: T) { show(v); }` ใช้ได้กับชนิดที่มี `show` รองรับ
+### Inspect the generated assembly
 
-### ดูแอสเซมบลีที่ gen (debug)
 ```
-mvs.exe prog.mvs -S --keep      # ได้ prog.asm อ่านได้
+mvs.exe prog.mvs -S --keep      # produces a readable prog.asm
 ```
-
-> หมายเหตุการออกแบบ: **ลำดับการประกาศ struct ไม่สำคัญ** — struct อ้างถึงกันไปมาได้ (คำนวณ layout แบบ fixpoint)
 
 ---
 
-## 7. ข้อจำกัดปัจจุบัน
+## 8. Current limitations
 
-> ส่วนนี้สำคัญ — รู้ขอบเขตก่อนใช้งานจริง (ดู roadmap การแก้ใน `Recap.md`)
+Know the boundaries before relying on it (the roadmap for fixing these is in section 9).
 
-### ภาษา / ชนิดข้อมูล
-- **ไม่มีชนิด array** — ต้องใช้ pointer + malloc แทน
-- bitwise ครบ (`& | ^ ~ << >>`); ยกกำลังใช้ `**` (เช่น `2 ** 8`, `2.0 ** 10`) — ฐานทศนิยมได้ (คูณ double ซ้ำ
-  ตามเลขชี้กำลังจำนวนเต็ม); เลขชี้กำลังติดลบยังไม่รองรับ (คืน 1.0)
-- **generic + overloading + trait มีครบ** (monomorphization); overload แยก**ความกว้าง int** ได้ (i32 vs i64 เป็นคนละตัว
-  โดย literal จำนวนเต็มจับคู่แบบหมวดถ้ามี int overload เดียว); `trait`/`<T: Trait>`/default method มีแล้ว — แต่ยังเป็น
-  **static dispatch** เท่านั้น (ยังไม่มี `dyn Trait`/vtable, `where` หลายเงื่อนไข)
-- `const` **ยังไม่บังคับใช้จริง** (เขียนทับได้ในระดับ codegen) — เป็นเพียงเจตนา
-- **ค่าปริยายของพารามิเตอร์** (`age: u8 = 5`) parse ได้แต่ codegen ไม่ใช้
+### Language / types
 
-### ตัวเลข
-- **คำนวณใน register 64-bit เสมอ** — ความกว้างชนิดเคารพตอน load/store (เก็บ/โหลด ตัด/ขยายถูก,
-  unsigned ใช้ div/setb จริง, มี wrap-around) แต่ overflow กลางนิพจน์เป็นแบบ 64-bit
-  (เช่น `let a: u8 = 200; io.out("{}", a + 100)` พิมพ์ 300 — แต่ `let c: u8 = a + 100` เก็บแล้วได้ 44;
-  `~` ตัดให้พอดีความกว้างชนิดแล้ว เช่น `~(u8)0 = 255`). ชนิด**ผลลัพธ์**ของเลขคณิต int = ตัวที่กว้างกว่า (เช่น `i32 + i64` → i64)
-- **`i128` / `u128`** เก็บ/ส่ง 16 ไบต์ แต่ยังคำนวณเป็น 64-bit (ยังไม่รองรับเลข 128-bit เต็ม)
-- **ไม่ตรวจหารด้วยศูนย์** (จะ crash ตอน runtime)
-- การแปลง `u64`↔`f64` ค่า ≥ 2^63 ใช้เส้นทาง unsigned แล้ว (ถูกต้อง); `dereference` ของค่าที่ไม่ใช่ pointer เป็น compile error
-- **int↔float แปลงโดยปริยายที่ขอบ** (กำหนดค่า/คืนค่า/ส่ง argument) เช่น `let x: f64 = 5` ได้ 5.0; `int as bool` ได้ 0/1
-- โครงสร้างที่บรรจุตัวเองแบบ by-value (`struct P { n: P; }`) เป็น compile error (ขนาดอนันต์) — ใช้ `*P` แทน
-- generic ที่ `T` ปรากฏเฉพาะใน return/body (ไม่อยู่ใน parameter) จะ instantiate เป็น `i64` โดยปริยาย
-- **ทศนิยม (float):** `+ - * /` `**` (ฐาน float, ชี้กำลังจำนวนเต็ม) เปรียบเทียบ และ unary `-` ใช้ได้;
-  แต่ **`%` (modulo), `++`/`--`, และ `switch` ใช้กับ float ไม่ได้** → เป็น compile error (ใช้กับจำนวนเต็มเท่านั้น)
-  · เลขชี้กำลัง `**` ติดลบยังไม่รองรับ (คืน 1.0)
+- **No array type** — use pointer + malloc.
+- Full bitwise (`& | ^ ~ << >>`); power is `**` (e.g. `2 ** 8`, `2.0 ** 10`) — a float base works (repeated
+  `mulsd` by an integer exponent); a negative exponent isn't supported (returns 1.0).
+- generics + overloading + traits are all present (monomorphization); overloads distinguish int **width**
+  (i32 vs i64 are separate), with an integer literal matched by category if there's a single int overload;
+  `trait`/`<T: Trait>`/default methods exist — but it's **static dispatch only** (no `dyn Trait`/vtable, no
+  multi-condition `where`).
+- `const` isn't truly enforced yet (writable at the codegen level) — intent only.
+- Default parameter values (`age: u8 = 5`) parse but codegen ignores them.
 
-### struct / ฟังก์ชัน
-- struct literal ที่ฟิลด์เป็น struct ซ้อนรับเฉพาะ literal/lvalue
-- struct **literal** ตรง ๆ เป็น argument ส่งไม่ได้ (ใช้ตัวแปรชั่วคราว) — แต่ **ผลลัพธ์ struct จากฟังก์ชัน**
-  ใช้เป็น rvalue ได้แล้ว (`g(make())`, `make().field`, `make().method()` — คอมไพเลอร์ materialize ลงช่อง temp ให้)
-- **generic method** (`impl` ที่มี `<T>`) ยังไม่รองรับ — ใช้ generic function แทน
-- จำนวนฟิลด์ struct สูงสุด 64, ฟังก์ชัน/สัญลักษณ์มีลิมิต (ดู `MAX_*` ใน `common.h`)
+### Numbers
 
-### กับดักที่พบบ่อย (gotchas — ไม่ใช่บั๊ก แต่ควรรู้)
-- **`==` บนสตริงเทียบ "ที่อยู่" ไม่ใช่เนื้อหา** — ใช้ `extern strcmp` (ดู How-to)
-- **`char + int` ให้ผลเป็น `char`** (สืบชนิดจากตัวซ้าย) — io.out จะพิมพ์เป็นอักขระ; แปลงเป็น i32 ถ้าต้องการตัวเลข
-- io.out: `%` ในข้อความพิมพ์ตรง ๆ (ไม่ต้อง escape); ใช้ `{{` `}}` แทนปีกกาจริง
+- **Math always runs in 64-bit registers** — width is respected at load/store (correct truncate/extend, real
+  unsigned div/setb, real wrap), but mid-expression overflow is 64-bit. (`let a: u8 = 200; io.out("{}", a + 100)`
+  prints 300, but `let c: u8 = a + 100` stores 44; `~` masks to width, e.g. `~(u8)0 = 255`.) The **result type**
+  of integer arithmetic is the wider operand (`i32 + i64` → i64).
+- `i128`/`u128` store/pass 16 bytes but still compute as 64-bit (no full 128-bit math yet).
+- **No divide-by-zero check** (crashes at runtime).
+- `u64`↔`f64` conversion of values ≥ 2^63 uses the unsigned path (correct); dereferencing a non-pointer is a
+  compile error.
+- int↔float converts implicitly at edges (assign/return/argument), e.g. `let x: f64 = 5` gives 5.0; `int as bool`
+  gives 0/1.
+- A struct containing itself by value (`struct P { n: P; }`) is a compile error (infinite size) — use `*P`.
+- A generic where `T` appears only in the return/body (not a parameter) instantiates as `i64` by default.
+- For floats: `+ - * /`, `**` (float base, integer exponent), comparison, and unary `-` work; but `%`, `++`/`--`,
+  and `switch` on a float are compile errors; a negative `**` exponent isn't supported (returns 1.0).
 
-### หน่วยความจำ
-- **ไม่มีการจัดการหน่วยความจำอัตโนมัติ** — ไม่มี GC, ไม่มี RAII/destructor, ต้อง `free` เอง
-- **ไม่มีการตรวจขอบเขต** (no bounds checking) — เขียนเกิน = undefined behavior
-- std lib บางตัวยัง `malloc` โดยไม่ `free` (ยอม leak ในตัวอย่าง)
+### struct / functions
+
+- A struct literal with a nested struct field accepts only a literal/lvalue.
+- A bare struct **literal** can't be passed as an argument (use a temp), but a struct **result from a function**
+  works as an rvalue (`g(make())`, `make().field`, `make().method()` — materialized into a temp slot).
+- **Generic methods** (`impl` with `<T>`) aren't supported — use a generic function.
+- Max 64 struct fields; functions/symbols have limits (see `MAX_*` in `common.h`).
+
+### Common gotchas (not bugs, but worth knowing)
+
+- **`==` on strings compares addresses, not contents** — use `extern strcmp`.
+- **`char + int` yields `char`** (inherits from the left operand) — io.out prints it as a character; cast to i32
+  for a number.
+- io.out: `%` in text prints literally (no escaping); use `{{` `}}` for literal braces.
+
+### Memory
+
+- **No automatic memory management** — no GC, no RAII/destructor, you `free` yourself.
+- **No bounds checking** — writing past an allocation is undefined behavior.
+- Some std functions still malloc without freeing (deliberate leak in the examples).
 
 ### C interop / float
-- float ส่ง/รับผ่าน **xmm** ตาม ABI แล้ว — เรียก C math ได้ทั้ง `f64` (`sqrt`/`pow`) และ `f32` (`sqrtf`)
-  - ⚠️ ฟังก์ชัน MVS ที่ `export` และมีพารามิเตอร์ `f32` ถูกเรียกจาก C จะอ่านบิตผิด (ใช้ `f64` แทนสำหรับ export)
-- **ชื่อ extern/export ห้ามชนคำสงวน NASM** (`abs`, `rel`, `seg`, `wrt`) — assemble ไม่ผ่าน
 
-### เป้าหมาย / รูปแบบเอาต์พุต
-- รองรับเฉพาะ **x86-64 + win64 calling convention** + object format **COFF/PE** (`nasm -f win64`)
-- **ยังไม่มี ELF / SysV ABI** — OS dev สาย GNU ld/ELF (GRUB multiboot) ต้องรอ backend ใหม่ (roadmap)
-- ต้องมี `nasm` + `clang` ในเครื่อง (ลิงก์ผ่าน `-llegacy_stdio_definitions -lws2_32`)
+- Floats pass/return through **xmm** per the ABI — C math works for both `f64` (`sqrt`/`pow`) and `f32` (`sqrtf`).
+  Caveat: an `export`ed MVS function with an `f32` parameter, called from C, reads the bits wrong (use `f64` for
+  exports).
+- **extern/export names must not collide with NASM reserved words** (`abs`, `rel`, `seg`, `wrt`) — won't assemble.
 
-### คอมไพเลอร์
-- **หยุดที่ error แรก** (ยังไม่มี error recovery เต็มรูปแบบ)
-- การ resolve method ระยะ reachability เป็นแบบ over-approximate (อาจเก็บ method ชื่อซ้ำเกินจริงเล็กน้อย)
+### Target / output format
 
----
+- Only **x86-64 + win64** + **COFF/PE** (`nasm -f win64`).
+- **No ELF / SysV ABI yet** — GNU ld/ELF OS dev (GRUB multiboot) waits on a new backend (roadmap).
+- Needs `nasm` + `clang` (linked via `-llegacy_stdio_definitions -lws2_32`).
 
-## 8. ลำดับการเรียนรู้ที่แนะนำ
+### Compiler
 
-**ระดับใช้งานภาษา (ดู `examples/` แบ่งเป็นกลุ่ม 01..08):**
-1. `examples/demo.mvs` → `01_language/` (hello, types, operators, casts, control, bitwise, args)
-2. `02_functions/` (recursion, generics, overload) → `03_structs/` (structs, methods, pointers)
-3. `04_traits/` (traits, display) → `05_strings/` (String) → `06_modules/` (import)
-4. `07_c_interop/` (extern_c, use_c + .c, export_lib + .c, freestanding)
-5. `08_stdlib/` (io_demo, floats, files, net_client/server)
-
-**ระดับเข้าใจคอมไพเลอร์ (อ่านโค้ดตามลำดับ):**
-1. `src/token.h` → `src/lexer.c` (token คืออะไร, ตัดคำยังไง)
-2. `src/ast.h` (รูปร่างของ AST) → `src/parser.c` (recursive descent)
-3. `src/arch/common.c` (ระบบชนิด, struct layout, symbol table)
-4. `src/arch/x86_64/win.c` (`gen_expr`, `gen_stmt` — การปล่อย instruction)
-5. `src/module.c`, `src/main.c` (โมดูล + pipeline)
-
-**แบบฝึกหัดที่แนะนำ:**
-- เขียนโปรแกรม แล้วรัน `mvs file.mvs -S` อ่าน assembly เทียบกับซอร์ส
-- ลองทำ bump allocator บน buffer ที่ malloc มา (จองครั้งเดียว แจกจ่ายเอง)
-- (ขั้นสูง) เพิ่ม operator ใหม่: แก้ `token.h` → `lexer.c` → `parser.c` → `gen_binop_apply` ใน win.c
+- **Stops at the first error** (no full error recovery yet).
+- Method reachability is over-approximate (may keep a few same-named methods beyond what's strictly used).
 
 ---
 
-## 9. อภิธานศัพท์
+## 9. Status and roadmap
 
-| คำ | ความหมาย |
-|----|----------|
-| **Token** | หน่วยเล็กสุดที่มีความหมาย (keyword, ตัวเลข, ตัวดำเนินการ) |
-| **Lexer** | ตัวแปลงตัวอักษรเป็น token |
-| **Parser** | ตัวประกอบ token เป็นต้นไม้ไวยากรณ์ |
-| **AST** | Abstract Syntax Tree — ต้นไม้แทนโครงสร้างโปรแกรม |
-| **Codegen** | ตัวแปลง AST เป็นแอสเซมบลี |
-| **ABI** | Application Binary Interface — กติกาการเรียกฟังก์ชัน (รีจิสเตอร์, stack) |
-| **Stack frame** | พื้นที่บน stack ของฟังก์ชันหนึ่งครั้งเรียก (ตัวแปร local อยู่ที่นี่) |
-| **Prologue/Epilogue** | โค้ดต้น/ท้ายฟังก์ชันที่จอง/คืนเฟรม |
-| **Shadow space** | พื้นที่ 32 ไบต์ที่ผู้เรียกต้องจองให้ callee (กฎ win64) |
-| **sret** | structure return — คืน struct ผ่าน pointer ซ่อนที่ผู้เรียกเตรียมไว้ |
-| **rbp / rsp** | base / stack pointer (รีจิสเตอร์ชี้ frame และยอด stack) |
-| **RIP-relative** | อ้างที่อยู่สัมพัทธ์กับตัวนับคำสั่ง (`default rel` ใน NASM) |
-| **Tree-shaking** | ตัดฟังก์ชันที่ไม่ถูกเรียกออกจากเอาต์พุต |
-| **Intrinsic** | ฟีเจอร์ที่คอมไพเลอร์จัดการเอง (เช่น `io.out`) ไม่ใช่ฟังก์ชันธรรมดา |
-| **Freestanding** | โค้ดที่ไม่พึ่ง OS/runtime — ใช้เขียน OS/bare-metal |
+Current state: the basic subset works end to end. The compiler turns `.mvs` into a real `.exe` on Windows
+x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
+
+### Done
+
+- Hand-written lexer (keywords, numbers, strings + escapes, chars, 1–2 char operators, `//` and block comments).
+- Recursive-descent parser with full operator precedence.
+- `let`/`const` (local + global), arithmetic `+ - * / % **`, comparison, logic `&& || !`, bitwise `& | ^ ~ << >>`.
+- `if/elseif/else`, `while`, `for`, `do-while`, `switch/case/default`, `break`, `continue`.
+- Functions + parameters (5+ via stack) + return + recursion.
+- Real integer width (i8..i64, u8..u64, real unsigned div/mod/compare, real wrap), `i128`/`u128` stored as 16 bytes.
+- `f32` (real 4 bytes) / `f64` via SSE; int↔float conversion; floats across the C boundary both ways.
+- Pointers, pointer arithmetic scaled by sizeof, function pointers (value + indirect `call rax`).
+- structs: literals, member access (read/write), nested, struct return (sret), by-value parameters,
+  struct-result-as-rvalue; methods (`impl`) + associated functions (`Type::new`) + chaining.
+- Generics (monomorphization) + overloading (by category, splitting int width) + traits (`impl Trait for`,
+  `<T: Trait>`, default methods) with static dispatch and compile-time bound checking.
+- `as` cast; compile-time type checking (incl. call argument type/count); scope shadowing (scope-aware in every
+  analysis pass).
+- Module system: three import forms + checks (symbol exists, duplicates, namespace binding, circular import).
+- `io.out` Rust-style (`{}`, `{:x}`, structs, unlimited args); tree-shaking.
+- stdlib in MVS: `io` (out/print/in), `fs` (write/read), `net` (TcpServer/TcpClient, tested with curl),
+  `string` (`String` on the heap), `fmt` (`Display` + `println`/`print`).
+- C interop (`extern`/`export` + `-c`); `--nostd` freestanding (proven self-contained via `llvm-nm`).
+
+Verified by running, not just compiling: the net server echoes real HTTP from curl; C calls
+`mvs_square`/`mvs_sum_to` through a `.obj`; the freestanding `.obj` has no undefined symbols.
+
+### Remaining
+
+- **Full 128-bit i128/u128 math** — needs a two-register value model (rdx:rax) plus software 128-bit division
+  (x86 has no 128/128 divide). Today the 16 bytes are stored but computed as 64-bit.
+- **Dynamic dispatch (`dyn Trait` / vtable)** and multi-condition `where`. This is also the prerequisite for
+  making `io.out`'s `{}` form a real library function (see below).
+- **A real array type.**
+- **`io.out` as a library** instead of an intrinsic. This needs three things, in order:
+  1. trait objects / `dyn Trait` (a fat pointer `{data, vtable}`), with a per-(type, trait) vtable and dynamic
+     dispatch through it.
+  2. variadic parameters on the receiving side — gather varargs into a slice `{ptr, len}` and pass one argument
+     (avoiding C's va_list).
+  3. combine: `func out(fmt: str, args: ...dyn Display)` in io.mvs, plus `impl Display` for the primitives (which
+     in turn needs impl-on-primitive support — today `impl` only binds to structs).
+  The existing library path is `fmt.println(x)` / `fmt.print(x)` for single values you `impl Display` on, so
+  `io.out` stays an intrinsic for now (like Rust's `println!`).
+- **ELF + SysV ABI backend** (for ELF/GNU OS dev): a new `src/arch/x86_64/sysv.c` reusing `common.c`, changing
+  only the calling convention (args in rdi, rsi, rdx, rcx, r8, r9; no shadow space), `nasm -f elf64`, a new
+  `ARCH_X86_64_SYSV` + `--target elf64`.
+- **ARM64 backend** (`src/arch/arm64/<os>.c` + `ARCH_ARM64`); selectable object format / entry point for flat
+  binaries / multiboot kernel images.
+
+### Known minor limits (low risk, not yet fixed)
+
+- **One module = one namespace:** importing the same file under different names/forms dedups silently the second
+  time — a symbol may not be exposed as expected.
+- An extern C function taking `f32` in stack position ≥4 isn't narrowed double→single yet (registers 0–3 are done).
+- A compound assignment whose lvalue base contains a call (`getptr().x += 1`) may evaluate the call twice (rare).
+- `[`/`]` are lexed but there's no array type; generic params beyond 4 are clamped; `-2 ** 2 == 4` (unary binds
+  tighter than `**`).
+- Function pointers (v1): the type doesn't take varargs in its signature; can't overload by function-pointer type
+  (all mangle to `func`); assignment to a func-ptr variable is type-checked leniently; pointing a func-ptr at a C
+  `extern` taking/returning `f32` won't narrow double↔single (func pointers are meant for MVS functions).
+
+About `--nostd` for OS dev: it currently produces self-contained x86-64 with no undefined symbols and no CRT/OS
+dependency — runnable on bare metal — **but** the object is COFF/PE (`nasm -f win64`) using the win64 calling
+convention, suited to the LLVM/lld side. GNU ld + ELF (e.g. GRUB multiboot) can't link COFF; that waits on the
+ELF/SysV backend above.
+
+### Where to edit when adding a feature
+
+| To add... | Edit |
+|-----------|------|
+| a token/keyword | `src/token.h`, `src/lexer.c` (the `KEYWORDS` table) |
+| new syntax | `src/parser.c` (+ new `ND_*` in `src/ast.h`) |
+| instruction emission | `src/arch/x86_64/win.c` (`gen_expr` / `gen_stmt`) |
+| shared logic (type/struct/symtab/tree-shake) | `src/arch/common.c` (+ `common.h`) |
+| import behavior | `src/module.c` (`handle_import` / `load_module`) |
+| a stdlib function | `std/*.mvs` (MVS + `extern` into libc) |
+| a new architecture | `src/arch/<arch>/<os>.c` (reuse `common.c`) + `TargetArch` + a case in `codegen.c` |
 
 ---
 
-> หากพบว่าเอกสารนี้ไม่ตรงกับโค้ด ให้ยึดโค้ดเป็นหลักและอัปเดตเอกสาร — ดูกฎใน [`Rules.md`](Rules.md)
+## 10. Gotchas (learned the hard way)
+
+- **16-byte stack alignment:** temp pushes use 16 bytes, not 8 (see `push_tmp`). Switching to 8 crashes `printf`
+  in expressions with nested calls.
+- **clang warnings:** you need `-D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations` or MSVC headers flood you
+  with warnings (fopen/strdup/strcpy).
+- **Link flags:** `-llegacy_stdio_definitions` (else `scanf` won't link, UCRT inlines it) and `-lws2_32` (net) —
+  set in `src/main.c`.
+- **float in printf:** it's variadic, so a float must be placed in both the GPR and `xmm<n>` (see io.out), or it
+  prints wrong.
+- **struct return:** a struct-returning function uses a hidden pointer (rcx) — only call it storing the result
+  into a variable (otherwise error).
+- **method `ns` vs `mod`:** a method's `ns` is the struct name (for the label); `mod` is the module (for resolving
+  internal calls). Using ns as cur_ns makes a method call itself in a loop (e.g. `send` calling extern `send`) —
+  use `fn->mod`.
+- **NASM keywords:** an extern/export name equal to a nasm reserved word (`abs`, `rel`, `seg`, `wrt`) won't
+  assemble — avoid those names.
+- **--nostd:** no package imports, no CRT linkage, emits a `.obj`; reachability roots = main + exports.
+- **Don't nest `/*` inside a Thai comment:** clang warns `-Wcomment`.
+- **scope shadowing:** fully supported (codegen uses the visible stack; every type-analysis pass is scope-aware) —
+  same-named variables of different types/scopes work correctly.
+- **global init:** globals are initialized at the **start of main**, not in `.data`. See the loop in `gen_func`
+  that checks `strcmp(fn->name, "main")` — with no `main`, global init doesn't run.
+- **modules:** io needs `import { io } from "std";` first, else "undefined function 'io.out'".
+- **std dir:** found via `MVS_STD` or `<dir of mvs.exe>/std` — set `MVS_STD` if you run mvs.exe from elsewhere.
+- **printf variadic:** you can pass more arguments than the `extern` declares (codegen doesn't check arg count
+  against the signature).
+- **callee-saved registers (win64):** `rbx, rbp, rdi, rsi, rsp, r12-r15` must not be clobbered without restoring.
+  Memory copy uses `gen_memcpy()` (r10/r11 volatile), never `rep movsb` (it uses rsi/rdi). Proven: C sets rsi/rdi,
+  calls MVS (struct copy), and rsi/rdi survive.
+- **pointer arithmetic must scale everywhere:** `p+1`, `p+=1`, `p++`, and `p - q` (divide by sizeof) all the same
+  (there used to be a bug where compound/`++`/ptr-ptr didn't scale — fixed).
+- **shift/div/mod signedness follows the left operand only** (not an OR of both sides) — otherwise `signed >> n`
+  becomes a logical shift. Comparison treats "either side unsigned = unsigned" (so a big u64 isn't seen as negative).
+- **struct declaration order is free:** layout is computed by fixpoint (`layout_structs`), supporting fields that
+  are structs declared later.
+- **overload:** resolution counts nested-call arguments first (recurse children first); a same-category signature
+  clash (i32 vs i64) reports a clear error.
+- **malformed input** (trailing escape, unclosed `{`) must not read past the buffer — guards exist; internal tables
+  have bounds checks (`MAX_*`).
+- **No gcc/ld/flex/bison on the machine** — don't write scripts/Makefiles that call them.
 
 ---
 
-## 📚 เอกสารทั้งหมด (เชื่อมโยงถึงกัน)
+## 11. Glossary
 
-> 📍 คุณกำลังอ่าน: **GUIDE.md**
-
-| ไฟล์ | เนื้อหา |
+| Term | Meaning |
 |------|---------|
-| [README.md](README.md) | ภาพรวม · ติดตั้ง · วิธีใช้ · ความสามารถ |
-| [GUIDE.md](GUIDE.md) | คู่มือภาษาเชิงลึก · ไวยากรณ์ · กลไกหน่วยความจำ · assembly จริง |
-| [Rules.md](Rules.md) | กฎ/ปรัชญา freestanding · ABI · ข้อควรระวังสำหรับผู้พัฒนา |
-| [Recap.md](Recap.md) | สถานะงาน · roadmap · gotchas |
-| [CLAUDE.md](CLAUDE.md) | ไฟล์นำทางสำหรับ AI/ผู้พัฒนา · คำสั่ง · จุดแก้ไข |
-| [examples/README.md](examples/README.md) | รายการโปรแกรมตัวอย่างทั้งหมด |
+| Token | the smallest meaningful unit (keyword, number, operator) |
+| Lexer | turns characters into tokens |
+| Parser | assembles tokens into a syntax tree |
+| AST | Abstract Syntax Tree — the tree representing the program |
+| Codegen | turns the AST into assembly |
+| ABI | Application Binary Interface — the function-call contract (registers, stack) |
+| Stack frame | one function call's stack region (where locals live) |
+| Prologue/Epilogue | the function's entry/exit code that reserves/releases the frame |
+| Shadow space | the 32 bytes the caller reserves for the callee (win64 rule) |
+| sret | structure return — returning a struct through a hidden caller-provided pointer |
+| rbp / rsp | base / stack pointer |
+| RIP-relative | addressing relative to the instruction pointer (`default rel` in NASM) |
+| Tree-shaking | dropping unreferenced functions from the output |
+| Intrinsic | a feature the compiler handles itself (e.g. `io.out`), not an ordinary function |
+| Freestanding | code with no OS/runtime dependency — for writing an OS / bare-metal |
+
+If this doc and the code disagree, trust the code and update the doc.

@@ -1,41 +1,41 @@
 # CLAUDE.md
 
-แนวทางสำหรับ Claude Code (และ AI session อื่น ๆ) เมื่อทำงานในโปรเจกต์นี้
+Guidance for Claude Code (and any AI session) working in this project.
 
-> **อ่านก่อนเริ่มเสมอ:** [`Rules.md`](Rules.md) = กฎที่ห้ามละเมิด · [`Recap.md`](Recap.md) = สถานะงานและสิ่งที่ค้าง
-> · [`GUIDE.md`](GUIDE.md) = คู่มือภาษาเชิงลึก (ไวยากรณ์ + กลไกหน่วยความจำ + assembly จริง)
+> **Read first:** [RULES.md](RULES.md) — the rules you must not break.
+> [GUIDE.md](GUIDE.md) — the language reference, internals, project status, and roadmap.
 
-## โปรเจกต์นี้คืออะไร
+## What this project is
 
-คอมไพเลอร์สำหรับภาษา **MVS** (ภาษาระดับล่างคล้าย C แต่ syntax อ่านง่ายกว่า)
-เขียนด้วย **C ล้วน** สร้างแอสเซมบลี **x86-64 Windows (NASM)** โดยตรง
-**ไม่ใช้ LLVM, ไม่ใช้ flex/bison** — lexer/parser เขียนมือทั้งหมด
+A compiler for **MVS**, a low-level language (C-level, but easier to read). Written in **plain C**,
+emitting **x86-64 Windows (NASM)** assembly directly. **No LLVM, no flex/bison** — the lexer and
+parser are hand-written.
 
-## ข้อจำกัดสำคัญที่สุด (รายละเอียดเต็มใน Rules.md)
+## The most important constraints (full detail in RULES.md)
 
-1. **ห้าม LLVM / flex / bison** — gen แอสเซมบลีเอง, lexer/parser เขียนมือ
-2. **คอมเมนต์โค้ดเป็นภาษาไทยละเอียด** แต่ **output/error เป็นภาษาอังกฤษ**
-3. Toolchain ที่มี: **clang + nasm เท่านั้น** (ไม่มี gcc/ld/flex/bison/make ของ GNU ครบชุด)
-4. โครงสร้างต้องรองรับหลายสถาปัตยกรรม — front-end ห้ามผูกกับ x86
+1. **No LLVM / flex / bison** — generate assembly yourself; hand-write the lexer/parser.
+2. **Source comments in detailed Thai**, but **program output and error messages in English.**
+3. Available toolchain: **clang + nasm only** (no full GNU gcc/ld/flex/bison/make).
+4. The structure must support multiple architectures — the front end must not bind to x86.
 
-## คำสั่งหลัก
+## Main commands
 
 ```powershell
-# build คอมไพเลอร์
+# build the compiler
 make
-#   เทียบเท่า: clang -Wall -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc `
-#              src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/codegen.c `
-#              src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
+#   equivalent to: clang -Wall -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc `
+#                  src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/codegen.c `
+#                  src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
 
-# คอมไพล์โปรแกรม MVS → .exe แล้วรัน
+# compile an MVS program to .exe, then run it
 .\mvs.exe examples\demo.mvs
 .\examples\demo.exe
 
-# debug codegen: ดูแอสเซมบลีที่ gen ออกมา (ไม่เรียก nasm/clang)
+# debug codegen: see the generated assembly (no nasm/clang)
 .\mvs.exe examples\demo.mvs -S --keep
 ```
 
-## สถาปัตยกรรมโค้ด (pipeline)
+## Code architecture (pipeline)
 
 ```
 .mvs → [lexer] → tokens → [parser] → AST → [codegen driver] → [arch backend] → .asm
@@ -43,66 +43,66 @@ make
                                         nasm -f win64 → .obj → clang → .exe
 ```
 
-| ไฟล์                      | หน้าที่                                              |
-|---------------------------|------------------------------------------------------|
-| `src/token.h`             | นิยามชนิด token                                       |
-| `src/lexer.{h,c}`         | ตัดคำ (hand-written tokenizer)                        |
-| `src/ast.{h,c}`           | โครงสร้าง AST (`Node` เดียวแยกด้วย `kind`) + ตัวช่วย   |
-| `src/parser.{h,c}`        | recursive-descent parser                             |
-| `src/module.{h,c}`        | ระบบโมดูล: resolve `import` ข้ามไฟล์ + package std    |
-| `src/codegen.{h,c}`       | ตัวขับ เลือก backend ตาม `TargetArch` (ไม่ผูก arch)   |
-| `src/arch/common.{h,c}`   | ส่วนกลาง backend (ไม่ขึ้น arch): type, struct, symtab, tree-shaking |
-| `src/arch/x86_64/win.c`   | backend เฉพาะ x86-64 win64 (ปล่อย NASM, stack-machine) |
-| `src/main.c`              | CLI: ขับ pipeline ทั้งหมด                             |
-| `std/*.mvs`               | standard library เขียนด้วย MVS (`io`/`string`/`fmt`/`fs`/`net`) |
+| File | Role |
+|------|------|
+| `src/token.h` | token kinds |
+| `src/lexer.{h,c}` | tokenizer (hand-written) |
+| `src/ast.{h,c}` | AST (one `Node` tagged by `kind`) + helpers |
+| `src/parser.{h,c}` | recursive-descent parser |
+| `src/module.{h,c}` | module system: resolve `import` across files + std package |
+| `src/codegen.{h,c}` | driver: picks the backend by `TargetArch` (not arch-bound) |
+| `src/arch/common.{h,c}` | shared backend (arch-independent): types, structs, symtab, tree-shaking |
+| `src/arch/x86_64/win.c` | x86-64 win64 backend (emits NASM, stack machine) |
+| `src/main.c` | CLI driving the whole pipeline |
+| `std/*.mvs` | standard library written in MVS (`io`/`string`/`fmt`/`fs`/`net`) |
 
-## จะเพิ่มฟีเจอร์ต้องแตะไฟล์ไหน
+## Where to edit when adding a feature
 
-- token/keyword → `token.h` + `lexer.c` (ตาราง `KEYWORDS`)
-- ไวยากรณ์ → `parser.c` (+ `ND_*` ใน `ast.h`)
-- type checking / trait bound / generic / overload → `generic.c` (รัน pass หลัง parse: monomorphize → resolve_overloads → typecheck)
-- การ gen instruction → `arch/x86_64/win.c` · ตรรกะกลาง (type/struct/symtab/tree-shake/io.out format) → `arch/common.c`
-- พฤติกรรม import → `module.c` · ฟังก์ชัน stdlib → `std/*.mvs`
-- arch ใหม่ → สร้าง `arch/<arch>/<os>.c` (reuse `common.c`) + `TargetArch` (`codegen.h`) + case ใน `codegen.c`
+- token/keyword → `token.h` + `lexer.c` (the `KEYWORDS` table)
+- syntax → `parser.c` (+ `ND_*` in `ast.h`)
+- type checking / trait bound / generic / overload → `generic.c` (passes after parse:
+  monomorphize → resolve_overloads → typecheck)
+- instruction emission → `arch/x86_64/win.c`; shared logic (type/struct/symtab/tree-shake/io.out format)
+  → `arch/common.c`
+- import behavior → `module.c`; stdlib functions → `std/*.mvs`
+- a new arch → create `arch/<arch>/<os>.c` (reuse `common.c`) + `TargetArch` (`codegen.h`) + a case in `codegen.c`
 
-## เช็คก่อนถือว่าเสร็จ
+## Before calling it done
 
-1. `make` ผ่านไม่มี warning
-2. คอมไพล์ **และรัน** `examples/demo.mvs` + `examples/01_language/types.mvs` ได้ผลถูกต้อง
-3. เพิ่มฟีเจอร์ → เพิ่มตัวอย่างใน `examples/` พิสูจน์ว่าใช้ได้จริง
+1. `make` passes with no warnings.
+2. Compile **and run** `examples/demo.mvs` + `examples/01_language/types.mvs` with correct results.
+3. New feature → add an example under `examples/` proving it works.
 
-## สถานะฟีเจอร์ (ดูรายละเอียดใน Recap.md)
+## Feature status (details in GUIDE.md)
 
-**ทำแล้ว:** struct + **method/impl + chaining** · pointer · ความกว้าง int จริง · **f32 (4 ไบต์จริง)**/f64 (SSE) ·
-switch/do-while · io.out แบบ Rust (`{}`/`{:x}` + **พิมพ์ struct** + arg ไม่จำกัด) · import + extern ·
-stdlib `io`/`fs`/`net`/**`string`** + `io.in` · args > 4 · tree-shaking · sret · **C interop (`export`/`-c`)** ·
-**`--nostd` freestanding** · **generics + overloading (แยกความกว้าง int)** · **scope shadowing** ·
-struct by-value param + **struct-returning call เป็น rvalue** · **type checking** + **`as` cast** ·
-**trait + associated function (`Type::new`) + `<T: Trait>` + default method** · **`String` (heap) + `String::from`/`from_int`** ·
-**float xmm กับ C สองทาง (f32 single↔double)** · **function pointer (`func(...) -> T` เป็นค่า + indirect `call rax`)**
+**Done:** struct + method/impl + chaining · pointer · real int width · f32 (real 4 bytes)/f64 (SSE) ·
+switch/do-while · Rust-style io.out (`{}`/`{:x}` + struct printing + unlimited args) · import + extern ·
+stdlib `io`/`fs`/`net`/`string` + `io.in` · args > 4 · tree-shaking · sret · C interop (`export`/`-c`) ·
+`--nostd` freestanding · generics + overloading (split by int width) · scope shadowing ·
+struct by-value params + struct-returning call as an rvalue · type checking + `as` cast ·
+trait + associated function (`Type::new`) + `<T: Trait>` + default method · `String` (heap) +
+`String::from`/`from_int` · float xmm across the C boundary both ways (f32 single↔double) ·
+function pointer (`func(...) -> T` as a value + indirect `call rax`).
 
-**ยังเหลือ:** i128/u128 คำนวณ 128-bit เต็ม · trait dynamic dispatch (`dyn`/vtable) + `where` หลายเงื่อนไข ·
-ชนิด array จริง · io.out เป็น library (variadic+reflection) · backend ARM64/Linux
+**Remaining:** full 128-bit i128/u128 math · dynamic dispatch (`dyn`/vtable) + multi-condition `where` ·
+a real array type · io.out as a library (variadic + reflection) · ARM64/Linux backends.
 
-## ข้อควรระวังเฉพาะ (ดูเต็มใน Rules.md)
+## Project-specific cautions (full list in RULES.md)
 
-- **ปรัชญา freestanding by default** (Rules ข้อ 0): แกนภาษาห้ามพึ่ง OS/CRT — ทุกอย่างที่แตะ OS อยู่ใน `std/*.mvs` (opt-in)
-- C interop: `export func` = ชื่อสัญลักษณ์ดิบ + `global`; `-c` ผลิต `.obj`; `--nostd` = freestanding obj
-- method: `ns` = ชื่อ struct (label), `mod` = โมดูล (resolve การเรียกภายใน) — อย่าสับสน (ดู Rules 5.6)
-- link ต้องมี `-llegacy_stdio_definitions -lws2_32`; ชื่อ extern/export ห้ามชนคำสงวน NASM (`abs` ฯลฯ)
-- float เก็บเป็น bit-pattern ใน rax, เข้า xmm เฉพาะตอนคำนวณ; `io.out` เป็น compiler intrinsic
+- **Freestanding by default** (RULES §0): the language core must not depend on the OS/CRT — everything
+  touching the OS lives in `std/*.mvs` (opt-in).
+- C interop: `export func` = raw symbol name + `global`; `-c` produces a `.obj`; `--nostd` = freestanding obj.
+- method: `ns` = struct name (label), `mod` = module (resolves internal calls) — don't confuse them (RULES §5.6).
+- linking needs `-llegacy_stdio_definitions -lws2_32`; extern/export names must not clash with NASM reserved
+  words (`abs`, etc.).
+- floats are stored as a bit-pattern in rax, entering xmm only for math; `io.out` is a compiler intrinsic.
 
----
+## Documentation
 
-## 📚 เอกสารทั้งหมด (เชื่อมโยงถึงกัน)
-
-> 📍 คุณกำลังอ่าน: **CLAUDE.md**
-
-| ไฟล์ | เนื้อหา |
-|------|---------|
-| [README.md](README.md) | ภาพรวม · ติดตั้ง · วิธีใช้ · ความสามารถ |
-| [GUIDE.md](GUIDE.md) | คู่มือภาษาเชิงลึก · ไวยากรณ์ · กลไกหน่วยความจำ · assembly จริง |
-| [Rules.md](Rules.md) | กฎ/ปรัชญา freestanding · ABI · ข้อควรระวังสำหรับผู้พัฒนา |
-| [Recap.md](Recap.md) | สถานะงาน · roadmap · gotchas |
-| [CLAUDE.md](CLAUDE.md) | ไฟล์นำทางสำหรับ AI/ผู้พัฒนา · คำสั่ง · จุดแก้ไข |
-| [examples/README.md](examples/README.md) | รายการโปรแกรมตัวอย่างทั้งหมด |
+| File | Contents |
+|------|----------|
+| [README.md](README.md) | overview · install · how to compile · usage |
+| [GUIDE.md](GUIDE.md) | language reference · internals · real assembly · status · roadmap |
+| [RULES.md](RULES.md) | rules · freestanding philosophy · ABI · developer cautions |
+| [CLAUDE.md](CLAUDE.md) | this file — navigation for AI/developers · commands · where to edit |
+| [examples/README.md](examples/README.md) | the full list of example programs |
