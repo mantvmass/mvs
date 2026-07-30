@@ -26,12 +26,23 @@ static void pop_tmp(Gen *g, const char *reg) {
 }
 
 /* Copy size bytes of memory: src is in r10, dst is in r11.
- * Uses only volatile registers (r10/r11/rcx/rax); never touches rsi/rdi, which win64 treats as
- * callee-saved, and never clashes with argument registers (rcx/rdx/r8/r9) that may still hold
- * parameters not yet saved */
+ * Touches only rax/r10/r11, and never rsi/rdi (callee-saved on win64). It must
+ * not touch an argument register either: the prologue copies 16-byte parameters
+ * while later parameters are still in their registers, and rcx is an argument
+ * register. Small sizes unroll; a big struct falls back to a loop with the
+ * counter saved and restored around it. */
 static void gen_memcpy(Gen *g, int size) {
+    if (size <= 128) {
+        int off = 0;
+        while (off + 8 <= size) { fprintf(g->out, "    mov rax, [r10 + %d]\n    mov [r11 + %d], rax\n", off, off); off += 8; }
+        if (off + 4 <= size) { fprintf(g->out, "    mov eax, [r10 + %d]\n    mov [r11 + %d], eax\n", off, off); off += 4; }
+        if (off + 2 <= size) { fprintf(g->out, "    mov ax, [r10 + %d]\n    mov [r11 + %d], ax\n", off, off); off += 2; }
+        if (off < size)      { fprintf(g->out, "    mov al, [r10 + %d]\n    mov [r11 + %d], al\n", off, off); }
+        return;
+    }
     int l = new_label(g);
     fprintf(g->out,
+        "    push rcx\n"
         "    mov ecx, %d\n"           /* counter (zero-extended into rcx) */
         ".Lcpy%d:\n"
         "    test rcx, rcx\n"
@@ -40,7 +51,8 @@ static void gen_memcpy(Gen *g, int size) {
         "    mov [r11], al\n"
         "    inc r10\n    inc r11\n    dec rcx\n"
         "    jmp .Lcpy%d\n"
-        ".Lcpyend%d:\n", size, l, l, l, l);
+        ".Lcpyend%d:\n"
+        "    pop rcx\n", size, l, l, l, l);
 }
 
 /* forward declarations */
@@ -1488,6 +1500,15 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
                 fprintf(g->out, "    mov [rax], rcx\n");
                 fprintf(g->out, "    lea rdx, [rel mvs_vt_%s_%s]\n    mov [rax + 8], rdx\n",
                         trait, at.sname ? at.sname : datatype_name(at.base));
+            } else if (at.ptr == 1 && at.arr == 0) {
+                /* &value: the pointer already IS the data half, so nothing is
+                 * copied. This is the spelling a dyn parameter takes, and the
+                 * typecheck has confirmed the pointee implements the trait */
+                g->need_vtables = 1;
+                fprintf(g->out, "    mov rcx, rax\n    lea rax, [rbp - %d]\n", boff);
+                fprintf(g->out, "    mov [rax], rcx\n");
+                fprintf(g->out, "    lea rdx, [rel mvs_vt_%s_%s]\n    mov [rax + 8], rdx\n",
+                        trait, at.base == TYPE_STRUCT && at.sname ? at.sname : datatype_name(at.base));
             } else {
                 /* scalar: spill the value so the blob has something to point at */
                 g->need_vtables = 1;
@@ -1879,6 +1900,7 @@ int x86_64_win_generate(Node *program, FILE *out) {
             Sym *s = &g.globals[g.nglobals++];
             s->name = d->name; s->type = d->type; s->ptr = d->ptr; s->sname = d->type_name;
             s->arr = d->arr;
+            s->sig = d->sig;   /* a global holding a function pointer keeps its signature */
             s->size = type_size(&g, d->type, d->ptr, d->type_name);
             if (s->arr > 0) s->size *= s->arr;   /* [T; N] global spans N elements in .bss */
             s->is_global = 1; s->offset = 0;

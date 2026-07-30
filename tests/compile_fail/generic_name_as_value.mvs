@@ -1,0 +1,7 @@
+//~ ERROR: is a generic function
+// a generic function has no address of its own: only its instances do
+func id<T>(x: T) -> T { return x; }
+func take(f: func(i64) -> i64) -> i64 { return f(1); }
+func main() -> i8 {
+    return take(id) as i8;
+}

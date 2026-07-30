@@ -168,8 +168,12 @@ Build / assemble / link:
 - Callee-saved (nonvolatile) registers on win64: rbx, rbp, rdi, rsi, rsp, r12-r15. Functions we
   emit must not clobber these without saving/restoring, especially **rsi/rdi** (easy to miss
   because `rep movsb` uses them). Break this and C code that calls an exported MVS function breaks.
-  - Copy memory with `gen_memcpy()` (a byte loop using r10/r11/rcx/rax, all volatile). Don't use
-    `rep movsb`.
+  - Copy memory with `gen_memcpy()` (src in r10, dst in r11, scratch rax). Don't use `rep movsb`.
+  - **`gen_memcpy` must not touch an argument register.** The prologue copies 16-byte parameters
+    while LATER parameters are still sitting in their registers, so a counter in rcx (argument 4
+    under SysV) makes the next parameter get copied from address zero: a crash that only shows up
+    with three or more parameters where a later one is a struct, `dyn`, or `i128`. It unrolls the
+    copy for sizes up to 128 bytes and saves/restores the counter for bigger ones.
   - Free scratch (volatile) registers: rax, rcx, rdx, r8, r9, r10, r11, xmm0-5.
 
 ## 5. Label naming (don't collide with the C runtime)

@@ -207,7 +207,12 @@ Node *expr_func_sig(Gen *g, Node *callee) {
         ExprType bt = type_of(g, callee->operand);
         StructInfo *s = find_struct(g, bt.sname);
         if (s) { Field *f = find_field(s, callee->name); if (f && f->type == TYPE_FUNC && f->ptr == 0) return f->sig; }
+        return NULL;                                                  /* otherwise a method call, resolved by name */
     }
+    /* any other expression yielding a function value is called indirectly:
+     * arr[i](x), pick(flag)(x), (*pp)(x), v.get(0).op(x) */
+    ExprType t = type_of(g, callee);
+    if (t.base == TYPE_FUNC && t.ptr == 0) return t.sig;
     return NULL;
 }
 
@@ -281,7 +286,7 @@ ExprType type_of(Gen *g, Node *n) {
             Node *callee = n->operand;
             /* indirect call through a function pointer: result type = the signature's return type */
             Node *fsig = expr_func_sig(g, callee);
-            if (fsig) { r.base = fsig->type; r.ptr = fsig->ptr; r.sname = fsig->type_name; break; }
+            if (fsig) { r.base = fsig->type; r.ptr = fsig->ptr; r.sname = fsig->type_name; r.sig = fsig->sig; break; }
             Node *f = NULL;
             if (callee->kind == ND_IDENT) {
                 f = find_func(g, g->cur_ns ? g->cur_ns : "", callee->name);
@@ -312,7 +317,9 @@ ExprType type_of(Gen *g, Node *n) {
                     f = find_func(g, datatype_name(bt.base), callee->name);
                 if (!f && callee->operand->kind == ND_IDENT) f = find_func(g, callee->operand->name, callee->name);
             }
-            if (f) { r.base = f->type; r.ptr = f->ptr; r.sname = f->type_name; }
+            /* the signature comes along so a call RETURNING a function pointer
+             * can itself be called: pick(flag)(1, 2) */
+            if (f) { r.base = f->type; r.ptr = f->ptr; r.sname = f->type_name; r.sig = f->sig; }
             break;
         }
         default: break;

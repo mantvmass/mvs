@@ -80,6 +80,12 @@ jobs:
       - name: Feature matrix (every type through every context)
         run: sh scripts/matrix.sh elf64
 
+      # The other axis: features through contexts. Trait objects, function
+      # pointers, generic inference, structs and pointers as generic
+      # arguments, and control flow that crosses match arms.
+      - name: Feature matrix (traits, function pointers, generics, flow)
+        run: sh scripts/matrix_features.sh elf64
+
       - name: Upload Linux binary
         uses: actions/upload-artifact@v4
         with:
@@ -140,3 +146,6 @@ jobs:
 
       - name: Feature matrix on AArch64
         run: sh scripts/matrix.sh arm64
+
+      - name: Feature matrix 2 on AArch64
+        run: sh scripts/matrix_features.sh arm64

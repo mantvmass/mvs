@@ -669,13 +669,35 @@ static int parse_generic_cname(Parser *p, const char *base, char *out, size_t on
         char *aname = NULL;
         DataType at = parse_type(p, &aptr, &aname, NULL, &aarr);
         if (p->panic || p->fatal) { free(aname); return 0; }
-        if (aptr > 0 || aarr > 0 || at == TYPE_FUNC || at == TYPE_DYN ||
-            at == TYPE_UNKNOWN || at == TYPE_VOID) {
+        if (at == TYPE_FUNC || at == TYPE_DYN) {
+            int isfn = at == TYPE_FUNC;
             free(aname);
-            error(p, "generic type arguments must be primitive types or struct names");
+            error(p, isfn ? "a generic type argument cannot be a function-pointer type"
+                          : "a generic type argument cannot be a trait-object type");
+            if (!p->trying)
+                diag_help("wrap it in a struct and use that instead: "
+                          "struct Cell { v: %s } ... Vec<Cell>",
+                          isfn ? "func(i64) -> i64;" : "dyn Shape;");
             return 0;
         }
+        if (aarr > 0 || at == TYPE_UNKNOWN || at == TYPE_VOID) {
+            free(aname);
+            error(p, "generic type arguments must be types with a known size");
+            return 0;
+        }
+        /* pointers are allowed and travel in the canonical name as leading stars:
+         * Vec<*Node> is "Vec<*Node>", mangled to Vec__pNode */
+        char argbuf[160];
         const char *an = (at == TYPE_STRUCT) ? aname : datatype_name(at);
+        if (aptr > 0) {
+            if ((size_t)aptr + strlen(an) + 1 >= sizeof(argbuf)) {
+                free(aname); error(p, "generic type name too long"); return 0;
+            }
+            int k = 0;
+            while (k < aptr) argbuf[k++] = '*';
+            strcpy(argbuf + k, an);
+            an = argbuf;
+        }
         if (len + strlen(an) + 3 >= on) { free(aname); error(p, "generic type name too long"); return 0; }
         if (out[len - 1] != '<') out[len++] = ',';
         strcpy(out + len, an);
@@ -946,7 +968,9 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
         }
     }
     expect(p, TK_ARROW, "expected '->' before return type");
-    fn->type = parse_type(p, &fn->ptr, &fn->type_name, NULL, NULL); /* nested func-ptr return not supported */
+    /* a function may RETURN a function pointer; fn->sig then holds the returned
+     * signature, which is what lets pick(flag)(1, 2) be called directly */
+    fn->type = parse_type(p, &fn->ptr, &fn->type_name, &fn->sig, NULL);
     /* where clause: `where T: A + B, U: C` fills the same bound slots as <T: A> */
     if (match(p, TK_WHERE)) {
         do {

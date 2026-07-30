@@ -10,6 +10,7 @@
 #   1  golden suites        every example, run and diffed, on elf64 and arm64
 #   2  built-in runner      mvs test: goldens + unit tests + compile-fail
 #   3  feature matrix       every type through every context, self-checking
+#   3b feature matrix 2     traits, function pointers, generics, pointers, flow
 #   4  differential tests   the same programs in MVS and C must agree
 #   5  optimizer equality   every example must print the same thing under -O
 #   6  freestanding         --nostd objects with zero undefined symbols
@@ -47,6 +48,12 @@ step "3. feature matrix: every type through every context"
 if sh scripts/matrix.sh elf64 > /tmp/audit_mx.txt 2>&1; then tail -1 /tmp/audit_mx.txt; else tail -10 /tmp/audit_mx.txt; note "feature matrix (elf64)"; fi
 if [ "$QUICK" != "quick" ]; then
     if sh scripts/matrix.sh arm64 > /tmp/audit_mx64.txt 2>&1; then tail -1 /tmp/audit_mx64.txt; else tail -10 /tmp/audit_mx64.txt; note "feature matrix (arm64)"; fi
+fi
+
+step "3b. feature matrix: traits, function pointers, generics, pointers, flow"
+if sh scripts/matrix_features.sh elf64 > /tmp/audit_mf.txt 2>&1; then tail -1 /tmp/audit_mf.txt; else tail -12 /tmp/audit_mf.txt; note "feature matrix 2 (elf64)"; fi
+if [ "$QUICK" != "quick" ]; then
+    if sh scripts/matrix_features.sh arm64 > /tmp/audit_mf64.txt 2>&1; then tail -1 /tmp/audit_mf64.txt; else tail -12 /tmp/audit_mf64.txt; note "feature matrix 2 (arm64)"; fi
 fi
 
 step "4. differential tests against the C reference"

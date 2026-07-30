@@ -1158,6 +1158,17 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
                 fprintf(g->out, "    str x1, [x0]\n");
                 addr_label(g, "x2", vt);
                 fprintf(g->out, "    str x2, [x0, #8]\n");
+            } else if (at.ptr == 1 && at.arr == 0) {
+                /* &value: the pointer already IS the data half, nothing is copied */
+                g->need_vtables = 1;
+                char vt[LABEL_MAX];
+                snprintf(vt, sizeof(vt), "mvs_vt_%s_%s", trait,
+                         at.base == TYPE_STRUCT && at.sname ? at.sname : datatype_name(at.base));
+                fprintf(g->out, "    mov x1, x0\n");
+                addr_local(g, "x0", boff);
+                fprintf(g->out, "    str x1, [x0]\n");
+                addr_label(g, "x2", vt);
+                fprintf(g->out, "    str x2, [x0, #8]\n");
             } else {
                 g->need_vtables = 1;
                 char vt[LABEL_MAX];
@@ -1697,6 +1708,7 @@ int arm64_linux_generate(Node *program, FILE *out) {
             Sym *s = &g.globals[g.nglobals++];
             s->name = d->name; s->type = d->type; s->ptr = d->ptr; s->sname = d->type_name;
             s->arr = d->arr;
+            s->sig = d->sig;   /* a global holding a function pointer keeps its signature */
             s->size = type_size(&g, d->type, d->ptr, d->type_name);
             if (s->arr > 0) s->size *= s->arr;
             s->is_global = 1; s->offset = 0;

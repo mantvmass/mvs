@@ -405,6 +405,17 @@ A `dyn Trait` is 16 bytes: the data pointer plus a pointer to a per-(Type, Trait
 `&value` of a non-implementing struct is a compile error. Trait objects cannot be compared,
 used as conditions, or passed to extern C.
 
+A trait object is written `&value` everywhere: in a `let`, in a parameter, in a
+return. A **variadic** trait slice (`items: ...dyn Shape`) additionally accepts
+a plain value, which it copies into the slice: that is what lets `fmt.outf`
+take literals and temporaries. Both spellings mean the same thing there.
+
+```txt
+func total(items: ...dyn Shape) -> i64 { ... }
+total(&sq, &re);      // pointers: stored as they are
+total(sq, re);        // values: copied into the slice
+```
+
 #### Multiple bounds: `<T: A + B>` and `where`
 
 ```txt
@@ -464,6 +475,26 @@ struct Op { name: str; fn: func(i32, i32) -> i32; }   // store as a field (dispa
 let plus: Op = Op { name: "plus", fn: add };
 io.out("{}", plus.fn(5, 6));        // 11
 ```
+
+A function value can live anywhere a value can, and any expression that
+evaluates to one can be called directly:
+
+```txt
+let table: [func(i64, i64) -> i64; 2] = [add, mul];
+io.out("{}", table[i](3, 4));            // element of an array
+
+let g_op: func(i64, i64) -> i64 = add;   // a global holds one too
+
+func chooser(plus: bool) -> func(i64, i64) -> i64 {   // returned from a function
+    if (plus) { return add; }
+    return mul;
+}
+io.out("{}", chooser(true)(4, 5));       // called on the spot
+io.out("{}", ops.get(0).op(8, 9));       // through a container and a field
+```
+
+A function-pointer type cannot be a generic argument (`Vec<func(i64) -> i64>`);
+put it in a struct and use `Vec<That>`.
 
 Returning a struct through a function pointer works (uses sret), and it works with generics. The emitted
 code is `lea rax, [rel <label>]` for the value and `call rax` for the call (see 6.2).
@@ -749,11 +780,31 @@ if (r.is_ok()) { io.out("{}", r.unwrap()); }  // unwrap aborts on the wrong side
 
 Methods: `is_some`/`is_none`/`unwrap`/`unwrap_or` on Option;
 `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` on Result.
-Limits (v1): type arguments must be primitives or named structs (no pointers,
-arrays, or function types), max 4 parameters, and `impl Trait for Vec<T>` is
-not supported yet. Methods are instantiated EAGERLY: every method of an
-instantiated struct must typecheck for that instance (Rust only checks the
-methods you call), so keep type-specific methods on their own structs.
+
+A type parameter is inferred from the arguments, including through a composite
+parameter, and the expected type fills in what the arguments cannot:
+
+```txt
+func head<T>(v: Vec<T>) -> T { return v.get(0); }   // T comes from Vec<T>
+func unwrap_or<T>(o: Option<T>, dflt: T) -> T { ... }
+
+let vs: Vec<str> = Vec<str>::new();
+vs.push("hi");
+io.out("{}", head(vs));                  // T = str, from the argument's type
+io.out("{}", unwrap_or(None(), "b"));    // T = str, from the OTHER argument
+let o: Option<u16> = Some(400);          // T = u16, from the declared type
+```
+
+Type arguments may be primitives, named structs, or **pointers**
+(`Vec<*Node>`, `Option<*u8>`, `HashMap<str, *Node>`). They may not be trait
+objects or function-pointer types, because those are not plain values: wrap
+them in a one-field struct and use that (`struct Cell { s: dyn Shape; }` then
+`Vec<Cell>`), which is what the error message tells you to do. Other limits:
+max 4 parameters, and `impl Trait for Vec<T>` is not supported yet. Methods are
+instantiated EAGERLY: every method of an instantiated struct must typecheck for
+that instance (Rust only checks the methods you call), so keep type-specific
+methods on their own structs. Finally, a generic function has no address of its
+own: `None` alone is an error, write `None()` or `None<i64>()`.
 
 ### 4.16 Threads + Mutex (std/thread, std/sync)
 
@@ -1326,8 +1377,8 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 ### struct / functions
 
 - A struct literal with a nested struct field accepts only a literal/lvalue.
-- A bare struct **literal** can't be passed as an argument (use a temp), but a struct **result from a function**
-  works as an rvalue (`g(make())`, `make().field`, `make().method()`, materialized into a temp slot).
+- A struct **literal** and a struct **result from a function** both work as rvalues (`g(P { x: 1 })`,
+  `g(make())`, `make().field`, `make().method()`, materialized into a temp slot).
 - **Generic methods** (`impl` with `<T>`) aren't supported; use a generic function.
 - Max 64 struct fields; functions/symbols have limits (see `MAX_*` in `common.h`).
 

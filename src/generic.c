@@ -60,6 +60,27 @@ static int gs_split(const char *cname, char *base, size_t bn, char *args[4]);
  * decl_name "Option<V>" + method of HashMap<K,V> + receiver "HashMap<i64,str>"
  * yields "Option<str>" (and a bare "V" yields "str"). Returns a fresh string,
  * or NULL when nothing changes. */
+/* Canonical generic arguments carry their pointer depth as leading stars
+ * ("*Node"). Peel them off, advancing s to the base name. */
+static int canon_stars(const char **s) {
+    int n = 0;
+    while (**s == '*') { n++; (*s)++; }
+    return n;
+}
+
+/* Apply a canonical type text to a CType: stars add to the pointer depth, the
+ * rest names a primitive or a struct. Takes ownership of txt. */
+static void ctype_from_canon(CType *out, char *txt) {
+    const char *s = txt;
+    int stars = canon_stars(&s);
+    DataType prim = datatype_from_name(s);
+    out->ptr += stars;
+    if (prim != TYPE_UNKNOWN) { out->base = prim; out->sname = NULL; free(txt); return; }
+    out->base = TYPE_STRUCT;
+    if (stars > 0) { char *b = strdup(s); free(txt); out->sname = b; }
+    else out->sname = txt;
+}
+
 static char *spec_type_name(const char *decl_name, Node *tmpl_method, const char *recv_canon) {
     char base[128];
     char *args[4];
@@ -76,10 +97,13 @@ static char *spec_type_name(const char *decl_name, Node *tmpl_method, const char
         CType ts[4];
         int nb = 0;
         for (int i = 0; i < tmpl_method->ngen && i < nargs; i++) {
-            DataType p = datatype_from_name(args[i]);
+            const char *an = args[i];
+            int aptr = 0;
+            while (*an == '*') { aptr++; an++; }        /* Vec<*Node> binds T = *Node */
+            DataType p = datatype_from_name(an);
             if (p != TYPE_UNKNOWN) { ts[nb].base = p; ts[nb].sname = NULL; }
-            else { ts[nb].base = TYPE_STRUCT; ts[nb].sname = args[i]; }
-            ts[nb].ptr = 0; ts[nb].sig = NULL; ts[nb].arr = 0;
+            else { ts[nb].base = TYPE_STRUCT; ts[nb].sname = (char *)an; }
+            ts[nb].ptr = aptr; ts[nb].sig = NULL; ts[nb].arr = 0;
             bm[nb].name = tmpl_method->gen[i];
             bm[nb].t = ts[nb];
             bm[nb].is_const = 0; bm[nb].decl = NULL; bm[nb].used = 0;
@@ -202,11 +226,7 @@ static int struct_field_type(Node *prog, const char *sname, const char *field, C
                         /* the field's type may BE a parameter (T) or mention one
                          * (Option<T>): specialize it with this instance's arguments */
                         char *spec = spec_type_name(f->type_name, d, sname);
-                        if (spec) {
-                            DataType prim = datatype_from_name(spec);
-                            if (prim != TYPE_UNKNOWN) { out->base = prim; out->sname = NULL; }
-                            else out->sname = spec;
-                        }
+                        if (spec) ctype_from_canon(out, spec);
                     }
                     for (int a = 0; a < nargs; a++) free(args[a]);
                     return 1;
@@ -376,11 +396,7 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
                      * HashMap<i64,str>::get declares Option<V> -> Option<str> */
                     if (recv_canon && best->ngen > 0 && ct.base == TYPE_STRUCT && ct.sname) {
                         char *spec = spec_type_name(ct.sname, best, recv_canon);
-                        if (spec) {
-                            DataType prim = datatype_from_name(spec);
-                            if (prim != TYPE_UNKNOWN) { ct.base = prim; ct.sname = NULL; }
-                            else ct.sname = spec;
-                        }
+                        if (spec) ctype_from_canon(&ct, spec);
                     }
                     return ct;
                 }
@@ -423,12 +439,19 @@ static void type_code(CType t, char *buf) {
 }
 
 /* The canonical text of a bound type for use INSIDE a composite generic name,
- * e.g. T=i64 -> "i64", T=String -> "String". Pointer/func bindings cannot appear
- * inside generic argument lists (the parser rejects them), so those return NULL. */
-static const char *bind_canon(CType t) {
-    if (t.ptr > 0 || t.base == TYPE_FUNC || t.base == TYPE_DYN) return NULL;
-    if (t.base == TYPE_STRUCT) return t.sname;
-    return datatype_name(t.base);
+ * e.g. T=i64 -> "i64", T=String -> "String", T=*Node -> "*Node". Function and
+ * trait-object bindings have no canonical text (the parser rejects them as
+ * generic arguments), so those return NULL. The text is written into buf. */
+static const char *bind_canon(CType t, char *buf, size_t bn) {
+    if (t.base == TYPE_FUNC || t.base == TYPE_DYN) return NULL;
+    const char *base = t.base == TYPE_STRUCT ? t.sname : datatype_name(t.base);
+    if (!base) return NULL;
+    if (t.ptr <= 0) return base;
+    if ((size_t)t.ptr + strlen(base) + 1 >= bn) return NULL;
+    int k = 0;
+    while (k < t.ptr) buf[k++] = '*';
+    strcpy(buf + k, base);
+    return buf;
 }
 
 /* Textually substitute generic parameter names inside a composite type name:
@@ -443,9 +466,10 @@ static int subst_in_cname(const char *src, Bind *gmap, int ngmap, char *out, siz
                    (*e >= '0' && *e <= '9') || *e == '_') e++;
             size_t idl = (size_t)(e - s);
             const char *rep = NULL;
+            char repbuf[160];
             for (int i = 0; i < ngmap; i++)
                 if (strlen(gmap[i].name) == idl && strncmp(gmap[i].name, s, idl) == 0) {
-                    rep = bind_canon(gmap[i].t);
+                    rep = bind_canon(gmap[i].t, repbuf, sizeof(repbuf));
                     break;
                 }
             if (rep) {
@@ -507,7 +531,8 @@ static void substitute(Node *n, Bind *gmap, int ngmap) {
         if (!n->gen[i]) continue;
         for (int g = 0; g < ngmap; g++)
             if (strcmp(n->gen[i], gmap[g].name) == 0) {
-                const char *rep = bind_canon(gmap[g].t);
+                char repbuf[160];
+                const char *rep = bind_canon(gmap[g].t, repbuf, sizeof(repbuf));
                 if (rep) { free(n->gen[i]); n->gen[i] = strdup(rep); }
                 break;
             }
@@ -612,10 +637,12 @@ static char *de_subst_ptype(const char *src, Node *edecl, char *args[4], int nar
         CType ts[4];
         int nb = 0;
         for (int i = 0; i < edecl->ngen && i < nargs; i++) {
-            DataType p = datatype_from_name(args[i]);
+            const char *an = args[i];
+            int aptr = canon_stars(&an);
+            DataType p = datatype_from_name(an);
             if (p != TYPE_UNKNOWN) { ts[nb].base = p; ts[nb].sname = NULL; }
-            else { ts[nb].base = TYPE_STRUCT; ts[nb].sname = args[i]; }
-            ts[nb].ptr = 0; ts[nb].sig = NULL; ts[nb].arr = 0;
+            else { ts[nb].base = TYPE_STRUCT; ts[nb].sname = (char *)an; }
+            ts[nb].ptr = aptr; ts[nb].sig = NULL; ts[nb].arr = 0;
             bm[nb].name = edecl->gen[i];
             bm[nb].t = ts[nb];
             nb++;
@@ -633,19 +660,14 @@ static void de_bind_type(Node *bd, Node *pt, Node *edecl, char *args[4], int nar
     bd->sig = pt->sig ? node_clone(pt->sig) : NULL;
     if (pt->type == TYPE_STRUCT && pt->type_name && edecl->ngen > 0) {
         char *txt = de_subst_ptype(pt->type_name, edecl, args, nargs);
-        DataType p = datatype_from_name(txt);
-        if (p != TYPE_UNKNOWN && bd->ptr == 0) {
-            bd->type = p;
-            bd->type_name = NULL;
-            free(txt);
-        } else if (p != TYPE_UNKNOWN) {          /* pointer to a primitive: *T with T=i64 */
-            bd->type = p;
-            bd->type_name = NULL;
-            free(txt);
-        } else {
-            bd->type = TYPE_STRUCT;
-            bd->type_name = txt;
-        }
+        /* the payload text may be a primitive, a struct, or either behind stars
+         * (Some(p) on an Option<*Node> binds p as a *Node) */
+        CType ct = { TYPE_UNKNOWN, bd->ptr, NULL, NULL, 0 };
+        ctype_from_canon(&ct, txt);
+        bd->type = ct.base;
+        bd->ptr = ct.ptr;
+        bd->type_name = ct.base == TYPE_STRUCT ? ct.sname : NULL;
+        if (ct.base != TYPE_STRUCT) free(ct.sname);
         return;
     }
     bd->type = pt->type;
@@ -1170,6 +1192,7 @@ static void gs_mangle(const char *cname, char *out, size_t on) {
     for (const char *s = cname; *s && o + 3 < on; s++) {
         if (*s == '<') { out[o++] = '_'; out[o++] = '_'; }
         else if (*s == ',') out[o++] = '_';
+        else if (*s == '*') out[o++] = 'p';     /* Vec<*Node> -> Vec__pNode */
         else if (*s == '>') { /* dropped */ }
         else out[o++] = *s;
     }
@@ -1217,6 +1240,7 @@ static void gs_instantiate(Node *prog, const char *cname, char *out_mangled, siz
 static CType gs_text_type(Node *prog, const char *text, int *made,
                           const char *file, int line, int col) {
     CType t = { TYPE_UNKNOWN, 0, NULL, NULL, 0 };
+    while (*text == '*') { t.ptr++; text++; }       /* Vec<*Node>: T = *Node */
     DataType prim = datatype_from_name(text);
     if (prim != TYPE_UNKNOWN) { t.base = prim; return t; }
     t.base = TYPE_STRUCT;
@@ -1394,6 +1418,89 @@ static int unify_ret_with_expected(Node *prog, Node *tmpl, const char *expect_sn
     return bound;
 }
 
+/* Structurally unify a DECLARED type name that may mention generic parameters
+ * (T, Vec<T>, HashMap<K,V>, Vec<Option<T>>) with a CONCRETE canonical name
+ * (i64, Vec<i64>, HashMap<str,Slot>, Vec<Option<*Node>>), binding every
+ * parameter the shape determines. Parameters already in `bound` keep their
+ * binding: the first parameter position that determines one wins. Returns the
+ * bitmask of parameters bound by this call. */
+static int unify_cname(Node *prog, const char *decl, const char *conc, Node *tmpl,
+                       Bind *gmap, int bound, int *made, Node *at) {
+    if (!decl || !conc) return 0;
+    int got = 0;
+    /* stars must line up: a *T parameter against a *Node argument leaves T = Node */
+    while (*decl == '*' && *conc == '*') { decl++; conc++; }
+    for (int gi = 0; gi < tmpl->ngen; gi++) {
+        if (!tmpl->gen[gi] || strcmp(decl, tmpl->gen[gi]) != 0) continue;
+        if (bound & (1 << gi)) return 0;
+        gmap[gi].name = tmpl->gen[gi];
+        gmap[gi].t = gs_text_type(prog, conc, made, at->file, at->line, at->col);
+        gmap[gi].is_const = 0; gmap[gi].decl = NULL; gmap[gi].used = 0;
+        return 1 << gi;
+    }
+    if (!strchr(decl, '<') || !strchr(conc, '<')) return 0;
+    char dbase[128], cbase[128];
+    char *dargs[4], *cargs[4];
+    int dn = gs_split(decl, dbase, sizeof(dbase), dargs);
+    int cn = gs_split(conc, cbase, sizeof(cbase), cargs);
+    if (dn > 0 && dn == cn && strcmp(dbase, cbase) == 0)
+        for (int i = 0; i < dn; i++)
+            got |= unify_cname(prog, dargs[i], cargs[i], tmpl, gmap, bound | got, made, at);
+    for (int i = 0; i < dn; i++) free(dargs[i]);
+    for (int i = 0; i < cn; i++) free(cargs[i]);
+    return got;
+}
+
+/* The type expected of argument `argi` of a call to a GENERIC function, worked
+ * out from the other arguments: in unwrap_or<T>(o: Option<T>, dflt: T) the
+ * second argument determines T, so the first one is expected to be an
+ * Option<str> and a bare `None` there knows what to become. Returns NULL unless
+ * every parameter of the template is determined by the other arguments. */
+static const char *generic_param_expect(Node *prog, Node *call, Node *tmpl, int argi,
+                                        Bind *map, int nmap, char *buf, size_t bufn) {
+    if (tmpl->ngen <= 0 || tmpl->ngen > 4 || argi >= tmpl->nitems) return NULL;
+    Node *pp = tmpl->items[argi];
+    if (pp->type != TYPE_STRUCT || !pp->type_name || pp->ptr != 0) return NULL;
+
+    Bind gmap[4];
+    CType none = { TYPE_UNKNOWN, 0, NULL, NULL, 0 };
+    int bound = 0, made = 0;
+    for (int gi = 0; gi < tmpl->ngen; gi++) {
+        gmap[gi].name = tmpl->gen[gi]; gmap[gi].t = none;
+        gmap[gi].is_const = 0; gmap[gi].decl = NULL; gmap[gi].used = 0;
+    }
+    for (int pi = 0; pi < tmpl->nitems && pi < call->nitems; pi++) {
+        if (pi == argi) continue;
+        Node *q = tmpl->items[pi];
+        if (q->type != TYPE_STRUCT || !q->type_name) continue;
+        CType at = infer(prog, call->items[pi], map, nmap);
+        if (at.base == TYPE_UNKNOWN) continue;
+        int gi = -1;
+        for (int g = 0; g < tmpl->ngen; g++)
+            if (tmpl->gen[g] && strcmp(q->type_name, tmpl->gen[g]) == 0) { gi = g; break; }
+        if (gi >= 0) {
+            if (bound & (1 << gi)) continue;
+            gmap[gi].t = at;
+            gmap[gi].t.ptr = at.ptr - q->ptr; if (gmap[gi].t.ptr < 0) gmap[gi].t.ptr = 0;
+            bound |= 1 << gi;
+            continue;
+        }
+        if (!strchr(q->type_name, '<') || at.base != TYPE_STRUCT || !at.sname) continue;
+        const char *conc = canon_of_instance(prog, at.sname);
+        if (conc) bound |= unify_cname(prog, q->type_name, conc, tmpl, gmap, bound, &made, call);
+    }
+    if (bound != (1 << tmpl->ngen) - 1) return NULL;        /* something is still open */
+    if (!strchr(pp->type_name, '<')) {                       /* the parameter IS T */
+        for (int gi = 0; gi < tmpl->ngen; gi++)
+            if (tmpl->gen[gi] && strcmp(pp->type_name, tmpl->gen[gi]) == 0) {
+                const char *c = bind_canon(gmap[gi].t, buf, bufn);
+                return (c && c != buf) ? c : (c ? buf : NULL);
+            }
+        return NULL;
+    }
+    return subst_in_cname(pp->type_name, gmap, tmpl->ngen, buf, bufn) ? buf : NULL;
+}
+
 /* The struct type expected of argument `argi` of this call, or NULL when there
  * is none to be had. For a method on a generic instance the declared parameter
  * type is specialized for the receiver, so Vec<Option<u8>>::push expects an
@@ -1405,6 +1512,12 @@ static const char *call_param_expect(Node *prog, Node *call, int argi, Bind *map
     Node *fn = NULL;
     const char *recv_canon = NULL;
     if (callee->kind == ND_IDENT) {
+        /* a generic callee: the other arguments may pin this one's type down */
+        Node *tmpl = find_template(prog, callee->name);
+        if (tmpl && callee->ngen == 0) {
+            const char *e = generic_param_expect(prog, call, tmpl, argi, map, nmap, buf, bufn);
+            if (e) return e;
+        }
         for (int i = 0; i < prog->nitems; i++) {
             Node *d = prog->items[i];
             if (d->kind != ND_FUNC || d->is_extern || d->is_method || d->ngen != 0) continue;
@@ -1575,22 +1688,36 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                 }
                 *made += gmade;
             } else {
-            /* Infer each generic parameter's type from the arguments */
+            /* Infer each generic parameter from the arguments. Unbound parameters
+             * stay i64, which is what an untyped integer literal means. */
+            int bound = 0;
             for (int gi = 0; gi < tmpl->ngen; gi++) {
-                CType concrete = { TYPE_I64, 0, NULL, NULL, 0 };
-                /* Find the first parameter whose type refers to this generic param */
-                for (int pi = 0; pi < tmpl->nitems && pi < n->nitems; pi++) {
-                    Node *pp = tmpl->items[pi];
-                    if (pp->type == TYPE_STRUCT && pp->type_name &&
-                        strcmp(pp->type_name, tmpl->gen[gi]) == 0) {
-                        CType at = infer(prog, n->items[pi], map, *nmap);
-                        if (at.arr > 0) { at.arr = 0; at.ptr++; }   /* [T; N] decays to *T for inference */
-                        concrete.base = at.base; concrete.sname = at.sname; concrete.sig = at.sig;
-                        concrete.ptr = at.ptr - pp->ptr; if (concrete.ptr < 0) concrete.ptr = 0;
-                        break;
-                    }
+                CType dflt = { TYPE_I64, 0, NULL, NULL, 0 };
+                gmap[gi].name = tmpl->gen[gi]; gmap[gi].t = dflt;
+                gmap[gi].is_const = 0; gmap[gi].decl = NULL; gmap[gi].used = 0;
+            }
+            for (int pi = 0; pi < tmpl->nitems && pi < n->nitems; pi++) {
+                Node *pp = tmpl->items[pi];
+                if (pp->type != TYPE_STRUCT || !pp->type_name) continue;
+                int gi = -1;
+                for (int g = 0; g < tmpl->ngen; g++)
+                    if (tmpl->gen[g] && strcmp(pp->type_name, tmpl->gen[g]) == 0) { gi = g; break; }
+                if (gi >= 0) {                       /* the parameter IS the type: f<T>(x: T) */
+                    if (bound & (1 << gi)) continue;
+                    CType at = infer(prog, n->items[pi], map, *nmap);
+                    if (at.arr > 0) { at.arr = 0; at.ptr++; }   /* [T; N] decays to *T for inference */
+                    gmap[gi].t.base = at.base; gmap[gi].t.sname = at.sname; gmap[gi].t.sig = at.sig;
+                    gmap[gi].t.ptr = at.ptr - pp->ptr; if (gmap[gi].t.ptr < 0) gmap[gi].t.ptr = 0;
+                    bound |= 1 << gi;
+                    continue;
                 }
-                gmap[gi].name = tmpl->gen[gi]; gmap[gi].t = concrete;
+                /* the parameter MENTIONS the type: f<T>(v: Vec<T>), f<K,V>(m: HashMap<K,V>).
+                 * Match the declared shape against the argument's canonical name */
+                if (!strchr(pp->type_name, '<')) continue;
+                CType at = infer(prog, n->items[pi], map, *nmap);
+                if (at.base != TYPE_STRUCT || !at.sname) continue;
+                const char *conc = canon_of_instance(prog, at.sname);
+                if (conc) bound |= unify_cname(prog, pp->type_name, conc, tmpl, gmap, bound, made, n);
             }
             /* the expected type wins over argument inference for the parameters
              * it determines: `let o: Option<u16> = Some(400)` must bind T = u16,
@@ -2638,7 +2765,10 @@ static void tc_check(TcCtx *c, Node *n) {
                 for (int i = fixed; i < n->nitems; i++) {  /* extras: must implement the trait */
                     CType at = infer(c->prog, n->items[i], c->map, *c->nmap);
                     const char *tn = NULL;
-                    if (at.ptr == 0 && at.arr == 0) {
+                    /* a value is copied into the slice; &value is stored as-is.
+                     * Both spellings are accepted so a trait object is written
+                     * the same way here as in a dyn parameter or a dyn let */
+                    if (at.arr == 0 && (at.ptr == 0 || (at.ptr == 1 && at.base != TYPE_DYN))) {
                         if (at.base == TYPE_DYN) tn = (at.sname && trait && strcmp(at.sname, trait) == 0) ? at.sname : NULL;
                         else if (at.base == TYPE_STRUCT) tn = at.sname;
                         else if (at.base != TYPE_FUNC && at.base != TYPE_VOID && at.base != TYPE_UNKNOWN)
@@ -2701,8 +2831,58 @@ static void tc_check(TcCtx *c, Node *n) {
     /* note: ND_VAR_DECL is handled in the switch above (checks the init + adds the variable to scope) */
 }
 
+/* A generic function has no address of its own: only its instances do. Using the
+ * bare name as a value (passing `None` instead of `None()`) would otherwise be
+ * read as a function pointer and typed i64, which reports a baffling error far
+ * from the mistake. Report it where it is written instead. */
+static void tc_collect_names(Node *n, const char **names, int *nn, int cap) {
+    if (!n || *nn >= cap) return;
+    if ((n->kind == ND_VAR_DECL || n->kind == ND_PARAM) && n->name) names[(*nn)++] = n->name;
+    Node *kids[9] = { n->lhs, n->rhs, n->operand, n->cond, n->then_branch,
+                      n->else_branch, n->init, n->step, n->body };
+    for (int i = 0; i < 9; i++) tc_collect_names(kids[i], names, nn, cap);
+    for (int i = 0; i < n->nitems; i++) tc_collect_names(n->items[i], names, nn, cap);
+}
+
+static void tc_no_bare_templates(Node *prog, Node *n, int *errc,
+                                 const char **shadow, int nshadow) {
+    if (!n) return;
+    Node *skip = (n->kind == ND_CALL && n->operand && n->operand->kind == ND_IDENT) ? n->operand : NULL;
+    if (n->kind == ND_IDENT && n->name && n->ngen == 0 && find_template(prog, n->name)) {
+        for (int i = 0; i < nshadow; i++)      /* a variable of that name wins */
+            if (shadow[i] && strcmp(shadow[i], n->name) == 0) return;
+        diag_print(n->file, n->line, n->col, "error",
+                   "'%s' is a generic function, so the bare name is not a value", n->name);
+        diag_help("call it ('%s(...)'), or name the type ('%s<i64>()')", n->name, n->name);
+        (*errc)++;
+        return;
+    }
+    Node *kids[9] = { n->lhs, n->rhs, n->operand, n->cond, n->then_branch,
+                      n->else_branch, n->init, n->step, n->body };
+    for (int i = 0; i < 9; i++)
+        if (kids[i] && kids[i] != skip) tc_no_bare_templates(prog, kids[i], errc, shadow, nshadow);
+    for (int i = 0; i < n->nitems; i++)
+        tc_no_bare_templates(prog, n->items[i], errc, shadow, nshadow);
+}
+
 int typecheck(Node *prog) {
     int errc = 0;
+    {   /* names that a generic function could be shadowed by: globals, then the
+         * function's own parameters and locals */
+        const char *shadow[512]; int nshadow = 0;
+        for (int i = 0; i < prog->nitems; i++)
+            if (prog->items[i]->kind == ND_VAR_DECL && prog->items[i]->name && nshadow < 512)
+                shadow[nshadow++] = prog->items[i]->name;
+        int nglob = nshadow;
+        for (int i = 0; i < prog->nitems; i++) {
+            Node *f = prog->items[i];
+            if (f->kind != ND_FUNC || !f->body || f->ngen != 0) continue;
+            nshadow = nglob;
+            for (int j = 0; j < f->nitems; j++) tc_collect_names(f->items[j], shadow, &nshadow, 512);
+            tc_collect_names(f->body, shadow, &nshadow, 512);
+            tc_no_bare_templates(prog, f->body, &errc, shadow, nshadow);
+        }
+    }
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
         if (f->kind == ND_FUNC && f->body && f->ngen == 0) {

@@ -155,7 +155,13 @@ as the Rust-style path separator) · GENERIC ENUMS + match phase 2 (bare pattern
 resolved from the scrutinee's type, match as an EXPRESSION in let/assign/return;
 the desugar is scope-aware and infers through generic instances) · `Option`/
 `Result` rewritten as REAL enums · `std/map` (`HashMap<K, V>`: open addressing,
-`get` returns `Option<V>`, i64 and str keys via `map_hash`/`map_eq` overloads).
+`get` returns `Option<V>`, i64 and str keys via `map_hash`/`map_eq` overloads) ·
+POINTERS as generic arguments (`Vec<*Node>`, `Option<*u8>`, canonical name keeps
+the stars, mangled `Vec__pNode`) · generic inference through a composite
+parameter (`head<T>(v: Vec<T>)`) and from a sibling argument
+(`unwrap_or(None(), "b")`) · function values in every position (global, array
+element, container field, returned and called on the spot) · `&value` accepted
+in a variadic trait slice, matching how a trait object is written everywhere else.
 
 **Dogfood:** `examples/10_json` is a real 1084-line program in MVS (JSON
 library + CLI). Run it before claiming a language change is ergonomic; it is

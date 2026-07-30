@@ -1,0 +1,10 @@
+//~ ERROR: cannot be a trait-object type
+// a trait object is a fat pointer, so it cannot be a generic argument;
+// the diagnostic points at the struct wrapper that does work
+import { Vec } from "std/vec";
+trait Shape { func area(self: *Self) -> i64; }
+func main() -> i8 {
+    let v: Vec<dyn Shape> = Vec<dyn Shape>::new();
+    v.drop();
+    return 0;
+}

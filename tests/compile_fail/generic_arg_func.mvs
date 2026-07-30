@@ -1,0 +1,8 @@
+//~ ERROR: cannot be a function-pointer type
+// same for a function-pointer type: wrap it in a struct
+import { Vec } from "std/vec";
+func main() -> i8 {
+    let v: Vec<func(i64) -> i64> = Vec<func(i64) -> i64>::new();
+    v.drop();
+    return 0;
+}
