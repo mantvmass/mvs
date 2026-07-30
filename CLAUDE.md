@@ -22,6 +22,12 @@ hand-written.
 ## Main commands
 
 ```powershell
+# fuzz + sanitizers (Linux/WSL; the CI job runs both on every push)
+#   gcc -g -O1 -fsanitize=address,undefined ... -o mvs_asan
+#   ASAN_OPTIONS=detect_leaks=0 ./mvs_asan test
+#   ASAN_OPTIONS=detect_leaks=0 MVS=./mvs_asan sh scripts/fuzz.sh 400
+# (leak detection is off on purpose: the compiler never frees its AST)
+
 # build the compiler
 make
 #   equivalent to: clang -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc `

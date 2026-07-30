@@ -464,6 +464,9 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
     return out;
 }
 
+/* runtime bounds checking (see common.h); main.c flips it off for --no-check */
+int mvs_bounds_checks = 1;
+
 /* ---------- reserving variable space on the stack ---------- */
 
 /* Add a local variable and assign its offset (slot rounded up to a multiple of 8 bytes); returns the offset.

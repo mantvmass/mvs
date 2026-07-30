@@ -175,6 +175,16 @@ static void gen_addr(Gen *g, Node *n) {
             }
             push_tmp(g);
             gen_expr(g, n->rhs);                                 /* rax = index */
+            /* bounds check for [T; N] with a non-constant index (constants are
+             * rejected at compile time). Unsigned compare, so a negative index
+             * fails too; out of range traps instead of touching memory */
+            if (mvs_bounds_checks && bt.arr > 0 && n->rhs->kind != ND_INT) {
+                int l = new_label(g);
+                fprintf(g->out, "    cmp rax, %d\n", bt.arr);
+                fprintf(g->out, "    jb .Lbc%d\n", l);
+                fprintf(g->out, "    ud2\n");                    /* index out of range */
+                fprintf(g->out, ".Lbc%d:\n", l);
+            }
             if (esz != 1) fprintf(g->out, "    imul rax, %d\n", esz);
             pop_tmp(g, "rcx");
             fprintf(g->out, "    add rax, rcx\n");

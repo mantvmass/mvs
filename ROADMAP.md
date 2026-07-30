@@ -81,6 +81,21 @@ generic call arguments (`none<i64>()`), `Option<T>`/`Result<T, E>` in std,
 `Vec<T>` (growable, bounds-checked, any element type),
 `io.out` width/precision specs (`{:8.2}`, `{:08}`, `{:04x}`).
 
+## Hardening (the road to production use)
+
+Done: runtime bounds checks on `[T; N]` indexing (trap on out-of-range,
+`--no-check` to opt out), a compiler fuzzer (`scripts/fuzz.sh`: mutated real
+sources, token soup, deep-nesting stress) and an ASan/UBSan CI job running both
+the suite and the fuzzer.
+
+Still open, roughly in order of value:
+
+- Debug info: DWARF line tables so a crash maps back to `.mvs` lines.
+- Integer overflow checks behind a flag (trap on signed overflow).
+- A larger real-program corpus written IN MVS (the strongest bug finder).
+- Register allocation to replace the stack machine (performance).
+- Deterministic release builds and a signed-artifact story.
+
 ## Tooling
 
 - Growing the `-O` peephole (today: safe two/three-line patterns on all three

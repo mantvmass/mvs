@@ -68,6 +68,7 @@ Build modes:
 | `mvs file.mvs --target arm64` | `.o` (AArch64) | link with the cross gcc, run under qemu |
 | `mvs file.mvs --nostd --target elf64` | `.o` (freestanding ELF) | GNU ld / GRUB multiboot OS dev |
 | `mvs file.mvs -O` | same, fewer instructions | peephole cleanup of the assembly (all targets) |
+| `mvs file.mvs --no-check` | same, no bounds checks | trust every array index (see section 4.2) |
 | `mvs test` | test report | run the golden suite from the repo root (no PowerShell needed) |
 | `mvs --version` | version string | |
 
@@ -174,6 +175,15 @@ Rules: a `[T; N]` lives on the stack (globals in `.bss`); a constant index out o
 compile error; the literal length must match N exactly; parameters cannot be arrays (pass `*T`,
 the array decays); whole-array assignment (`a = b`) is rejected, copy element by element.
 For dynamically-sized buffers use `malloc` + pointer arithmetic as before.
+
+**Bounds checking.** A NON-constant index into a `[T; N]` is checked at run time
+(the comparison is unsigned, so a negative index fails too). An out-of-range
+index TRAPS instead of touching memory: `ud2` on x86-64 (SIGILL), `brk #1` on
+AArch64 (SIGTRAP). A trap rather than a message keeps the check dependency-free,
+so it works identically hosted and under `--nostd`; buffered output written
+before the trap may be lost. Pass `--no-check` to drop the checks (the index is
+then trusted, C-style). Pointer indexing (`p[i]`) is never checked: a pointer
+carries no length.
 
 Integer literals may be written in decimal, hex, or binary; all are plain `TK_INT`
 tokens with the same 64-bit value:

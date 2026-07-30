@@ -181,6 +181,17 @@ static void gen_addr(Gen *g, Node *n) {
             }
             push_tmp(g);
             gen_expr(g, n->rhs);
+            /* bounds check for [T; N] with a non-constant index (constants are
+             * rejected at compile time). Unsigned compare, so a negative index
+             * fails too; out of range traps instead of touching memory */
+            if (mvs_bounds_checks && bt.arr > 0 && n->rhs->kind != ND_INT) {
+                int l = new_label(g);
+                fprintf(g->out, "    mov x9, #%d\n", bt.arr);
+                fprintf(g->out, "    cmp x0, x9\n");
+                fprintf(g->out, "    b.lo .Lbc%d\n", l);
+                fprintf(g->out, "    brk #1\n");                 /* index out of range */
+                fprintf(g->out, ".Lbc%d:\n", l);
+            }
             if (esz != 1) fprintf(g->out, "    mov x9, #%d\n    mul x0, x0, x9\n", esz);
             pop_tmp(g, "x1");
             fprintf(g->out, "    add x0, x0, x1\n");

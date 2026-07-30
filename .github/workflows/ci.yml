@@ -75,6 +75,32 @@ jobs:
             std/
             core/
 
+  # Memory safety of the COMPILER ITSELF: build with AddressSanitizer +
+  # UndefinedBehaviorSanitizer, run the whole suite under it, then fuzz with
+  # mutated sources, token soup, and deep-nesting stress. Any signal or
+  # sanitizer report is a compiler bug. Leak detection is off on purpose: the
+  # compiler is a short-lived process that never frees its AST.
+  sanitize-and-fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install NASM
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - name: Build with ASan + UBSan
+        run: gcc -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs_asan
+
+      - name: Run the test suite under the sanitizers
+        run: ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 ./mvs_asan test
+        env:
+          MVS_STD: std
+          MVS_CORE: core
+
+      - name: Fuzz the compiler under the sanitizers
+        run: ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 MVS=./mvs_asan sh scripts/fuzz.sh 400
+
   # AArch64 target: cross-compile every runnable example with --target arm64,
   # link with the cross gcc, RUN under qemu-aarch64, and diff stdout against
   # the same goldens as win64/elf64 (three ABIs, one behavior)

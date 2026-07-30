@@ -135,6 +135,13 @@ Node *find_func(Gen *g, const char *ns, const char *name);
 Sym  *find_var(Gen *g, const char *name);
 int   intern_string(Gen *g, const char *data, int len);
 
+/* Runtime bounds checking for [T; N] indexing with a non-constant index.
+ * 1 = emit a check that traps on an out-of-range index (the default; constant
+ * indices are already rejected at compile time), 0 = trust the program
+ * (`--no-check`). A trap is used instead of a message so the same code works
+ * hosted and under --nostd with no runtime dependency at all. */
+extern int mvs_bounds_checks;
+
 /* --- type system and struct layout --- */
 StructInfo *find_struct(Gen *g, const char *name);
 int   type_size(Gen *g, DataType base, int ptr, const char *sname);

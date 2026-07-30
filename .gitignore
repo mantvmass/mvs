@@ -28,3 +28,8 @@ _t/
 *~
 .DS_Store
 Thumbs.db
+
+# fuzzer reproducers (scripts/fuzz.sh writes these next to the repo root)
+fuzz-crash-*.mvs
+fuzz-san-*.mvs
+mvs_asan

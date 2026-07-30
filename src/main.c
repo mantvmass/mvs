@@ -20,6 +20,7 @@
 #include "module.h"
 #include "generic.h"
 #include "codegen.h"
+#include "arch/common.h"   /* mvs_bounds_checks (the --no-check switch) */
 #include "diag.h"
 
 #ifdef _WIN32
@@ -653,6 +654,7 @@ int main(int argc, char **argv) {
             "  -S            emit assembly (.asm) only, then stop\n"
             "  -c            emit an object file (.obj) only (for linking with C)\n"
             "  -O            peephole-optimize the generated assembly\n"
+            "  --no-check    drop the runtime bounds checks on [T; N] indexing\n"
             "  --nostd       freestanding mode: no std/C runtime/OS (emits .obj) - for OS dev\n"
             "  --target <t>  target: win64 (default), elf64 (x86-64 Linux), arm64 (AArch64 Linux)\n"
             "  --test-main   generate main() from the file's test_* functions (used by `mvs test`)\n"
@@ -675,6 +677,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "-S") == 0) only_asm = 1;
         else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--emit-obj") == 0) emit_obj = 1;
         else if (strcmp(argv[i], "-O") == 0) optimize = 1;
+        else if (strcmp(argv[i], "--no-check") == 0) mvs_bounds_checks = 0;
         else if (strcmp(argv[i], "--test-main") == 0) test_main = 1;
         else if (strcmp(argv[i], "--nostd") == 0) { nostd = 1; emit_obj = 1; } /* freestanding -> produce .obj */
         else if (strcmp(argv[i], "--keep") == 0) keep = 1;
