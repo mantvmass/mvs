@@ -20,7 +20,7 @@ extern func malloc(n: usize) -> *u8;
 extern func free(p: *u8) -> void;
 extern func memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 extern func strlen(s: str) -> usize;
-extern func sprintf(buf: *u8, fmt: str, v: i64) -> i32;
+extern func sprintf(buf: *u8, fmt: str) -> i32;   // variadic like printf: extras typed per call
 
 // String: heap buffer (null-terminated) + length + capacity
 struct String {
@@ -43,6 +43,28 @@ impl String {
         let buf: *u8 = malloc(32);
         sprintf(buf, "%lld", v);               // convert the number to decimal text
         return String { data: buf, len: strlen(buf), cap: 32 };
+    }
+
+    // associated function: unsigned integers (full u64 range)
+    func from_uint(v: u64) -> String {
+        let buf: *u8 = malloc(32);
+        sprintf(buf, "%llu", v);
+        return String { data: buf, len: strlen(buf), cap: 32 };
+    }
+
+    // associated function: floating point (printf's %f formatting, like io.out)
+    func from_float(v: f64) -> String {
+        let buf: *u8 = malloc(48);
+        sprintf(buf, "%f", v);
+        return String { data: buf, len: strlen(buf), cap: 48 };
+    }
+
+    // associated function: a single character
+    func from_char(c: char) -> String {
+        let buf: *u8 = malloc(2);
+        *buf = c as u8;
+        *(buf + 1) = 0;
+        return String { data: buf, len: 1, cap: 2 };
     }
 
     func len(self: *String) -> usize { return self.len; }

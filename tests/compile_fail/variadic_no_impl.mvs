@@ -1,0 +1,11 @@
+//~ ERROR: does not implement trait
+// a variadic extra must implement the slice's trait
+import { String } from "std/string";
+struct Plain { x: i32; }
+trait Show { func fmt(self: *Self) -> String; }
+func shout(args: ...dyn Show) -> void { let _n: usize = args_len; }
+func main() -> i8 {
+    let p: Plain = Plain { x: 1 };
+    shout(p);
+    return 0;
+}

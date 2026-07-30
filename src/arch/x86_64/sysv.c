@@ -323,13 +323,17 @@ static void gen_dyn_store(Gen *g, ExprType rhs_t, const char *trait) {
         fprintf(g->out, "    mov rdx, [rcx + 8]\n    mov [rax + 8], rdx\n");
         return;
     }
-    if (rhs_t.ptr == 1 && rhs_t.base == TYPE_STRUCT && rhs_t.sname && trait) {
-        g->need_vtables = 1;
-        fprintf(g->out, "    mov [rax], rcx\n");
-        fprintf(g->out, "    lea rdx, [rel mvs_vt_%s_%s]\n    mov [rax + 8], rdx\n", trait, rhs_t.sname);
-        return;
+    if (rhs_t.ptr == 1 && trait) {
+        /* pointer to a struct OR a primitive (impl Display for i64): pointee name = vtable key */
+        const char *tn = rhs_t.base == TYPE_STRUCT ? rhs_t.sname : datatype_name(rhs_t.base);
+        if (tn) {
+            g->need_vtables = 1;
+            fprintf(g->out, "    mov [rax], rcx\n");
+            fprintf(g->out, "    lea rdx, [rel mvs_vt_%s_%s]\n    mov [rax + 8], rdx\n", trait, tn);
+            return;
+        }
     }
-    fprintf(stderr, "codegen error: a dyn value can only come from another dyn or a pointer to an implementing struct\n");
+    fprintf(stderr, "codegen error: a dyn value can only come from another dyn or a pointer to an implementing type\n");
     g->had_error = 1;
 }
 
@@ -1351,11 +1355,18 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
             if (!target) target = find_func(g, "", callee->name);
             if (!target) { fprintf(stderr, "codegen error: undefined function '%s'\n", callee->name); g->had_error = 1; return; }
         } else if (callee->kind == ND_MEMBER) {
-            /* try interpreting it as a method call first: the receiver is an expression of struct type */
+            /* try interpreting it as a method call first: struct receivers use the struct's
+             * namespace; primitive receivers (impl Display for i64) use the type's name */
             ExprType bt = type_of(g, callee->operand);
             if (bt.base == TYPE_STRUCT && bt.sname) {
                 target = find_func(g, bt.sname, callee->name);  /* methods live in namespace = struct name */
                 if (target) { self_expr = callee->operand; self_is_ptr = (bt.ptr > 0); }
+            }
+            if (!target && bt.ptr == 0 && bt.base != TYPE_STRUCT && bt.base != TYPE_DYN &&
+                bt.base != TYPE_FUNC && bt.base != TYPE_VOID && bt.base != TYPE_UNKNOWN &&
+                (callee->operand->kind != ND_IDENT || find_var(g, callee->operand->name))) {
+                target = find_func(g, datatype_name(bt.base), callee->name);
+                if (target) { self_expr = callee->operand; self_is_ptr = 0; }
             }
             /* if it is not a method, interpret the base as a module namespace (e.g. net.TcpServer) */
             if (!target && callee->operand->kind == ND_IDENT)
@@ -1372,11 +1383,21 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
         fprintf(stderr, "codegen error: a struct-returning call must be assigned to a variable\n");
         g->had_error = 1; return;
     }
+    /* variadic MVS call: extra arguments are packed into dyn blobs on the caller's frame;
+     * the ABI itself sees only fixed args + a pointer to the blobs + their count */
+    int va_fixed = -1, va_extra = 0; long long va_base = 0;
+    if (!indirect && target && target->variadic && !target->is_extern && !self_expr) {
+        va_fixed = target->nitems - 2;
+        va_extra = n->nitems - va_fixed; if (va_extra < 0) va_extra = 0;
+        va_base = n->lhs ? n->lhs->int_val : 0;
+    }
+    int n_abi = va_fixed >= 0 ? va_fixed + 2 : n->nitems;
+
     /* full value order: [hidden sret pointer]?, [self if a method]?, then the actual arguments.
      * SysV AMD64: ints/pointers go in rdi,rsi,rdx,rcx,r8,r9 and floats in xmm0..7, each class
      * counted separately; overflow goes on the stack (no shadow space) */
     int nself = self_expr ? 1 : 0;
-    int total = n->nitems + nself + (has_sret ? 1 : 0);
+    int total = n_abi + nself + (has_sret ? 1 : 0);
     int arg_start0 = (has_sret ? 1 : 0) + nself;
     int poff0 = nself;
     static const char *gpr[6] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
@@ -1405,7 +1426,7 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
         push_tmp(g);
     }
     int poff = self_expr ? 1 : 0;  /* method: items[0] of sig is self */
-    for (int i = 0; i < n->nitems; i++) {
+    for (int i = 0; i < (va_fixed >= 0 ? va_fixed : n->nitems); i++) {
         gen_expr(g, n->items[i]);
         if (i + poff < sig->nitems) {     /* coerce int<->float to the parameter type (except varargs) */
             Node *pp = sig->items[i + poff];
@@ -1419,6 +1440,46 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
                 fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->items[i]->int_val);
             }
         }
+        push_tmp(g);
+    }
+    if (va_fixed >= 0) {
+        /* pack every extra argument into the reserved [blobs][spills] block, then push the
+         * slice pointer and the count as the last two ABI arguments */
+        const char *trait = sig->items[va_fixed]->type_name;
+        for (int k = 0; k < va_extra; k++) {
+            Node *arg = n->items[va_fixed + k];
+            ExprType at = type_of(g, arg);
+            int boff = (int)va_base - k * 16;                 /* this extra's blob */
+            int voff = (int)va_base - (va_extra + k) * 16;    /* this extra's value spill */
+            gen_expr(g, arg);
+            if (is_dyn(at.base, at.ptr)) {
+                fprintf(g->out, "    mov rcx, rax\n    lea rax, [rbp - %d]\n", boff);
+                gen_dyn_store(g, at, trait);                  /* copy an existing trait object */
+            } else if ((at.base == TYPE_STRUCT && at.ptr == 0) || is_i128(at.base, at.ptr)) {
+                /* address-as-value kinds: the value already IS a stable address */
+                g->need_vtables = 1;
+                fprintf(g->out, "    mov rcx, rax\n    lea rax, [rbp - %d]\n", boff);
+                fprintf(g->out, "    mov [rax], rcx\n");
+                fprintf(g->out, "    lea rdx, [rel mvs_vt_%s_%s]\n    mov [rax + 8], rdx\n",
+                        trait, at.sname ? at.sname : datatype_name(at.base));
+            } else {
+                /* scalar: spill the value so the blob has something to point at */
+                g->need_vtables = 1;
+                fprintf(g->out, "    mov rcx, rax\n");
+                fprintf(g->out, "    lea rax, [rbp - %d]\n", voff);
+                gen_store_typed(g, at.ptr > 0 ? TYPE_USIZE : at.base,
+                                type_size(g, at.base, at.ptr, at.sname));
+                fprintf(g->out, "    lea rcx, [rbp - %d]\n", voff);
+                fprintf(g->out, "    lea rax, [rbp - %d]\n", boff);
+                fprintf(g->out, "    mov [rax], rcx\n");
+                fprintf(g->out, "    lea rdx, [rel mvs_vt_%s_%s]\n    mov [rax + 8], rdx\n",
+                        trait, datatype_name(at.base));
+            }
+        }
+        if (va_extra) fprintf(g->out, "    lea rax, [rbp - %lld]\n", va_base);
+        else          fprintf(g->out, "    xor eax, eax\n");   /* empty slice: null + 0 */
+        push_tmp(g);
+        fprintf(g->out, "    mov rax, %d\n", va_extra);
         push_tmp(g);
     }
     /* indirect: evaluate the function address, push it as the last temp (topmost), load it for call rax later

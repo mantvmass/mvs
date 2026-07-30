@@ -1,0 +1,6 @@
+x = 42
+mixed: 7 hello true 2.500000
+point (3, 4) and {literal}
+no args here
+42
+(3, 4)

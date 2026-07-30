@@ -286,6 +286,12 @@ ExprType type_of(Gen *g, Node *n) {
                     }
                 }
                 if (bt.base == TYPE_STRUCT && bt.sname) f = find_func(g, bt.sname, callee->name); /* method */
+                /* primitive receiver method (impl Display for i64): namespace = the type's name;
+                 * only when the base is a real variable/expression, not a bare module name */
+                if (!f && bt.ptr == 0 && bt.base != TYPE_STRUCT && bt.base != TYPE_DYN &&
+                    bt.base != TYPE_FUNC && bt.base != TYPE_VOID && bt.base != TYPE_UNKNOWN &&
+                    (callee->operand->kind != ND_IDENT || find_var(g, callee->operand->name)))
+                    f = find_func(g, datatype_name(bt.base), callee->name);
                 if (!f && callee->operand->kind == ND_IDENT) f = find_func(g, callee->operand->name, callee->name);
             }
             if (f) { r.base = f->type; r.ptr = f->ptr; r.sname = f->type_name; }
@@ -515,6 +521,9 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
         } else if (callee && callee->kind == ND_MEMBER) {
             ExprType bt = type_of(g, callee->operand);
             if (bt.base == TYPE_STRUCT && bt.sname) { fn = find_func(g, bt.sname, callee->name); argoff = 1; }
+            /* namespace call (fmt.outf): resolve so variadic slice slots get reserved too */
+            if (!fn && callee->operand->kind == ND_IDENT && !find_var(g, callee->operand->name))
+                fn = find_func(g, callee->operand->name, callee->name);
         }
         if (fn && !fn->is_extern) {
             for (int i = 0; i < n->nitems && i + argoff < fn->nitems; i++) {
@@ -524,6 +533,19 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
                     if (!is_dyn(at.base, at.ptr))
                         n->items[i]->int_val = add_local(g, "$dynarg", TYPE_DYN, 0, 0, NULL, NULL, frame);
                 }
+            }
+        }
+        /* variadic call: reserve one block of [blobs: n*16][value spills: n*16]; the base
+         * offset is stashed in a synthetic ND_FRAMEREF hung off the call's unused lhs
+         * (extra-argument nodes can be literals whose int_val is their VALUE) */
+        if (fn && fn->variadic && !fn->is_extern && argoff == 0) {
+            int fixed = fn->nitems - 2;
+            int nextra = n->nitems - fixed;
+            if (nextra > 0 && !n->lhs) {
+                int base = add_local(g, "$va", TYPE_DYN, 0, 2 * nextra, NULL, NULL, frame);
+                Node *holder = node_new(ND_FRAMEREF, n->line);
+                holder->int_val = base;
+                n->lhs = holder;
             }
         }
     } else if (n->kind == ND_BINARY) {

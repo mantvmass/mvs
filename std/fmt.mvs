@@ -21,10 +21,35 @@
 import { String } from "std/string";
 
 extern func printf(fmt: str) -> i32;
+extern func putchar(c: i32) -> i32;
 
 // trait Display: a "printable" type must be able to build a String representing itself
 trait Display {
     func fmt(self: *Self) -> String;
+}
+
+// ---- Display for the primitive types (impl-on-primitive) ----
+// These let outf/println print any built-in value through the same trait machinery.
+
+impl Display for i8    { func fmt(self: *i8)    -> String { return String::from_int(*self as i64); } }
+impl Display for i16   { func fmt(self: *i16)   -> String { return String::from_int(*self as i64); } }
+impl Display for i32   { func fmt(self: *i32)   -> String { return String::from_int(*self as i64); } }
+impl Display for i64   { func fmt(self: *i64)   -> String { return String::from_int(*self); } }
+impl Display for isize { func fmt(self: *isize) -> String { return String::from_int(*self as i64); } }
+impl Display for u8    { func fmt(self: *u8)    -> String { return String::from_uint(*self as u64); } }
+impl Display for u16   { func fmt(self: *u16)   -> String { return String::from_uint(*self as u64); } }
+impl Display for u32   { func fmt(self: *u32)   -> String { return String::from_uint(*self as u64); } }
+impl Display for u64   { func fmt(self: *u64)   -> String { return String::from_uint(*self); } }
+impl Display for usize { func fmt(self: *usize) -> String { return String::from_uint(*self as u64); } }
+impl Display for f32   { func fmt(self: *f32)   -> String { return String::from_float(*self); } }
+impl Display for f64   { func fmt(self: *f64)   -> String { return String::from_float(*self); } }
+impl Display for str   { func fmt(self: *str)   -> String { return String::from(*self); } }
+impl Display for char  { func fmt(self: *char)  -> String { return String::from_char(*self); } }
+impl Display for bool  {
+    func fmt(self: *bool) -> String {
+        if (*self) { return String::from("true"); }
+        return String::from("false");
+    }
 }
 
 // print any value that impls Display (newline appended); generic with trait bound, static dispatch
@@ -39,4 +64,33 @@ func print<T: Display>(x: T) -> void {
     let s: String = x.fmt();
     printf("%s", s.as_str());
     s.drop();
+}
+
+// io.out as a LIBRARY: a pure-MVS formatted print. The {} placeholders are resolved
+// at run time by walking the format bytes and dispatching each packed argument
+// through its Display impl (the compiler wraps extras into a dyn slice; args_len
+// carries the count). {{ and }} print literal braces; a newline is appended.
+func outf(f: str, args: ...dyn Display) -> void {
+    let p: *u8 = f;
+    let ai: usize = 0;
+    let i: usize = 0;
+    while (p[i] != 0) {
+        if (p[i] == 123) {                                   // '{'
+            if (p[i + 1] == 123) { putchar(123); i = i + 2; continue; }
+            if (p[i + 1] == 125) {                           // "{}": the next argument
+                if (ai < args_len) {
+                    let s: String = args[ai].fmt();          // dynamic dispatch per value
+                    printf("%s", s.as_str());
+                    s.drop();
+                    ai = ai + 1;
+                }
+                i = i + 2;
+                continue;
+            }
+        }
+        if (p[i] == 125 && p[i + 1] == 125) { putchar(125); i = i + 2; continue; }
+        putchar(p[i] as i32);
+        i = i + 1;
+    }
+    putchar(10);
 }

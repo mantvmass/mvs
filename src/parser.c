@@ -791,6 +791,27 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
             param->name = strdup(p->cur.lexeme);
             advance(p);
             expect(p, TK_COLON, "expected ':' after parameter name");
+            /* variadic tail: `args: ...dyn Trait` collects extra call arguments as a slice.
+             * The parameter itself becomes a POINTER to the element blobs, and a hidden
+             * `<name>_len: usize` parameter carrying the count is appended after it. */
+            if (match(p, TK_ELLIPSIS)) {
+                param->variadic = 1;
+                fn->variadic = 1;
+                param->type = parse_type(p, &param->ptr, &param->type_name, &param->sig, NULL);
+                if (param->type != TYPE_DYN)
+                    error(p, "a variadic parameter must be a trait object (args: ...dyn Trait)");
+                param->ptr += 1;              /* the callee sees a pointer to the elements */
+                node_add_item(fn, param);
+                Node *plen = node_new(ND_PARAM, param->line);
+                char lname[256];
+                snprintf(lname, sizeof(lname), "%s_len", param->name ? param->name : "args");
+                plen->name = strdup(lname);
+                plen->type = TYPE_USIZE;
+                node_add_item(fn, plen);
+                if (!check(p, TK_RPAREN))
+                    error(p, "the variadic parameter must be the last parameter");
+                break;                        /* nothing may follow the variadic tail */
+            }
             param->type = parse_type(p, &param->ptr, &param->type_name, &param->sig, NULL); /* pass *T, not [T; N] */
             /* Default value: stored in the param's operand; call sites missing trailing
              * arguments get a clone of this expression (fill_default_args in generic.c) */
@@ -804,7 +825,7 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
         int seen_default = 0;
         for (int i = 0; i < fn->nitems; i++) {
             if (fn->items[i]->operand) seen_default = 1;
-            else if (seen_default) {
+            else if (seen_default && !fn->variadic) {
                 error(p, "parameter without a default follows a parameter with a default");
                 break;
             }
@@ -849,10 +870,12 @@ static Node *parse_impl(Parser *p) {
     char *first = NULL, *trait = NULL, *sname = NULL;
     if (!check(p, TK_IDENT)) error(p, "expected type/trait name after impl");
     else { first = strdup(p->cur.lexeme); advance(p); }
-    if (match(p, TK_FOR)) {                 /* impl Trait for Type */
+    if (match(p, TK_FOR)) {                 /* impl Trait for Type (structs AND primitives) */
         trait = first;
-        if (!check(p, TK_IDENT)) error(p, "expected type name after 'for'");
-        else { sname = strdup(p->cur.lexeme); advance(p); }
+        if (check(p, TK_IDENT) || is_type_token(p->cur.type)) {
+            sname = strdup(p->cur.lexeme);  /* a primitive keyword keeps its spelling, e.g. "i64" */
+            advance(p);
+        } else error(p, "expected a type name after 'for'");
     } else {                                /* impl Type */
         sname = first;
     }

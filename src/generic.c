@@ -234,7 +234,18 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
                             return ct;
                         }
                 }
-                if (bt.base == TYPE_STRUCT && bt.sname) scope = bt.sname;
+                /* primitive receiver (impl Display for i64): the namespace is the type's name.
+                 * A bare unresolved identifier stays a MODULE namespace (io.out), so the
+                 * primitive path only applies when the base is a real variable/expression. */
+                int prim_recv = 0;
+                if (bt.ptr == 0 && bt.base != TYPE_STRUCT && bt.base != TYPE_DYN &&
+                    bt.base != TYPE_FUNC && bt.base != TYPE_VOID && bt.base != TYPE_UNKNOWN) {
+                    if (callee->operand->kind != ND_IDENT) prim_recv = 1;
+                    else for (int i = nmap - 1; i >= 0; i--)
+                        if (strcmp(map[i].name, callee->operand->name) == 0) { prim_recv = 1; break; }
+                }
+                if (prim_recv) scope = datatype_name(bt.base);
+                else if (bt.base == TYPE_STRUCT && bt.sname) scope = bt.sname;
                 else if (callee->operand->kind == ND_IDENT) scope = callee->operand->name;
                 Node *best = NULL;
                 for (int i = 0; i < prog->nitems; i++) {
@@ -372,8 +383,12 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                 CType ct = gmap[gi].t;
                 char missing[128];
                 snprintf(missing, sizeof(missing), "%s", tmpl->gen_bound[gi]);
-                int ok = ct.base == TYPE_STRUCT && ct.sname &&
-                         type_impls_all(prog, ct.sname, tmpl->gen_bound[gi], missing, sizeof(missing));
+                /* the bound holder may be a struct OR a primitive (impl Display for i64) */
+                const char *bn = (ct.base == TYPE_STRUCT) ? ct.sname
+                               : (ct.ptr == 0 && ct.base != TYPE_DYN && ct.base != TYPE_FUNC &&
+                                  ct.base != TYPE_VOID && ct.base != TYPE_UNKNOWN)
+                                   ? datatype_name(ct.base) : NULL;
+                int ok = bn && type_impls_all(prog, bn, tmpl->gen_bound[gi], missing, sizeof(missing));
                 if (!ok) {
                     const char *tn = (ct.base == TYPE_STRUCT && ct.sname) ? ct.sname : datatype_name(ct.base);
                     diag_print(n->file, n->line, n->col, "error",
@@ -489,7 +504,7 @@ typedef struct { char *orig; Node *defs[16]; char sig[16][SIGCAP]; char catsig[1
 
 /* Is this function eligible for overloading (a plain global function) */
 static int ov_eligible(Node *f) {
-    return f->kind == ND_FUNC && f->body && f->ngen == 0 &&
+    return f->kind == ND_FUNC && f->body && f->ngen == 0 && !f->variadic &&
            !f->is_export && !f->is_method && !f->is_extern &&
            (f->ns == NULL || f->ns[0] == 0) && strcmp(f->name, "main") != 0;
 }
@@ -684,7 +699,7 @@ static void df_fill_call(Node *prog, Node *call, Bind *map, int nmap) {
             }
         }
     }
-    if (!fn || fn->ngen > 0) return;                 /* generic templates: types unresolved, skip */
+    if (!fn || fn->ngen > 0 || fn->variadic) return; /* generic/variadic: not default-fillable */
     int total = fn->nitems - argoff;
     int min = df_min_args(fn, argoff);
     if (call->nitems < min || call->nitems >= total) return;  /* wrong count: typecheck reports it */
@@ -782,7 +797,7 @@ static int tc_assignable(CType d, CType s) {
      * struct (the impl is verified at the assignment site); dyn converts to nothing else */
     if (d.ptr == 0 && d.base == TYPE_DYN) {
         if (s.ptr == 0 && s.base == TYPE_DYN) return d.sname && s.sname && strcmp(d.sname, s.sname) == 0;
-        return s.ptr == 1 && s.base == TYPE_STRUCT;
+        return s.ptr == 1;   /* pointer to struct OR primitive; the impl is verified separately */
     }
     if (s.ptr == 0 && s.base == TYPE_DYN) return 0;
     if (d.arr > 0 || s.arr > 0) {
@@ -923,14 +938,16 @@ static void tc_check_cond128(TcCtx *c, Node *cond) {
     }
 }
 
-/* When a dyn Trait target receives a pointer-to-struct, the struct must impl the trait */
+/* When a dyn Trait target receives a pointer, the pointee type (struct OR primitive)
+ * must impl the trait */
 static void tc_dyn_impl_check(TcCtx *c, Node *site, CType d, CType s) {
     if (!(d.ptr == 0 && d.base == TYPE_DYN) || !d.sname) return;
-    if (s.ptr == 1 && s.base == TYPE_STRUCT && s.sname &&
-        !type_impls_trait(c->prog, s.sname, d.sname)) {
+    if (s.ptr != 1) return;
+    const char *tn = s.base == TYPE_STRUCT ? s.sname : datatype_name(s.base);
+    if (tn && !type_impls_trait(c->prog, tn, d.sname)) {
         diag_print(site->file, site->line, site->col, "error",
-                   "type '%s' does not implement trait '%s'", s.sname, d.sname);
-        diag_help("add 'impl %s for %s { ... }' before storing it in a 'dyn %s'", d.sname, s.sname, d.sname);
+                   "type '%s' does not implement trait '%s'", tn, d.sname);
+        diag_help("add 'impl %s for %s { ... }' before storing it in a 'dyn %s'", d.sname, tn, d.sname);
         (*c->errc)++;
     }
 }
@@ -1222,11 +1239,19 @@ static void tc_check(TcCtx *c, Node *n) {
             }
         } else if (callee->kind == ND_MEMBER) {
             CType bt = infer(c->prog, callee->operand, c->map, *c->nmap);
-            if (bt.base == TYPE_STRUCT && bt.sname) {       /* a method call obj.m(...) */
+            /* primitive receiver (impl Display for i64): resolve by the type-name namespace,
+             * but only when the base is a real variable/expression (not a module name) */
+            const char *mns = NULL;
+            if (bt.base == TYPE_STRUCT && bt.sname) mns = bt.sname;
+            else if (bt.ptr == 0 && bt.base != TYPE_DYN && bt.base != TYPE_FUNC &&
+                     bt.base != TYPE_VOID && bt.base != TYPE_UNKNOWN &&
+                     (callee->operand->kind != ND_IDENT || tc_find(c, callee->operand->name)))
+                mns = datatype_name(bt.base);
+            if (mns) {                                      /* a method call obj.m(...) */
                 for (int i = 0; i < c->prog->nitems; i++) {
                     Node *d = c->prog->items[i];
                     if (d->kind == ND_FUNC && d->is_method && d->ngen == 0 && d->ns && callee->name &&
-                        strcmp(d->ns, bt.sname) == 0 && strcmp(d->name, callee->name) == 0) { fn = d; argoff = 1; break; }
+                        strcmp(d->ns, mns) == 0 && strcmp(d->name, callee->name) == 0) { fn = d; argoff = 1; break; }
                 }
             } else if (bt.ptr == 0 && bt.base == TYPE_DYN && bt.sname && callee->name) {
                 /* dynamic dispatch d.m(...): the method must exist in the trait; check
@@ -1245,7 +1270,51 @@ static void tc_check(TcCtx *c, Node *n) {
                 }
             }
         }
-        if (fn) {
+        if (fn && fn->variadic && argoff == 0) {
+            /* variadic function: fixed params, then any number of extras that must implement
+             * the variadic parameter's trait (they are wrapped into dyn blobs at the call site) */
+            int fixed = fn->nitems - 2;                    /* minus the slice param + hidden len */
+            const char *trait = fixed >= 0 ? fn->items[fixed]->type_name : NULL;
+            if (n->nitems < fixed) {
+                diag_print(n->file, n->line, n->col, "error",
+                           "function '%s' expects at least %d argument(s) but got %d",
+                           fn->name, fixed, n->nitems);
+                (*c->errc)++;
+            } else {
+                for (int i = 0; i < fixed; i++) {          /* fixed arguments: normal type check */
+                    Node *pp = fn->items[i];
+                    CType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 };
+                    CType at = infer(c->prog, n->items[i], c->map, *c->nmap);
+                    if (!tc_assignable(pt, at)) {
+                        char an[128], pn[128]; tc_name(at, an); tc_name(pt, pn);
+                        diag_print(n->items[i]->file, n->items[i]->line, n->items[i]->col, "error",
+                                   "argument %d to '%s': cannot pass '%s' where '%s' is expected",
+                                   i + 1, fn->name, an, pn);
+                        (*c->errc)++;
+                    }
+                }
+                for (int i = fixed; i < n->nitems; i++) {  /* extras: must implement the trait */
+                    CType at = infer(c->prog, n->items[i], c->map, *c->nmap);
+                    const char *tn = NULL;
+                    if (at.ptr == 0 && at.arr == 0) {
+                        if (at.base == TYPE_DYN) tn = (at.sname && trait && strcmp(at.sname, trait) == 0) ? at.sname : NULL;
+                        else if (at.base == TYPE_STRUCT) tn = at.sname;
+                        else if (at.base != TYPE_FUNC && at.base != TYPE_VOID && at.base != TYPE_UNKNOWN)
+                            tn = datatype_name(at.base);
+                    }
+                    int ok = tn && (at.base == TYPE_DYN || type_impls_trait(c->prog, tn, trait));
+                    if (!ok) {
+                        char an[128]; tc_name(at, an);
+                        diag_print(n->items[i]->file, n->items[i]->line, n->items[i]->col, "error",
+                                   "argument %d to '%s': type '%s' does not implement trait '%s'",
+                                   i + 1, fn->name, an, trait ? trait : "?");
+                        diag_help("add 'impl %s for %s { ... }' (values are passed by reference into the variadic slice)",
+                                  trait ? trait : "?", an);
+                        (*c->errc)++;
+                    }
+                }
+            }
+        } else if (fn) {
             int total = fn->nitems - argoff;
             int min = df_min_args(fn, argoff);
             if (n->nitems != total) {
@@ -1378,7 +1447,13 @@ static void apply_trait_defaults(Node *prog) {
             free(m->ns); m->ns = strdup(d->type_name);
             Bind self_map[1];
             self_map[0].name = "Self";
-            self_map[0].t.base = TYPE_STRUCT; self_map[0].t.ptr = 0; self_map[0].t.sname = d->type_name;
+            DataType pb = datatype_from_name(d->type_name);
+            if (pb != TYPE_UNKNOWN) {   /* impl on a primitive: Self = i64/f64/str/... */
+                self_map[0].t.base = pb; self_map[0].t.ptr = 0; self_map[0].t.sname = NULL;
+            } else {
+                self_map[0].t.base = TYPE_STRUCT; self_map[0].t.ptr = 0; self_map[0].t.sname = d->type_name;
+            }
+            self_map[0].t.sig = NULL; self_map[0].t.arr = 0;
             substitute(m, self_map, 1);                                  /* Self -> the concrete type */
             node_add_item(prog, m);
         }

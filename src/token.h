@@ -46,6 +46,7 @@ typedef enum {
     TK_TRAIT,        /* trait   - define a contract (set of method signatures), Rust-style */
     TK_DYN,          /* dyn     - trait object type (dyn Trait = fat pointer {data, vtable}) */
     TK_WHERE,        /* where   - trait bound clause after the signature (where T: A + B) */
+    TK_ELLIPSIS,     /* ...     - variadic parameter marker (args: ...dyn Display) */
     TK_TRUE,         /* true    - boolean true */
     TK_FALSE,        /* false   - boolean false */
     TK_AS,           /* as      - explicit type cast (e.g. x as i32) */

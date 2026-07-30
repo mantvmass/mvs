@@ -1,0 +1,38 @@
+// ============================================================
+//  lib_out: io.out as a LIBRARY (fmt.outf, written in pure MVS)
+//  build:  mvs.exe examples/08_stdlib/lib_out.mvs
+//  run:    examples\08_stdlib\lib_out.exe
+//
+//  fmt.outf walks the {} placeholders at RUN time and prints each argument
+//  through its Display impl: extras are packed into a variadic dyn slice
+//  (args: ...dyn Display), primitives print via impl-on-primitive, and
+//  user structs join by implementing Display themselves.
+// ============================================================
+import { fmt } from "std";
+import { String } from "std/string";
+
+struct Point { x: i32; y: i32; }
+
+impl Display for Point {
+    func fmt(self: *Point) -> String {
+        let s: String = String::from("(");
+        let xs: String = String::from_int(self.x as i64);
+        let ys: String = String::from_int(self.y as i64);
+        s.push_str(xs.as_str()).push_str(", ").push_str(ys.as_str()).push_str(")");
+        xs.drop();
+        ys.drop();
+        return s;
+    }
+}
+
+func main() -> i8 {
+    let x: i64 = 42;
+    fmt.outf("x = {}", x);
+    fmt.outf("mixed: {} {} {} {}", 7, "hello", true, 2.5);
+    let p: Point = Point { x: 3, y: 4 };
+    fmt.outf("point {} and {{literal}}", p);
+    fmt.outf("no args here");
+    fmt.println(x);
+    fmt.println(p);
+    return 0;
+}

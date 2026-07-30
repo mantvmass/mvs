@@ -1,0 +1,6 @@
+//~ ERROR: must be the last parameter
+// nothing may follow the variadic tail
+import { String } from "std/string";
+trait Show { func fmt(self: *Self) -> String; }
+func f(args: ...dyn Show, tail: i32) -> void { let _n: usize = args_len; }
+func main() -> i8 { return 0; }

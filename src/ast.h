@@ -113,6 +113,9 @@ typedef struct Node {
     int           paren;      /* 1 = this expression was written in parentheses; used by the parser
                                * so (-2) ** 2 keeps the unary minus inside while -2 ** 2 = -(2 ** 2) */
     int           is_const;   /* used by ND_VAR_DECL: 1 = const, 0 = let */
+    int           variadic;   /* ND_FUNC: takes a variadic tail; ND_PARAM: this is the variadic
+                               * slice parameter (typed pointer-to-element; a hidden usize
+                               * parameter named <name>_len follows it with the count) */
     int           is_extern;  /* used by ND_FUNC: 1 = foreign function (no body) */
     int           is_export;  /* used by ND_FUNC: 1 = exported for C to call (raw symbol name) */
     int           is_method;  /* used by ND_FUNC: 1 = struct method (ns = struct name) */
@@ -139,5 +142,8 @@ Node *node_clone(Node *n);
 DataType datatype_from_token(TokenType t);
 /* Data type name for display/debug */
 const char *datatype_name(DataType t);
+/* Inverse of datatype_name: "i64" -> TYPE_I64; TYPE_UNKNOWN when the name is no primitive.
+ * Used for impl-on-primitive (`impl Display for i64` stores the type as its name string) */
+DataType datatype_from_name(const char *name);
 
 #endif /* MVS_AST_H */

@@ -56,7 +56,8 @@ $runPass = @(
     "examples/05_strings/strings",
     "examples/06_modules/use_import",
     "examples/08_stdlib/io_demo",
-    "examples/08_stdlib/floats"
+    "examples/08_stdlib/floats",
+    "examples/08_stdlib/lib_out"
 )
 
 # fixed command-line arguments for examples that read argv
@@ -217,7 +218,8 @@ $elfTests = @(
     "examples/03_structs/methods",
     "examples/04_traits/dynamic",
     "examples/05_strings/strings",
-    "examples/08_stdlib/floats"
+    "examples/08_stdlib/floats",
+    "examples/08_stdlib/lib_out"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan
 foreach ($ex in $elfTests) {

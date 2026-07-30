@@ -289,7 +289,13 @@ Token lexer_next(Lexer *lx) {
             if (peek(lx) == ':') { advance(lx); return simple_token(TK_COLONCOLON, "::", line, col); } /* :: associated function call */
             return simple_token(TK_COLON, ":", line, col);
         case ',': advance(lx); return simple_token(TK_COMMA, ",", line, col);
-        case '.': advance(lx); return simple_token(TK_DOT, ".", line, col);
+        case '.':
+            advance(lx);
+            if (peek(lx) == '.' && peek_next(lx) == '.') {   /* '...' marks a variadic parameter */
+                advance(lx); advance(lx);
+                return simple_token(TK_ELLIPSIS, "...", line, col);
+            }
+            return simple_token(TK_DOT, ".", line, col);
     }
 
     /* Unknown character */

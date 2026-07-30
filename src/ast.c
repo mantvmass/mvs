@@ -104,3 +104,16 @@ const char *datatype_name(DataType t) {
     }
 }
 
+/* Inverse lookup: primitive type name -> DataType (TYPE_UNKNOWN if not a primitive) */
+DataType datatype_from_name(const char *name) {
+    static const DataType prims[] = {
+        TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I128, TYPE_ISIZE,
+        TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U128, TYPE_USIZE,
+        TYPE_BOOL, TYPE_STR, TYPE_CHAR, TYPE_F32, TYPE_F64
+    };
+    if (!name) return TYPE_UNKNOWN;
+    for (size_t i = 0; i < sizeof(prims) / sizeof(prims[0]); i++)
+        if (strcmp(datatype_name(prims[i]), name) == 0) return prims[i];
+    return TYPE_UNKNOWN;
+}
+

@@ -31,7 +31,8 @@ examples/04_traits/dynamic
 examples/05_strings/strings
 examples/06_modules/use_import
 examples/08_stdlib/io_demo
-examples/08_stdlib/floats"
+examples/08_stdlib/floats
+examples/08_stdlib/lib_out"
 
 for t in $tests; do
     name=$(echo "$t" | sed 's|^examples/||; s|/|_|g')
