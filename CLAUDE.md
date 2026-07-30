@@ -163,6 +163,14 @@ parameter (`head<T>(v: Vec<T>)`) and from a sibling argument
 element, container field, returned and called on the spot) · `&value` accepted
 in a variadic trait slice, matching how a trait object is written everywhere else.
 
+**How the audit is kept exhaustive:** `sh scripts/audit.sh` is the one command.
+Its three enumerated axes are `scripts/matrix.sh` (every TYPE through every
+context), `scripts/matrix_features.sh` (every FEATURE through every context:
+traits, function pointers, generic inference, pointers, control flow), and
+`tests/diff/ops_*` from `scripts/gen_ops_diff.py` (every OPERATOR on every
+integer type, with C as the oracle: 1690 checks). When a bug turns up, add the
+axis that would have caught it rather than a single regression test.
+
 **Dogfood:** `examples/10_json` is a real 1084-line program in MVS (JSON
 library + CLI). Run it before claiming a language change is ergonomic; it is
 what surfaced trailing commas, contextual `from`, struct-literal arguments,
