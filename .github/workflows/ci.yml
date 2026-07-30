@@ -7,6 +7,24 @@ on:
     branches: [main, develop]
 
 jobs:
+  # Linux: build the compiler natively with gcc, then compile every runnable example
+  # with --target elf64 (SysV ABI), link with gcc, RUN it, and diff stdout against
+  # the same goldens the Windows job uses (proves both backends behave identically)
+  test-elf-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install NASM
+        run: sudo apt-get update && sudo apt-get install -y nasm
+
+      - name: Build compiler (native Linux)
+        run: gcc -Wall -Wextra -Werror -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c -o mvs
+
+      - name: Run ELF64 test suite (compile, link, run, diff goldens)
+        run: sh tests/run_elf_ci.sh
+
   build:
     runs-on: windows-latest
     steps:

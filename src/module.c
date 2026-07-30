@@ -87,7 +87,13 @@ static int ends_with_mvs(const char *p) {
 
 /* Make an absolute (canonical) path so identical files compare equal */
 static void canonicalize(const char *path, char *out, size_t n) {
+#ifdef _WIN32
     if (!_fullpath(out, path, (int)n)) snprintf(out, n, "%s", path);
+#else
+    char *r = realpath(path, NULL);          /* POSIX: malloc'd resolved path */
+    if (r) { snprintf(out, n, "%s", r); free(r); }
+    else snprintf(out, n, "%s", path);
+#endif
 }
 
 /* Return the index of an already loaded module (canonical path compare) or -1 */

@@ -552,7 +552,8 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
 
 /* Compare namespaces (NULL counts as "") */
 static int ns_eq(const char *a, const char *b) {
-    if (!a) a = ""; if (!b) b = "";
+    if (!a) a = "";
+    if (!b) b = "";
     return strcmp(a, b) == 0;
 }
 

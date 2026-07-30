@@ -24,16 +24,25 @@
 
 #define PATHBUF 1024
 
+/* popen is spelled _popen on Windows; everything else is portable */
+#ifdef _WIN32
+#define POPEN  _popen
+#define PCLOSE _pclose
+#else
+#define POPEN  popen
+#define PCLOSE pclose
+#endif
+
 /* Run "<tool> --version", read the first line into ver; returns 1 if the tool exists (and works).
  * Used to check that the user has nasm/clang installed and to report the version in use */
 static int tool_version(const char *name, char *ver, size_t vn) {
     char cmd[256];
     snprintf(cmd, sizeof(cmd), "%s --version 2>&1", name);
-    FILE *f = _popen(cmd, "r");
+    FILE *f = POPEN(cmd, "r");
     if (!f) return 0;
     ver[0] = '\0';
     if (fgets(ver, (int)vn, f)) { char *nl = strchr(ver, '\n'); if (nl) *nl = '\0'; }
-    int rc = _pclose(f);
+    int rc = PCLOSE(f);
     return (rc == 0 && ver[0] != '\0');
 }
 
