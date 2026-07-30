@@ -1,0 +1,144 @@
+/*
+ * examples/10_json/writer.mvs - serialize a Doc back to JSON text
+ *
+ * Two shapes: compact (no whitespace) and pretty (two-space indent). Both walk
+ * the arena recursively and append into a String the caller owns.
+ * Strings are re-escaped so that write(parse(x)) is valid JSON again.
+ */
+import { Doc, Json } from "./value.mvs";
+import { String } from "std/string";
+import { cstr } from "core";
+
+// append a JSON-escaped copy of s (with the surrounding quotes)
+func write_escaped(out: *String, s: str) -> void {
+    out.push_str("\"");
+    let p: *u8 = s as *u8;
+    let n: usize = cstr.len(s);
+    let i: usize = 0;
+    while (i < n) {
+        let c: u8 = p[i];
+        if (c == 34) { out.push_str("\\\""); }
+        elseif (c == 92) { out.push_str("\\\\"); }
+        elseif (c == 10) { out.push_str("\\n"); }
+        elseif (c == 9) { out.push_str("\\t"); }
+        elseif (c == 13) { out.push_str("\\r"); }
+        elseif (c == 8) { out.push_str("\\b"); }
+        elseif (c == 12) { out.push_str("\\f"); }
+        elseif (c < 32) {
+            // control byte: emit \u00XX
+            out.push_str("\\u00");
+            let hi: u8 = c / 16;
+            let lo: u8 = c % 16;
+            let hs: String = String::from_char(hex_digit(hi));
+            let ls: String = String::from_char(hex_digit(lo));
+            out.push_str(hs.as_str());
+            out.push_str(ls.as_str());
+            hs.drop();
+            ls.drop();
+        }
+        else {
+            let one: String = String::from_char(c as char);
+            out.push_str(one.as_str());
+            one.drop();
+        }
+        i = i + 1;
+    }
+    out.push_str("\"");
+}
+
+func hex_digit(v: u8) -> char {
+    if (v < 10) { return (48 + v) as char; }
+    return (97 + v - 10) as char;
+}
+
+// numbers: integers print exactly, floats through the standard formatter
+func write_number_int(out: *String, v: i64) -> void {
+    let s: String = String::from_int(v);
+    out.push_str(s.as_str());
+    s.drop();
+}
+
+func write_number_float(out: *String, v: f64) -> void {
+    let s: String = String::from_float(v);
+    out.push_str(s.as_str());
+    s.drop();
+}
+
+func write_indent(out: *String, depth: i64) -> void {
+    let i: i64 = 0;
+    while (i < depth) {
+        out.push_str("  ");
+        i = i + 1;
+    }
+}
+
+// the recursive core: pretty = 1 adds newlines and indentation
+func write_value(doc: *Doc, id: i64, out: *String, pretty: i64, depth: i64) -> void {
+    match (doc.at(id)) {
+        Json::Null => { out.push_str("null"); }
+        Json::Bool(b) => {
+            if (b) { out.push_str("true"); }
+            else { out.push_str("false"); }
+        }
+        Json::Int(v) => { write_number_int(out, v); }
+        Json::Num(f) => { write_number_float(out, f); }
+        Json::Str(s) => { write_escaped(out, s); }
+        Json::Arr(ai) => {
+            let n: i64 = doc.arr_len(id);
+            if (n == 0) { out.push_str("[]"); return; }
+            out.push_str("[");
+            let i: i64 = 0;
+            while (i < n) {
+                if (i > 0) { out.push_str(","); }
+                if (pretty == 1) {
+                    out.push_str("\n");
+                    write_indent(out, depth + 1);
+                }
+                write_value(doc, doc.arr_get(id, i), out, pretty, depth + 1);
+                i = i + 1;
+            }
+            if (pretty == 1) {
+                out.push_str("\n");
+                write_indent(out, depth);
+            }
+            out.push_str("]");
+        }
+        Json::Obj(oi) => {
+            let n: i64 = doc.obj_len(id);
+            if (n == 0) { out.push_str("{}"); return; }
+            out.push_str("{");
+            let i: i64 = 0;
+            while (i < n) {
+                if (i > 0) { out.push_str(","); }
+                if (pretty == 1) {
+                    out.push_str("\n");
+                    write_indent(out, depth + 1);
+                }
+                write_escaped(out, doc.obj_key(id, i));
+                out.push_str(":");
+                if (pretty == 1) { out.push_str(" "); }
+                write_value(doc, doc.obj_val(id, i), out, pretty, depth + 1);
+                i = i + 1;
+            }
+            if (pretty == 1) {
+                out.push_str("\n");
+                write_indent(out, depth);
+            }
+            out.push_str("}");
+        }
+    }
+}
+
+// compact serialization; the caller owns the returned String
+func to_string(doc: *Doc, id: i64) -> String {
+    let out: String = String::new();
+    write_value(doc, id, &out, 0, 0);
+    return out;
+}
+
+// indented serialization; the caller owns the returned String
+func to_pretty(doc: *Doc, id: i64) -> String {
+    let out: String = String::new();
+    write_value(doc, id, &out, 1, 0);
+    return out;
+}

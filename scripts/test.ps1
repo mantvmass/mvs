@@ -75,7 +75,8 @@ $runPass = @(
     "examples/08_stdlib/lib_vec",
     "examples/08_stdlib/lib_map",
     "examples/08_stdlib/threads",
-    "examples/08_stdlib/net_loop"
+    "examples/08_stdlib/net_loop",
+    "examples/10_json/main"
 )
 
 # fixed command-line arguments for examples that read argv
@@ -258,7 +259,8 @@ $elfTests = @(
     "examples/08_stdlib/lib_vec",
     "examples/08_stdlib/lib_map",
     "examples/08_stdlib/threads",
-    "examples/08_stdlib/net_loop"
+    "examples/08_stdlib/net_loop",
+    "examples/10_json/main"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan
 foreach ($ex in $elfTests) {

@@ -590,6 +590,13 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
         }
         default: break;
     }
+    if (n->kind == ND_STRUCT_LIT && n->name) {
+        /* a struct literal used as an rvalue (a call argument, an element being
+         * pushed) needs a real address: reserve a temp slot to materialize into.
+         * Literals that directly initialize a variable or are returned use that
+         * destination instead and never consult this slot. */
+        n->int_val = add_local(g, "$lit", TYPE_STRUCT, 0, 0, n->name, NULL, frame);
+    }
     if (n->kind == ND_CALL) {
         ExprType rt = type_of(g, n);
         if ((rt.base == TYPE_STRUCT || is_blob16(rt.base, rt.ptr)) && rt.ptr == 0)

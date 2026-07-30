@@ -117,4 +117,19 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `kernel.mvs` | OS-style skeleton: VGA text writer + exported `kmain` entry (links with GNU ld) |
 | `bump_alloc.mvs` | a freestanding bump allocator (no malloc, state in a caller-owned struct) |
 | `use_core.mvs` | the `core` package under `--nostd`: mem/cmp/ptr/cstr/bits/slice, zero undefined symbols |
-| `intrinsics.mvs` | `core/arch` + the `asm()` intrinsic: hints, barriers, hardware counter, all freestanding |
+| `intrinsics.mvs` | `core/arch` + `asm()`: hints, barriers, hardware counter, all freestanding |
+
+## 10_json: a real program (1084 lines of MVS)
+
+A complete JSON library and CLI: tokenizer, arena-backed value tree, recursive
+descent parser with `Result` errors, compact and pretty serializers, and a
+command line front end. See [examples/10_json/README.md](../examples/10_json/README.md)
+for the breakdown and for the four compiler gaps writing it uncovered.
+
+| File | What it is |
+|------|------------|
+| `lexer.mvs` | tokenizer: escapes, `\uXXXX`, numbers, byte offsets |
+| `value.mvs` | `Json` enum + `Doc` arena, `get`/`path` returning `Option` |
+| `parser.mvs` | recursive descent, errors as values, depth cap |
+| `writer.mvs` | serialization, compact and pretty, round-trip stable |
+| `main.mvs` | the `jsontool` CLI plus a demo suite |

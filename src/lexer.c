@@ -20,7 +20,11 @@ static const Keyword KEYWORDS[] = {
     {"struct", TK_STRUCT}, {"if", TK_IF}, {"elseif", TK_ELSEIF}, {"else", TK_ELSE},
     {"while", TK_WHILE}, {"do", TK_DO}, {"for", TK_FOR}, {"switch", TK_SWITCH},
     {"case", TK_CASE}, {"default", TK_DEFAULT}, {"break", TK_BREAK},
-    {"continue", TK_CONTINUE}, {"import", TK_IMPORT}, {"from", TK_FROM},
+    {"continue", TK_CONTINUE}, {"import", TK_IMPORT},
+    /* 'from' is deliberately NOT here: it is a CONTEXTUAL keyword, recognized
+     * only inside an import statement, so ordinary code may use it as a name
+     * (String::from, a `from` parameter). TK_FROM is kept for compatibility
+     * with code that still checks for it. */
     {"extern", TK_EXTERN}, {"export", TK_EXPORT}, {"impl", TK_IMPL}, {"trait", TK_TRAIT},
     {"dyn", TK_DYN}, {"where", TK_WHERE}, {"enum", TK_ENUM}, {"match", TK_MATCH},
     {"true", TK_TRUE}, {"false", TK_FALSE}, {"as", TK_AS},

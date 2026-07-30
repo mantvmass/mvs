@@ -144,6 +144,7 @@ static Node *parse_struct_lit_body(Parser *p, char *name, int line) {
     advance(p); /* consume { */
     if (!check(p, TK_RBRACE)) {
         do {
+            if (check(p, TK_RBRACE)) break;      /* trailing comma, Rust style */
             Node *fi = node_new(ND_ASSIGN, p->cur.line);
             Node *fname = node_new(ND_IDENT, p->cur.line);
             if (!check(p, TK_IDENT)) { error(p, "expected field name in struct literal"); break; }
@@ -266,6 +267,7 @@ static Node *parse_primary(Parser *p) {
         advance(p); /* consume [ */
         if (!check(p, TK_RBRACKET)) {
             do {
+                if (check(p, TK_RBRACKET)) break;   /* trailing comma, Rust style */
                 node_add_item(lit, parse_expr(p));
             } while (match(p, TK_COMMA));
         }
@@ -300,6 +302,7 @@ static Node *parse_postfix(Parser *p) {
             call->operand = node;
             if (!check(p, TK_RPAREN)) {
                 do {
+                    if (check(p, TK_RPAREN)) break;   /* trailing comma, Rust style */
                     node_add_item(call, parse_expr(p));
                 } while (match(p, TK_COMMA));
             }
@@ -1067,7 +1070,10 @@ static Node *parse_import(Parser *p) {
         }
         expect(p, TK_RBRACE, "expected '}' to close import list");
     }
-    expect(p, TK_FROM, "expected 'from' after import list");
+    /* 'from' is contextual: it arrives as a plain identifier so that ordinary
+     * code can use the name, and only an import statement gives it meaning */
+    if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "from") == 0) advance(p);
+    else error(p, "expected 'from' after import list");
     if (!check(p, TK_STRING)) error(p, "expected module path string");
     else { n->str_val = strdup(p->cur.lexeme); advance(p); }
     expect(p, TK_SEMICOLON, "expected ';' after import");

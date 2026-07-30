@@ -1,0 +1,35 @@
+--- parse and re-serialize ---
+   scalars [1,-2,3.500000,true,false,null]
+    nested {"a":{"b":{"c":[1,[2,[3]]]}}}
+   escapes ["tab\there","nl\nhere","quote\"q","uA"]
+     empty {"o":{},"a":[],"s":""}
+   numbers [0,0,1000.000000,-0.025000,12345678901]
+   spacing {"x":[1,2]}
+--- errors are values ---
+  unclosed error: expected ',' or '}' in object at offset 7
+     comma error: expected ',' or ']' in array at offset 3
+       key error: expected a string key at offset 1
+  trailing error: trailing content after the value at offset 3
+ badescape error: unknown escape at offset 1
+--- paths ---
+ada
+dev
+2
+error: no value at path 'user.missing'
+--- stats ---
+  object 2
+   array 1
+  string 3
+     int 1
+   nodes 7
+--- pretty ---
+{
+  "a": [
+    1,
+    {
+      "b": true
+    }
+  ]
+}
+--- round trip is stable ---
+stable = 1

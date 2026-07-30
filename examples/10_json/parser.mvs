@@ -1,0 +1,224 @@
+/*
+ * examples/10_json/parser.mvs - recursive-descent JSON parser
+ *
+ * Consumes the token stream from lexer.mvs and fills a Doc arena from
+ * value.mvs. Errors are values: parse() returns Result<i64, str> where the
+ * success side is the root node index and the error side is a message that
+ * lives in the Doc (so the caller never has to free it separately).
+ *
+ * Depth is capped so a hostile input of nested brackets cannot exhaust the
+ * machine stack: a parser that segfaults on bad input is a parser bug.
+ */
+import { io } from "std";
+import { Lexer, Token, Tok } from "./lexer.mvs";
+import { Doc, Json, ArrSpan, ObjSpan } from "./value.mvs";
+import { Result, Ok, Err } from "std/result";
+import { Vec } from "std/vec";
+import { String } from "std/string";
+
+let MAX_DEPTH: i64 = 200;
+
+struct Parser {
+    lx: Lexer;
+    doc: *Doc;
+    cur: Token;
+    depth: i64;
+    msg: String;      // storage for the last error message
+}
+
+impl Parser {
+    func new(text: str, doc: *Doc) -> Parser {
+        let lx: Lexer = Lexer::new(text);
+        let first: Token = lx.next();
+        let p: Parser = Parser {
+            lx: lx,
+            doc: doc,
+            cur: first,
+            depth: 0,
+            msg: String::new(),
+        };
+        return p;
+    }
+
+    func advance(self: *Parser) -> void {
+        self.cur = self.lx.next();
+    }
+
+    // build an error message that mentions where it happened
+    func fail(self: *Parser, what: str) -> str {
+        let m: String = String::from(what);
+        m.push_str(" at offset ");
+        let off: String = String::from_int(self.cur.at);
+        m.push_str(off.as_str());
+        off.drop();
+        self.msg.drop();
+        self.msg = m;
+        return self.msg.as_str();
+    }
+
+    func parse_value(self: *Parser) -> Result<i64, str> {
+        if (self.depth > MAX_DEPTH) {
+            return Err<i64, str>(self.fail("nesting too deep"));
+        }
+        match (self.cur.kind) {
+            Tok::Null => { self.advance(); return Ok<i64, str>(self.doc.push(Json::Null)); }
+            Tok::True => { self.advance(); return Ok<i64, str>(self.doc.push(Json::Bool(true))); }
+            Tok::False => { self.advance(); return Ok<i64, str>(self.doc.push(Json::Bool(false))); }
+            Tok::Int(v) => { self.advance(); return Ok<i64, str>(self.doc.push(Json::Int(v))); }
+            Tok::Float(f) => { self.advance(); return Ok<i64, str>(self.doc.push(Json::Num(f))); }
+            Tok::Str(s) => {
+                let owned: str = self.doc.own_str(s);
+                self.advance();
+                return Ok<i64, str>(self.doc.push(Json::Str(owned)));
+            }
+            Tok::LBracket => { return self.parse_array(); }
+            Tok::LBrace => { return self.parse_object(); }
+            Tok::Bad(m) => { return Err<i64, str>(self.fail(m)); }
+            Tok::End => { return Err<i64, str>(self.fail("unexpected end of input")); }
+            _ => { return Err<i64, str>(self.fail("unexpected token")); }
+        }
+    }
+
+    func parse_array(self: *Parser) -> Result<i64, str> {
+        self.advance();                       // consume [
+        self.depth = self.depth + 1;
+        // children are collected first, then copied into the arena as one span
+        let kids: Vec<i64> = Vec<i64>::new();
+        let closed: bool = false;
+        match (self.cur.kind) {
+            Tok::RBracket => { self.advance(); closed = true; }
+            _ => { }
+        }
+        while (!closed) {
+            let item: Result<i64, str> = self.parse_value();
+            match (item) {
+                Ok(id) => { kids.push(id); }
+                Err(e) => { kids.drop(); self.depth = self.depth - 1; return Err<i64, str>(e); }
+            }
+            match (self.cur.kind) {
+                Tok::Comma => { self.advance(); }
+                Tok::RBracket => { self.advance(); closed = true; }
+                _ => {
+                    kids.drop();
+                    self.depth = self.depth - 1;
+                    return Err<i64, str>(self.fail("expected ',' or ']' in array"));
+                }
+            }
+        }
+        let start: i64 = self.doc.elems.len() as i64;
+        let i: usize = 0;
+        while (i < kids.len()) {
+            self.doc.elems.push(kids.get(i));
+            i = i + 1;
+        }
+        let span: ArrSpan = ArrSpan { start: start, len: kids.len() as i64 };
+        let ai: i64 = self.doc.arrays.len() as i64;
+        self.doc.arrays.push(span);
+        kids.drop();
+        self.depth = self.depth - 1;
+        return Ok<i64, str>(self.doc.push(Json::Arr(ai)));
+    }
+
+    func parse_object(self: *Parser) -> Result<i64, str> {
+        self.advance();                       // consume {
+        self.depth = self.depth + 1;
+        let ks: Vec<i64> = Vec<i64>::new();   // indices into doc.strs
+        let vs: Vec<i64> = Vec<i64>::new();
+        let closed: bool = false;
+        match (self.cur.kind) {
+            Tok::RBrace => { self.advance(); closed = true; }
+            _ => { }
+        }
+        while (!closed) {
+            // key
+            let key_idx: i64 = 0 - 1;
+            match (self.cur.kind) {
+                Tok::Str(s) => {
+                    self.doc.own_str(s);
+                    key_idx = (self.doc.strs.len() - 1) as i64;
+                    self.advance();
+                }
+                _ => {
+                    ks.drop(); vs.drop();
+                    self.depth = self.depth - 1;
+                    return Err<i64, str>(self.fail("expected a string key"));
+                }
+            }
+            // colon
+            match (self.cur.kind) {
+                Tok::Colon => { self.advance(); }
+                _ => {
+                    ks.drop(); vs.drop();
+                    self.depth = self.depth - 1;
+                    return Err<i64, str>(self.fail("expected ':' after key"));
+                }
+            }
+            // value
+            let v: Result<i64, str> = self.parse_value();
+            match (v) {
+                Ok(id) => { ks.push(key_idx); vs.push(id); }
+                Err(e) => {
+                    ks.drop(); vs.drop();
+                    self.depth = self.depth - 1;
+                    return Err<i64, str>(e);
+                }
+            }
+            match (self.cur.kind) {
+                Tok::Comma => { self.advance(); }
+                Tok::RBrace => { self.advance(); closed = true; }
+                _ => {
+                    ks.drop(); vs.drop();
+                    self.depth = self.depth - 1;
+                    return Err<i64, str>(self.fail("expected ',' or '}' in object"));
+                }
+            }
+        }
+        let start: i64 = self.doc.keys.len() as i64;
+        let i: usize = 0;
+        while (i < ks.len()) {
+            self.doc.keys.push(ks.get(i));
+            self.doc.vals.push(vs.get(i));
+            i = i + 1;
+        }
+        let span: ObjSpan = ObjSpan { start: start, len: ks.len() as i64 };
+        let oi: i64 = self.doc.objects.len() as i64;
+        self.doc.objects.push(span);
+        ks.drop(); vs.drop();
+        self.depth = self.depth - 1;
+        return Ok<i64, str>(self.doc.push(Json::Obj(oi)));
+    }
+
+    // parse a whole document: a value followed by end of input
+    func parse_document(self: *Parser) -> Result<i64, str> {
+        let root: Result<i64, str> = self.parse_value();
+        match (root) {
+            Err(e) => { return Err<i64, str>(e); }
+            Ok(id) => {
+                match (self.cur.kind) {
+                    Tok::End => { return Ok<i64, str>(id); }
+                    _ => { return Err<i64, str>(self.fail("trailing content after the value")); }
+                }
+            }
+        }
+    }
+
+    func free(self: *Parser) -> void {
+        self.lx.free_all();
+        self.msg.drop();
+    }
+}
+
+// convenience: parse text into an existing Doc, returning the root index
+func parse_into(doc: *Doc, text: str) -> Result<i64, str> {
+    let p: Parser = Parser::new(text, doc);
+    let r: Result<i64, str> = p.parse_document();
+    // the error message belongs to the parser, so copy it into the doc first
+    match (r) {
+        Ok(id) => { p.free(); return Ok<i64, str>(id); }
+        Err(e) => {
+            let owned: str = doc.own_str(e);
+            p.free();
+            return Err<i64, str>(owned);
+        }
+    }
+}

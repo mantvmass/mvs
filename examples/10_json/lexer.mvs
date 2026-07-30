@@ -1,0 +1,291 @@
+/*
+ * examples/10_json/lexer.mvs - the JSON tokenizer
+ *
+ * Turns raw text into a token stream. Numbers are converted here (integer and
+ * floating point kept apart), strings are unescaped into fresh heap buffers,
+ * and every token carries the byte offset it started at so the parser can
+ * report where a problem is.
+ *
+ * Memory: the caller owns the Lexer and must call lex_free to release the
+ * string values the tokens hold (MVS is manual, see docs/rules.md 0.2).
+ */
+import { mem } from "std";
+import { cstr } from "core";
+import { Vec } from "std/vec";
+
+// --- token kinds -------------------------------------------------------
+// A tagged enum instead of integer constants: the parser matches on it.
+enum Tok {
+    LBrace,          // {
+    RBrace,          // }
+    LBracket,        // [
+    RBracket,        // ]
+    Colon,           // :
+    Comma,           // ,
+    Str(str),        // a decoded string value (heap, owned by the lexer)
+    Int(i64),        // an integer literal that fits in i64
+    Float(f64),      // any other number
+    True,
+    False,
+    Null,
+    End,             // end of input
+    Bad(str),        // a lexing error, message owned by the lexer
+}
+
+struct Token {
+    kind: Tok;
+    at: i64;         // byte offset where the token starts
+}
+
+struct Lexer {
+    src: *u8;        // the input text (not owned)
+    len: i64;
+    pos: i64;
+    owned: Vec<i64>; // heap blocks handed to tokens, freed by lex_free
+}
+
+impl Lexer {
+    func new(text: str) -> Lexer {
+        let lx: Lexer = Lexer {
+            src: text as *u8,
+            len: cstr.len(text) as i64,
+            pos: 0,
+            owned: Vec<i64>::new(),
+        };
+        return lx;
+    }
+
+    // remember a heap block so lex_free can release it later
+    func track(self: *Lexer, p: *u8) -> void {
+        self.owned.push(p as i64);
+    }
+
+    func free_all(self: *Lexer) -> void {
+        let i: usize = 0;
+        while (i < self.owned.len()) {
+            mem.dealloc(self.owned.get(i) as *u8);
+            i = i + 1;
+        }
+        self.owned.drop();
+    }
+
+    func at_end(self: *Lexer) -> bool { return self.pos >= self.len; }
+
+    func peek(self: *Lexer) -> u8 {
+        if (self.pos >= self.len) { return 0; }
+        return self.src[self.pos];
+    }
+
+    func peek_at(self: *Lexer, off: i64) -> u8 {
+        let p: i64 = self.pos + off;
+        if (p >= self.len) { return 0; }
+        return self.src[p];
+    }
+
+    func bump(self: *Lexer) -> u8 {
+        let c: u8 = self.peek();
+        self.pos = self.pos + 1;
+        return c;
+    }
+
+    func skip_space(self: *Lexer) -> void {
+        while (!self.at_end()) {
+            let c: u8 = self.peek();
+            if (c == 32 || c == 9 || c == 10 || c == 13) { self.pos = self.pos + 1; }
+            else { return; }
+        }
+    }
+
+    // does the input continue with this literal word?
+    func word_is(self: *Lexer, w: str) -> bool {
+        let n: i64 = cstr.len(w) as i64;
+        if (self.pos + n > self.len) { return false; }
+        let p: *u8 = w as *u8;
+        let i: i64 = 0;
+        while (i < n) {
+            if (self.src[self.pos + i] != p[i]) { return false; }
+            i = i + 1;
+        }
+        return true;
+    }
+
+    // read a quoted string, decoding escapes into a fresh buffer
+    func read_string(self: *Lexer) -> Token {
+        let start: i64 = self.pos;
+        self.pos = self.pos + 1;                  // consume the opening quote
+        // worst case every byte survives, so the input length is a safe capacity
+        let cap: usize = ((self.len - self.pos) + 1) as usize;
+        let buf: *u8 = mem.alloc(cap);
+        let n: usize = 0;
+        while (true) {
+            if (self.at_end()) {
+                mem.dealloc(buf);
+                return Token { kind: Tok::Bad("unterminated string"), at: start };
+            }
+            let c: u8 = self.bump();
+            if (c == 34) { break; }                // closing quote
+            if (c != 92) {                         // ordinary byte
+                buf[n] = c;
+                n = n + 1;
+                continue;
+            }
+            if (self.at_end()) {
+                mem.dealloc(buf);
+                return Token { kind: Tok::Bad("escape at end of input"), at: start };
+            }
+            let e: u8 = self.bump();
+            if (e == 110) { buf[n] = 10; }         // \n
+            elseif (e == 116) { buf[n] = 9; }      // \t
+            elseif (e == 114) { buf[n] = 13; }     // \r
+            elseif (e == 98) { buf[n] = 8; }       // \b
+            elseif (e == 102) { buf[n] = 12; }     // \f
+            elseif (e == 34) { buf[n] = 34; }      // \"
+            elseif (e == 92) { buf[n] = 92; }      // backslash
+            elseif (e == 47) { buf[n] = 47; }      // \/
+            elseif (e == 117) {                    // \uXXXX: BMP subset, encoded as UTF-8
+                let code: i64 = 0;
+                let k: i64 = 0;
+                while (k < 4) {
+                    if (self.at_end()) {
+                        mem.dealloc(buf);
+                        return Token { kind: Tok::Bad("short \\u escape"), at: start };
+                    }
+                    let h: u8 = self.bump();
+                    let d: i64 = hex_value(h);
+                    if (d < 0) {
+                        mem.dealloc(buf);
+                        return Token { kind: Tok::Bad("bad hex in \\u escape"), at: start };
+                    }
+                    code = code * 16 + d;
+                    k = k + 1;
+                }
+                if (code < 128) {
+                    buf[n] = code as u8;
+                } elseif (code < 2048) {
+                    buf[n] = (192 + code / 64) as u8;
+                    n = n + 1;
+                    buf[n] = (128 + code % 64) as u8;
+                } else {
+                    buf[n] = (224 + code / 4096) as u8;
+                    n = n + 1;
+                    buf[n] = (128 + (code / 64) % 64) as u8;
+                    n = n + 1;
+                    buf[n] = (128 + code % 64) as u8;
+                }
+            } else {
+                mem.dealloc(buf);
+                return Token { kind: Tok::Bad("unknown escape"), at: start };
+            }
+            n = n + 1;
+        }
+        buf[n] = 0;
+        self.track(buf);
+        return Token { kind: Tok::Str(buf as str), at: start };
+    }
+
+    // read a number: integers stay integers, anything with . e E becomes a float
+    func read_number(self: *Lexer) -> Token {
+        let start: i64 = self.pos;
+        let is_float: bool = false;
+        if (self.peek() == 45) { self.pos = self.pos + 1; }        // leading minus
+        while (!self.at_end()) {
+            let c: u8 = self.peek();
+            if (c >= 48 && c <= 57) { self.pos = self.pos + 1; }
+            elseif (c == 46 || c == 101 || c == 69) {              // . e E
+                is_float = true;
+                self.pos = self.pos + 1;
+            }
+            elseif ((c == 43 || c == 45) && is_float) { self.pos = self.pos + 1; }  // exponent sign
+            else { break; }
+        }
+        if (self.pos == start) {
+            return Token { kind: Tok::Bad("expected a number"), at: start };
+        }
+        if (is_float) {
+            return Token { kind: Tok::Float(parse_float(self.src, start, self.pos)), at: start };
+        }
+        return Token { kind: Tok::Int(parse_int(self.src, start, self.pos)), at: start };
+    }
+
+    // the next token in the stream
+    func next(self: *Lexer) -> Token {
+        self.skip_space();
+        let at: i64 = self.pos;
+        if (self.at_end()) { return Token { kind: Tok::End, at: at }; }
+        let c: u8 = self.peek();
+        if (c == 123) { self.pos = self.pos + 1; return Token { kind: Tok::LBrace, at: at }; }
+        if (c == 125) { self.pos = self.pos + 1; return Token { kind: Tok::RBrace, at: at }; }
+        if (c == 91) { self.pos = self.pos + 1; return Token { kind: Tok::LBracket, at: at }; }
+        if (c == 93) { self.pos = self.pos + 1; return Token { kind: Tok::RBracket, at: at }; }
+        if (c == 58) { self.pos = self.pos + 1; return Token { kind: Tok::Colon, at: at }; }
+        if (c == 44) { self.pos = self.pos + 1; return Token { kind: Tok::Comma, at: at }; }
+        if (c == 34) { return self.read_string(); }
+        if (c == 45 || (c >= 48 && c <= 57)) { return self.read_number(); }
+        if (self.word_is("true")) { self.pos = self.pos + 4; return Token { kind: Tok::True, at: at }; }
+        if (self.word_is("false")) { self.pos = self.pos + 5; return Token { kind: Tok::False, at: at }; }
+        if (self.word_is("null")) { self.pos = self.pos + 4; return Token { kind: Tok::Null, at: at }; }
+        return Token { kind: Tok::Bad("unexpected character"), at: at };
+    }
+}
+
+// --- number conversion (no strtod: the digits are walked by hand) -------
+
+// hex digit value, or -1
+func hex_value(c: u8) -> i64 {
+    if (c >= 48 && c <= 57) { return (c - 48) as i64; }
+    if (c >= 97 && c <= 102) { return (c - 97) as i64 + 10; }
+    if (c >= 65 && c <= 70) { return (c - 65) as i64 + 10; }
+    return 0 - 1;
+}
+
+func parse_int(src: *u8, from: i64, to: i64) -> i64 {
+    let neg: bool = false;
+    let i: i64 = from;
+    if (src[i] == 45) { neg = true; i = i + 1; }
+    let v: i64 = 0;
+    while (i < to) {
+        v = v * 10 + (src[i] - 48) as i64;
+        i = i + 1;
+    }
+    if (neg) { return 0 - v; }
+    return v;
+}
+
+func parse_float(src: *u8, from: i64, to: i64) -> f64 {
+    let neg: bool = false;
+    let i: i64 = from;
+    if (src[i] == 45) { neg = true; i = i + 1; }
+    let whole: f64 = 0.0;
+    while (i < to && src[i] >= 48 && src[i] <= 57) {
+        whole = whole * 10.0 + (src[i] - 48) as i64 as f64;
+        i = i + 1;
+    }
+    if (i < to && src[i] == 46) {
+        i = i + 1;
+        let scale: f64 = 0.1;
+        while (i < to && src[i] >= 48 && src[i] <= 57) {
+            whole = whole + ((src[i] - 48) as i64 as f64) * scale;
+            scale = scale / 10.0;
+            i = i + 1;
+        }
+    }
+    if (i < to && (src[i] == 101 || src[i] == 69)) {          // exponent
+        i = i + 1;
+        let eneg: bool = false;
+        if (i < to && src[i] == 45) { eneg = true; i = i + 1; }
+        elseif (i < to && src[i] == 43) { i = i + 1; }
+        let ev: i64 = 0;
+        while (i < to && src[i] >= 48 && src[i] <= 57) {
+            ev = ev * 10 + (src[i] - 48) as i64;
+            i = i + 1;
+        }
+        let k: i64 = 0;
+        while (k < ev) {
+            if (eneg) { whole = whole / 10.0; }
+            else { whole = whole * 10.0; }
+            k = k + 1;
+        }
+    }
+    if (neg) { return 0.0 - whole; }
+    return whole;
+}

@@ -2223,6 +2223,16 @@ static void tc_check(TcCtx *c, Node *n) {
         CType lt = infer(c->prog, n->lhs, c->map, *c->nmap);
         CType rt = infer(c->prog, n->rhs, c->map, *c->nmap);
         TokenType op = n->op;
+        /* `a == b` on two str values compares ADDRESSES (a str is a pointer),
+         * which is almost never what the programmer means. Comparing against a
+         * literal 0 stays silent: that is the idiomatic null check. */
+        if ((op == TK_EQ || op == TK_NEQ) &&
+            lt.ptr == 0 && rt.ptr == 0 && lt.base == TYPE_STR && rt.base == TYPE_STR &&
+            diag_is_primary(n->file)) {
+            diag_print(n->file, n->line, n->col, "warning",
+                       "comparing two 'str' values compares their addresses, not their text");
+            diag_help("compare the contents instead: cstr.eq(a, b) from \"core\", or strcmp(a, b) == 0");
+        }
         if (op == TK_PLUS || op == TK_MINUS) {
             int lp = tc_isptr(lt), rp = tc_isptr(rt);
             if (lp && rp) {                                  /* ptr - ptr is allowed, ptr + ptr is not */

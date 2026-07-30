@@ -1,0 +1,202 @@
+/*
+ * examples/10_json/value.mvs - the JSON value tree
+ *
+ * A Json value is an enum, so a consumer matches on it instead of checking a
+ * type tag by hand. Composite values hold INDICES into an arena rather than
+ * pointers: MVS has no recursive generic types yet, and an arena also gives
+ * the whole document a single owner and a single free (see docs/rules.md 0.2).
+ *
+ *     let doc: Doc = Doc::new();
+ *     let id: i64 = doc.parse(text);      // index of the root value
+ *     match (doc.at(id)) { Json::Num(n) => ... }
+ *     doc.drop();                         // frees every node at once
+ */
+import { mem } from "std";
+import { Vec } from "std/vec";
+import { Option, Some, None } from "std/option";
+import { cstr } from "core";
+
+enum Json {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Num(f64),
+    Str(str),          // borrowed from the document's own storage
+    Arr(i64),          // index into Doc.arrays
+    Obj(i64),          // index into Doc.objects
+}
+
+// one array: a slice of Doc.elems [start, start + len)
+struct ArrSpan { start: i64; len: i64; }
+
+// one object: a slice of Doc.keys / Doc.vals [start, start + len)
+struct ObjSpan { start: i64; len: i64; }
+
+struct Doc {
+    nodes: Vec<Json>;      // every value in the document
+    arrays: Vec<ArrSpan>;
+    objects: Vec<ObjSpan>;
+    elems: Vec<i64>;       // array element node indices, packed per array
+    keys: Vec<i64>;        // object key string indices (into strs)
+    vals: Vec<i64>;        // object value node indices, packed per object
+    strs: Vec<i64>;        // owned heap strings (as pointers), freed on drop
+}
+
+impl Doc {
+    func new() -> Doc {
+        let d: Doc = Doc {
+            nodes: Vec<Json>::new(),
+            arrays: Vec<ArrSpan>::new(),
+            objects: Vec<ObjSpan>::new(),
+            elems: Vec<i64>::new(),
+            keys: Vec<i64>::new(),
+            vals: Vec<i64>::new(),
+            strs: Vec<i64>::new(),
+        };
+        return d;
+    }
+
+    // the value at an index (Json::Null for an out-of-range index)
+    func at(self: *Doc, id: i64) -> Json {
+        if (id < 0 || (id as usize) >= self.nodes.len()) { return Json::Null; }
+        return self.nodes.get(id as usize);
+    }
+
+    func count(self: *Doc) -> i64 { return self.nodes.len() as i64; }
+
+    // append a value, returning its index
+    func push(self: *Doc, v: Json) -> i64 {
+        let id: i64 = self.nodes.len() as i64;
+        self.nodes.push(v);
+        return id;
+    }
+
+    // take ownership of a heap string so it lives as long as the document
+    func own_str(self: *Doc, s: str) -> str {
+        let n: usize = cstr.len(s) + 1;
+        let buf: *u8 = mem.alloc(n);
+        mem.copy(buf, s as *u8, n);
+        self.strs.push(buf as i64);
+        return buf as str;
+    }
+
+    // --- array access -------------------------------------------------
+    func arr_len(self: *Doc, id: i64) -> i64 {
+        match (self.at(id)) {
+            Json::Arr(ai) => { return self.arrays.get(ai as usize).len; }
+            _ => { return 0; }
+        }
+    }
+
+    func arr_get(self: *Doc, id: i64, i: i64) -> i64 {
+        match (self.at(id)) {
+            Json::Arr(ai) => {
+                let sp: ArrSpan = self.arrays.get(ai as usize);
+                if (i < 0 || i >= sp.len) { return 0 - 1; }
+                return self.elems.get((sp.start + i) as usize);
+            }
+            _ => { return 0 - 1; }
+        }
+    }
+
+    // --- object access ------------------------------------------------
+    func obj_len(self: *Doc, id: i64) -> i64 {
+        match (self.at(id)) {
+            Json::Obj(oi) => { return self.objects.get(oi as usize).len; }
+            _ => { return 0; }
+        }
+    }
+
+    func obj_key(self: *Doc, id: i64, i: i64) -> str {
+        match (self.at(id)) {
+            Json::Obj(oi) => {
+                let sp: ObjSpan = self.objects.get(oi as usize);
+                if (i < 0 || i >= sp.len) { return ""; }
+                return self.strs.get((self.keys.get((sp.start + i) as usize)) as usize) as str;
+            }
+            _ => { return ""; }
+        }
+    }
+
+    func obj_val(self: *Doc, id: i64, i: i64) -> i64 {
+        match (self.at(id)) {
+            Json::Obj(oi) => {
+                let sp: ObjSpan = self.objects.get(oi as usize);
+                if (i < 0 || i >= sp.len) { return 0 - 1; }
+                return self.vals.get((sp.start + i) as usize);
+            }
+            _ => { return 0 - 1; }
+        }
+    }
+
+    // look a key up by name; absence is a value, not a sentinel
+    func get(self: *Doc, id: i64, key: str) -> Option<i64> {
+        let n: i64 = self.obj_len(id);
+        let i: i64 = 0;
+        while (i < n) {
+            if (cstr.eq(self.obj_key(id, i), key)) { return Some(self.obj_val(id, i)); }
+            i = i + 1;
+        }
+        return None<i64>();
+    }
+
+    // follow a dotted path: "user.roles" walks objects, digits index arrays
+    func path(self: *Doc, root: i64, p: str) -> Option<i64> {
+        let cur: i64 = root;
+        let bytes: *u8 = p as *u8;
+        let n: i64 = cstr.len(p) as i64;
+        let start: i64 = 0;
+        let i: i64 = 0;
+        while (i <= n) {
+            if (i == n || bytes[i] == 46) {          // '.' or end
+                if (i == start) { return None<i64>(); }
+                // the segment is [start, i)
+                let seg: *u8 = mem.alloc((i - start + 1) as usize);
+                let k: i64 = 0;
+                while (k < i - start) {
+                    seg[k] = bytes[start + k];
+                    k = k + 1;
+                }
+                seg[i - start] = 0;
+                let digit: bool = seg[0] >= 48 && seg[0] <= 57;
+                if (digit) {
+                    let idx: i64 = 0;
+                    let d: i64 = 0;
+                    while (d < i - start) {
+                        idx = idx * 10 + (seg[d] - 48) as i64;
+                        d = d + 1;
+                    }
+                    cur = self.arr_get(cur, idx);
+                    mem.dealloc(seg);
+                    if (cur < 0) { return None<i64>(); }
+                } else {
+                    let found: Option<i64> = self.get(cur, seg as str);
+                    mem.dealloc(seg);
+                    match (found) {
+                        Some(v) => { cur = v; }
+                        None => { return None<i64>(); }
+                    }
+                }
+                start = i + 1;
+            }
+            i = i + 1;
+        }
+        return Some(cur);
+    }
+
+    // one call releases the whole document
+    func drop(self: *Doc) -> void {
+        let i: usize = 0;
+        while (i < self.strs.len()) {
+            mem.dealloc(self.strs.get(i) as *u8);
+            i = i + 1;
+        }
+        self.nodes.drop();
+        self.arrays.drop();
+        self.objects.drop();
+        self.elems.drop();
+        self.keys.drop();
+        self.vals.drop();
+        self.strs.drop();
+    }
+}

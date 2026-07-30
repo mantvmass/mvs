@@ -53,7 +53,8 @@ examples/08_stdlib/option_result
 examples/08_stdlib/lib_vec
 examples/08_stdlib/lib_map
 examples/08_stdlib/threads
-examples/08_stdlib/net_loop"
+examples/08_stdlib/net_loop
+examples/10_json/main"
 
 for t in $tests; do
     name=$(echo "$t" | sed 's|^examples/||; s|/|_|g')

@@ -1,0 +1,223 @@
+/*
+ * examples/10_json/main.mvs - the jsontool command line program
+ *
+ * A real program written in MVS, built from the modules next to it:
+ *   lexer.mvs   tokenizer
+ *   value.mvs   the value tree (arena + enum)
+ *   parser.mvs  recursive descent, errors as Result
+ *   writer.mvs  compact and pretty serialization
+ *
+ * Usage (with no arguments it runs the built-in demo suite):
+ *   jsontool                  run the demo
+ *   jsontool pretty '<json>'  parse and print indented
+ *   jsontool compact '<json>' parse and print minified
+ *   jsontool get '<json>' <path>   print the value at a dotted path
+ *   jsontool stats '<json>'   count nodes by kind
+ *
+ * Memory: every Doc and String created here is dropped explicitly, which is
+ * the whole point of MVS being manual (docs/rules.md 0.2).
+ */
+import { io } from "std";
+import { Doc, Json } from "./value.mvs";
+import { parse_into } from "./parser.mvs";
+import { to_string, to_pretty } from "./writer.mvs";
+import { Result, Ok, Err } from "std/result";
+import { Option, Some, None } from "std/option";
+import { String } from "std/string";
+import { HashMap } from "std/map";
+import { cstr } from "core";
+
+// ---- reporting helpers -------------------------------------------------
+
+func kind_name(doc: *Doc, id: i64) -> str {
+    match (doc.at(id)) {
+        Json::Null => { return "null"; }
+        Json::Bool(b) => { return "bool"; }
+        Json::Int(v) => { return "int"; }
+        Json::Num(f) => { return "float"; }
+        Json::Str(s) => { return "string"; }
+        Json::Arr(a) => { return "array"; }
+        Json::Obj(o) => { return "object"; }
+    }
+}
+
+// count each kind in the subtree rooted at id, into a HashMap
+func tally(doc: *Doc, id: i64, counts: *HashMap<str, i64>) -> void {
+    let k: str = kind_name(doc, id);
+    let prev: i64 = match (counts.get(k)) {
+        Some(v) => v,
+        None => 0,
+    };
+    counts.insert(k, prev + 1);
+    match (doc.at(id)) {
+        Json::Arr(ai) => {
+            let n: i64 = doc.arr_len(id);
+            let i: i64 = 0;
+            while (i < n) {
+                tally(doc, doc.arr_get(id, i), counts);
+                i = i + 1;
+            }
+        }
+        Json::Obj(oi) => {
+            let n: i64 = doc.obj_len(id);
+            let i: i64 = 0;
+            while (i < n) {
+                tally(doc, doc.obj_val(id, i), counts);
+                i = i + 1;
+            }
+        }
+        _ => { }
+    }
+}
+
+// print a value the way a shell user expects: strings bare, the rest as JSON
+func print_scalar(doc: *Doc, id: i64) -> void {
+    match (doc.at(id)) {
+        Json::Str(s) => { io.out("{}", s); }
+        _ => {
+            let s: String = to_string(doc, id);
+            io.out("{}", s.as_str());
+            s.drop();
+        }
+    }
+}
+
+// ---- commands ----------------------------------------------------------
+
+func cmd_print(text: str, pretty: i64) -> i64 {
+    let d: Doc = Doc::new();
+    let rc: i64 = 0;
+    match (parse_into(&d, text)) {
+        Ok(root) => {
+            let s: String = String::new();
+            if (pretty == 1) { s.drop(); s = to_pretty(&d, root); }
+            else { s.drop(); s = to_string(&d, root); }
+            io.out("{}", s.as_str());
+            s.drop();
+        }
+        Err(e) => { io.out("error: {}", e); rc = 1; }
+    }
+    d.drop();
+    return rc;
+}
+
+func cmd_get(text: str, path: str) -> i64 {
+    let d: Doc = Doc::new();
+    let rc: i64 = 0;
+    match (parse_into(&d, text)) {
+        Ok(root) => {
+            match (d.path(root, path)) {
+                Some(id) => { print_scalar(&d, id); }
+                None => { io.out("error: no value at path '{}'", path); rc = 1; }
+            }
+        }
+        Err(e) => { io.out("error: {}", e); rc = 1; }
+    }
+    d.drop();
+    return rc;
+}
+
+func cmd_stats(text: str) -> i64 {
+    let d: Doc = Doc::new();
+    let rc: i64 = 0;
+    match (parse_into(&d, text)) {
+        Ok(root) => {
+            let counts: HashMap<str, i64> = HashMap<str, i64>::new();
+            tally(&d, root, &counts);
+            let kinds: [str; 7] = ["object", "array", "string", "int", "float", "bool", "null"];
+            let i: i64 = 0;
+            while (i < 7) {
+                let n: i64 = match (counts.get(kinds[i])) {
+                    Some(v) => v,
+                    None => 0,
+                };
+                if (n > 0) { io.out("{:8} {}", kinds[i], n); }
+                i = i + 1;
+            }
+            io.out("{:8} {}", "nodes", d.count());
+            counts.drop();
+        }
+        Err(e) => { io.out("error: {}", e); rc = 1; }
+    }
+    d.drop();
+    return rc;
+}
+
+// ---- the built-in demo (what `jsontool` with no arguments runs) ---------
+
+func demo_one(label: str, text: str) -> void {
+    let d: Doc = Doc::new();
+    match (parse_into(&d, text)) {
+        Ok(root) => {
+            let c: String = to_string(&d, root);
+            io.out("{:10} {}", label, c.as_str());
+            c.drop();
+        }
+        Err(e) => { io.out("{:10} error: {}", label, e); }
+    }
+    d.drop();
+}
+
+func run_demo() -> i64 {
+    io.out("--- parse and re-serialize ---");
+    demo_one("scalars", "[1, -2, 3.5, true, false, null]");
+    demo_one("nested", "{\"a\":{\"b\":{\"c\":[1,[2,[3]]]}}}");
+    demo_one("escapes", "[\"tab\\there\", \"nl\\nhere\", \"quote\\\"q\", \"u\\u0041\"]");
+    demo_one("empty", "{\"o\":{},\"a\":[],\"s\":\"\"}");
+    demo_one("numbers", "[0, -0, 1e3, -2.5e-2, 12345678901]");
+    demo_one("spacing", "  {  \"x\"  :  [ 1 , 2 ]  }  ");
+
+    io.out("--- errors are values ---");
+    demo_one("unclosed", "{\"a\": 1");
+    demo_one("comma", "[1 2]");
+    demo_one("key", "{1: 2}");
+    demo_one("trailing", "{} extra");
+    demo_one("badescape", "[\"\\q\"]");
+
+    io.out("--- paths ---");
+    let doc: str = "{\"user\":{\"name\":\"ada\",\"roles\":[\"admin\",\"dev\"]},\"count\":2}";
+    cmd_get(doc, "user.name");
+    cmd_get(doc, "user.roles.1");
+    cmd_get(doc, "count");
+    cmd_get(doc, "user.missing");
+
+    io.out("--- stats ---");
+    cmd_stats(doc);
+
+    io.out("--- pretty ---");
+    cmd_print("{\"a\":[1,{\"b\":true}]}", 1);
+
+    io.out("--- round trip is stable ---");
+    let d1: Doc = Doc::new();
+    let src: str = "{\"k\":[1,2.5,\"s\",null,{\"n\":false}]}";
+    match (parse_into(&d1, src)) {
+        Ok(r1) => {
+            let once: String = to_string(&d1, r1);
+            let d2: Doc = Doc::new();
+            match (parse_into(&d2, once.as_str())) {
+                Ok(r2) => {
+                    let twice: String = to_string(&d2, r2);
+                    io.out("stable = {}", cstr.eq(once.as_str(), twice.as_str()));
+                    twice.drop();
+                }
+                Err(e) => { io.out("reparse error: {}", e); }
+            }
+            d2.drop();
+            once.drop();
+        }
+        Err(e) => { io.out("parse error: {}", e); }
+    }
+    d1.drop();
+    return 0;
+}
+
+func main(argc: i32, argv: **u8) -> i8 {
+    if (argc < 2) { return run_demo() as i8; }
+    let cmd: str = argv[1] as str;
+    if (cstr.eq(cmd, "pretty") && argc >= 3) { return cmd_print(argv[2] as str, 1) as i8; }
+    if (cstr.eq(cmd, "compact") && argc >= 3) { return cmd_print(argv[2] as str, 0) as i8; }
+    if (cstr.eq(cmd, "stats") && argc >= 3) { return cmd_stats(argv[2] as str) as i8; }
+    if (cstr.eq(cmd, "get") && argc >= 4) { return cmd_get(argv[2] as str, argv[3] as str) as i8; }
+    io.out("usage: jsontool [pretty|compact|stats] '<json>' | get '<json>' <path>");
+    return 2;
+}

@@ -186,6 +186,15 @@ before the trap may be lost. Pass `--no-check` to drop the checks (the index is
 then trusted, C-style). Pointer indexing (`p[i]`) is never checked: a pointer
 carries no length.
 
+A trailing comma is allowed in struct literals, array literals, and call
+argument lists, as in Rust:
+
+```txt
+let p: Point = Point { x: 1, y: 2, };
+let a: [i64; 3] = [1, 2, 3,];
+f(1, 2,);
+```
+
 Integer literals may be written in decimal, hex, or binary; all are plain `TK_INT`
 tokens with the same 64-bit value:
 

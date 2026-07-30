@@ -1,0 +1,157 @@
+// unit tests for the JSON example (examples/10_json), the largest MVS program
+// in the repository: parsing, paths, serialization, and error handling
+import { test } from "std";
+import { Doc, Json } from "../../examples/10_json/value.mvs";
+import { parse_into } from "../../examples/10_json/parser.mvs";
+import { to_string, to_pretty } from "../../examples/10_json/writer.mvs";
+import { Result, Ok, Err } from "std/result";
+import { Option, Some, None } from "std/option";
+import { String } from "std/string";
+import { cstr } from "core";
+
+// parse text and return the compact serialization, or the error message
+func round(text: str) -> String {
+    let d: Doc = Doc::new();
+    let out: String = String::new();
+    match (parse_into(&d, text)) {
+        Ok(root) => {
+            out.drop();
+            out = to_string(&d, root);
+        }
+        Err(e) => {
+            out.push_str("ERR: ");
+            out.push_str(e);
+        }
+    }
+    d.drop();
+    return out;
+}
+
+@test
+func scalars_round_trip() -> void {
+    let a: String = round("[1,-2,true,false,null]");
+    test.eq(a.as_str(), "[1,-2,true,false,null]");
+    a.drop();
+    let b: String = round("{\"k\":\"v\"}");
+    test.eq(b.as_str(), "{\"k\":\"v\"}");
+    b.drop();
+}
+
+@test
+func whitespace_is_ignored() -> void {
+    let a: String = round("  {  \"x\" : [ 1 , 2 ]  }  ");
+    test.eq(a.as_str(), "{\"x\":[1,2]}");
+    a.drop();
+}
+
+@test
+func nesting_and_empties() -> void {
+    let a: String = round("{\"a\":{\"b\":{\"c\":[1,[2,[3]]]}}}");
+    test.eq(a.as_str(), "{\"a\":{\"b\":{\"c\":[1,[2,[3]]]}}}");
+    a.drop();
+    let b: String = round("{\"o\":{},\"a\":[],\"s\":\"\"}");
+    test.eq(b.as_str(), "{\"o\":{},\"a\":[],\"s\":\"\"}");
+    b.drop();
+}
+
+@test
+func escapes_survive() -> void {
+    let a: String = round("[\"t\\tb\",\"n\\nb\",\"q\\\"q\",\"s\\\\s\"]");
+    test.eq(a.as_str(), "[\"t\\tb\",\"n\\nb\",\"q\\\"q\",\"s\\\\s\"]");
+    a.drop();
+    // \u0041 decodes to A and re-serializes as a plain letter
+    let b: String = round("[\"\\u0041\"]");
+    test.eq(b.as_str(), "[\"A\"]");
+    b.drop();
+}
+
+@test
+func errors_are_values() -> void {
+    let a: String = round("{\"a\": 1");
+    test.ok(cstr.starts_with(a.as_str(), "ERR:"));
+    a.drop();
+    let b: String = round("[1 2]");
+    test.ok(cstr.starts_with(b.as_str(), "ERR:"));
+    b.drop();
+    let c: String = round("{1:2}");
+    test.ok(cstr.starts_with(c.as_str(), "ERR:"));
+    c.drop();
+    let d: String = round("{} trailing");
+    test.ok(cstr.starts_with(d.as_str(), "ERR:"));
+    d.drop();
+}
+
+@test
+func deep_nesting_is_rejected_not_crashed() -> void {
+    // 400 open brackets: past the depth cap, so it must be a clean error
+    let s: String = String::new();
+    let i: i64 = 0;
+    while (i < 400) {
+        s.push_str("[");
+        i = i + 1;
+    }
+    let r: String = round(s.as_str());
+    test.ok(cstr.starts_with(r.as_str(), "ERR:"));
+    r.drop();
+    s.drop();
+}
+
+@test
+func paths_and_lookup() -> void {
+    let d: Doc = Doc::new();
+    match (parse_into(&d, "{\"user\":{\"name\":\"ada\",\"roles\":[\"admin\",\"dev\"]},\"n\":7}")) {
+        Ok(root) => {
+            match (d.path(root, "user.name")) {
+                Some(id) => {
+                    match (d.at(id)) {
+                        Json::Str(s) => { test.eq(s, "ada"); }
+                        _ => { test.fail("expected a string"); }
+                    }
+                }
+                None => { test.fail("path user.name not found"); }
+            }
+            match (d.path(root, "user.roles.1")) {
+                Some(id) => {
+                    match (d.at(id)) {
+                        Json::Str(s) => { test.eq(s, "dev"); }
+                        _ => { test.fail("expected a string"); }
+                    }
+                }
+                None => { test.fail("path user.roles.1 not found"); }
+            }
+            match (d.path(root, "user.missing")) {
+                Some(id) => { test.fail("missing path resolved"); }
+                None => { test.ok(true); }
+            }
+            test.eq(d.obj_len(root), 2);
+        }
+        Err(e) => { test.fail(e); }
+    }
+    d.drop();
+}
+
+@test
+func pretty_matches_compact_content() -> void {
+    let d: Doc = Doc::new();
+    match (parse_into(&d, "{\"a\":[1,{\"b\":true}]}")) {
+        Ok(root) => {
+            let p: String = to_pretty(&d, root);
+            // reparsing the pretty form must give the same compact text
+            let d2: Doc = Doc::new();
+            match (parse_into(&d2, p.as_str())) {
+                Ok(r2) => {
+                    let c1: String = to_string(&d, root);
+                    let c2: String = to_string(&d2, r2);
+                    test.eq(c1.as_str(), c2.as_str());
+                    c1.drop();
+                    c2.drop();
+                }
+                Err(e) => { test.fail(e); }
+            }
+            d2.drop();
+            p.drop();
+        }
+        Err(e) => { test.fail(e); }
+    }
+    d.drop();
+}

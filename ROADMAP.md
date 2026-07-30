@@ -98,9 +98,17 @@ Done:
   implementation, on both x86-64 and AArch64. This is the only check that
   proves the generated code is RIGHT rather than merely unchanged
 
+- a real program written IN MVS: `examples/10_json` is a 1084-line JSON
+  library and CLI (tokenizer, arena value tree, recursive-descent parser with
+  `Result` errors, serializers, command line). It runs identically on all three
+  targets and is clean under AddressSanitizer with leak detection on. Writing
+  it uncovered four compiler gaps, all fixed: trailing commas, `from` as a
+  contextual keyword, struct literals as arguments, and a warning for `==` on
+  two `str` values
+
 Still open, roughly in order of value:
 
-- A larger real-program corpus written IN MVS (the strongest bug finder).
+- More real programs, and larger ones (this is still the strongest bug finder).
 - More differential pairs, ideally generated rather than hand-written.
 - Integer overflow checks behind a flag (trap on signed overflow).
 - DWARF variable info (today only line info), so a debugger can print locals.

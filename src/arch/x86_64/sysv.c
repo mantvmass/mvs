@@ -1056,8 +1056,15 @@ static void gen_expr(Gen *g, Node *n) {
             gen_addr(g, n);
             break;
         case ND_STRUCT_LIT:
-            fprintf(stderr, "codegen error: struct literal can only initialize a variable or be returned\n");
-            g->had_error = 1;
+            /* as an rvalue: materialize into the reserved temp, value = its address */
+            if (n->int_val) {
+                fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val);
+                gen_store_struct(g, n);
+                fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val);
+            } else {
+                fprintf(stderr, "codegen error: struct literal has no destination\n");
+                g->had_error = 1;
+            }
             break;
         default:
             fprintf(stderr, "codegen error: cannot generate expression (kind %d)\n", n->kind);

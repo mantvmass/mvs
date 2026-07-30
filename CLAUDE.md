@@ -149,6 +149,11 @@ the desugar is scope-aware and infers through generic instances) · `Option`/
 `Result` rewritten as REAL enums · `std/map` (`HashMap<K, V>`: open addressing,
 `get` returns `Option<V>`, i64 and str keys via `map_hash`/`map_eq` overloads).
 
+**Dogfood:** `examples/10_json` is a real 1084-line program in MVS (JSON
+library + CLI). Run it before claiming a language change is ergonomic; it is
+what surfaced trailing commas, contextual `from`, struct-literal arguments,
+and the `str ==` warning.
+
 **Remaining:** see [ROADMAP.md](ROADMAP.md) (nested/guard patterns, more
 collections, more `core` modules, macOS target).
 
