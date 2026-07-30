@@ -1,0 +1,77 @@
+// ============================================================
+//  dynamic: dyn Trait (trait objects) + dynamic dispatch + where clauses
+//  build:  mvs.exe examples/04_traits/dynamic.mvs
+//  run:    examples\04_traits\dynamic.exe
+//
+//  A `dyn Trait` value is a fat pointer {data, vtable}. Store `&value` of any
+//  implementing struct into it and calls dispatch through the vtable at run
+//  time, so one variable (or array) can hold different concrete types.
+//  `where T: A + B` constrains a generic over several traits at once.
+// ============================================================
+import { io } from "std";
+
+struct Rect { w: i32; h: i32; }
+struct Circle { r: i32; }
+
+trait Shape {
+    func area(self: *Self) -> i32;
+    func scaled(self: *Self, k: i32) -> i32;
+}
+
+impl Shape for Rect {
+    func area(self: *Rect) -> i32 { return self.w * self.h; }
+    func scaled(self: *Rect, k: i32) -> i32 { return self.w * self.h * k; }
+}
+impl Shape for Circle {
+    func area(self: *Circle) -> i32 { return 3 * self.r * self.r; }
+    func scaled(self: *Circle, k: i32) -> i32 { return 3 * self.r * self.r * k; }
+}
+
+// dynamic dispatch through a dyn parameter
+func describe(s: dyn Shape) -> i32 {
+    return s.area();
+}
+
+// where clause with multiple bounds
+trait Named { func name_id(self: *Self) -> i32; }
+impl Named for Rect { func name_id(self: *Rect) -> i32 { return 1; } }
+
+func both<T>(v: T) -> i32 where T: Shape + Named {
+    return v.area() + v.name_id();
+}
+
+func main() -> i8 {
+    let r: Rect = Rect { w: 3, h: 4 };
+    let c: Circle = Circle { r: 5 };
+
+    // build trait objects from pointers to concrete impls
+    let s1: dyn Shape = &r;
+    let s2: dyn Shape = &c;
+
+    io.out("rect area   = {}", s1.area());       // 12
+    io.out("circle area = {}", s2.area());       // 75
+    io.out("rect x10    = {}", s1.scaled(10));   // 120
+    io.out("circle x2   = {}", s2.scaled(2));    // 150
+
+    // reassign: same variable, different vtable at run time
+    let d: dyn Shape = &r;
+    io.out("d = rect    = {}", d.area());        // 12
+    d = &c;
+    io.out("d = circle  = {}", d.area());        // 75
+
+    // dyn as a function parameter
+    io.out("describe(r) = {}", describe(&r));    // 12
+    io.out("describe(c) = {}", describe(&c));    // 75
+
+    // dyn values in an array: a heterogeneous list
+    let shapes: [dyn Shape; 2] = [&r, &c];
+    let total: i32 = 0;
+    for (let i: i32 = 0; i < 2; i++) {
+        total += shapes[i].area();
+    }
+    io.out("total       = {}", total);           // 87
+
+    // where clause with two bounds (static dispatch, checked at instantiation)
+    io.out("both(r)     = {}", both(r));         // 13
+    return 0;
+}

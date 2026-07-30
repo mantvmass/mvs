@@ -84,6 +84,7 @@ int type_size(Gen *g, DataType base, int ptr, const char *sname) {
         case TYPE_I32: case TYPE_U32: case TYPE_F32: return 4;
         case TYPE_I64: case TYPE_U64: case TYPE_ISIZE: case TYPE_USIZE: case TYPE_F64: return 8;
         case TYPE_I128: case TYPE_U128: return 16;
+        case TYPE_DYN: return 16;              /* fat pointer {data, vtable} */
         case TYPE_STR: return 8;
         case TYPE_FUNC: return 8;   /* function pointer = an 8-byte address */
         case TYPE_STRUCT: { StructInfo *s = find_struct(g, sname); return s ? s->size : 0; }
@@ -269,6 +270,21 @@ ExprType type_of(Gen *g, Node *n) {
                 if (!f) f = find_func(g, "", callee->name);
             } else if (callee->kind == ND_MEMBER) {
                 ExprType bt = type_of(g, callee->operand);
+                if (is_dyn(bt.base, bt.ptr) && bt.sname && g->program) {
+                    /* dynamic dispatch: the result type comes from the trait's method signature */
+                    for (int i = 0; i < g->program->nitems; i++) {
+                        Node *tr = g->program->items[i];
+                        if (tr->kind != ND_TRAIT || !tr->name || strcmp(tr->name, bt.sname) != 0) continue;
+                        for (int j = 0; j < tr->nitems; j++)
+                            if (tr->items[j]->kind == ND_FUNC && callee->name &&
+                                strcmp(tr->items[j]->name, callee->name) == 0) {
+                                r.base = tr->items[j]->type; r.ptr = tr->items[j]->ptr;
+                                r.sname = tr->items[j]->type_name;
+                                return r;
+                            }
+                        break;
+                    }
+                }
                 if (bt.base == TYPE_STRUCT && bt.sname) f = find_func(g, bt.sname, callee->name); /* method */
                 if (!f && callee->operand->kind == ND_IDENT) f = find_func(g, callee->operand->name, callee->name);
             }
@@ -487,8 +503,29 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
     if (!n) return;
     if (n->kind == ND_CALL) {
         ExprType rt = type_of(g, n);
-        if ((rt.base == TYPE_STRUCT || is_i128(rt.base, rt.ptr)) && rt.ptr == 0)
-            n->int_val = add_local(g, "$tmp", TYPE_STRUCT, 0, 0, rt.sname, NULL, frame);
+        if ((rt.base == TYPE_STRUCT || is_blob16(rt.base, rt.ptr)) && rt.ptr == 0)
+            n->int_val = add_local(g, "$tmp", rt.base, 0, 0, rt.sname, NULL, frame); /* sized by the real type */
+        /* dyn parameters: a *Struct argument is wrapped into a fat-pointer blob at the call
+         * site; reserve one 16-byte slot per argument that needs the conversion */
+        Node *callee = n->operand;
+        Node *fn = NULL; int argoff = 0;
+        if (callee && callee->kind == ND_IDENT) {
+            fn = find_func(g, g->cur_ns ? g->cur_ns : "", callee->name);
+            if (!fn) fn = find_func(g, "", callee->name);
+        } else if (callee && callee->kind == ND_MEMBER) {
+            ExprType bt = type_of(g, callee->operand);
+            if (bt.base == TYPE_STRUCT && bt.sname) { fn = find_func(g, bt.sname, callee->name); argoff = 1; }
+        }
+        if (fn && !fn->is_extern) {
+            for (int i = 0; i < n->nitems && i + argoff < fn->nitems; i++) {
+                Node *pp = fn->items[i + argoff];
+                if (is_dyn(pp->type, pp->ptr)) {
+                    ExprType at = type_of(g, n->items[i]);
+                    if (!is_dyn(at.base, at.ptr))
+                        n->items[i]->int_val = add_local(g, "$dynarg", TYPE_DYN, 0, 0, NULL, NULL, frame);
+                }
+            }
+        }
     } else if (n->kind == ND_BINARY) {
         /* 128-bit binary ops need scratch: result + both operands (3 x 16 bytes) */
         ExprType lt = type_of(g, n->lhs), rt2 = type_of(g, n->rhs);

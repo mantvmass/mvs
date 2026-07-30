@@ -337,6 +337,31 @@ describe(c);                         // 75, Circle::area
   that an `impl` provides every trait method and that the trait exists.
 - Trait default methods are supported (the body is cloned and `Self` replaced for types that don't override).
 
+#### Trait objects: `dyn Trait` (dynamic dispatch)
+
+```rust
+let s: dyn Shape = &rect;            // fat pointer {data, vtable}; &circle works too
+io.out("{}", s.area());              // dispatches through the vtable at run time
+s = &circle;                          // same variable, different concrete type
+let all: [dyn Shape; 2] = [&rect, &circle];   // heterogeneous lists work
+
+func describe(s: dyn Shape) -> i32 { return s.area(); }   // dyn parameters and returns
+```
+
+A `dyn Trait` is 16 bytes: the data pointer plus a pointer to a per-(Type, Trait) vtable
+(`mvs_vt_<Trait>_<Type>` in `.data`, one slot per trait method in declaration order). Storing
+`&value` of a non-implementing struct is a compile error. Trait objects cannot be compared,
+used as conditions, or passed to extern C.
+
+#### Multiple bounds: `<T: A + B>` and `where`
+
+```rust
+func both<T: Shape + Named>(v: T) -> i32 { ... }          // inline form
+func both<T>(v: T) -> i32 where T: Shape + Named { ... }  // where clause (same meaning)
+```
+
+Every listed trait is checked at instantiation; the error names the first missing one.
+
 ### 4.7 struct and methods (Rust-style)
 
 ```rust
@@ -901,8 +926,8 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
   `mulsd` by an integer exponent); a negative exponent isn't supported (returns 1.0).
 - generics + overloading + traits are all present (monomorphization); overloads distinguish int **width**
   (i32 vs i64 are separate), with an integer literal matched by category if there's a single int overload;
-  `trait`/`<T: Trait>`/default methods exist, but it's **static dispatch only** (no `dyn Trait`/vtable, no
-  multi-condition `where`).
+  `trait`/`<T: A + B>`/`where`/default methods exist, and `dyn Trait` gives real vtable-based dynamic
+  dispatch (trait objects cannot be compared, used as conditions, or passed to extern C).
 
 ### Numbers
 
@@ -999,6 +1024,9 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
   slots 5+, for extern C calls, C callers of exports, and MVS callers of its own exports.
 - Golden test suite (`make test`): run-pass output diffs, compile-only, and compile-fail
   (expected-error) tests in `tests/`, run by CI.
+- `dyn Trait` trait objects: 16-byte fat pointers {data, vtable}, per-(Type, Trait) vtables
+  emitted in `.data`, run-time dispatch through the vtable, dyn variables/parameters/returns/
+  array elements, plus multi-bound generics (`<T: A + B>` and `where` clauses).
 - Full 128-bit `i128`/`u128` arithmetic: address-as-value convention (like structs), pair-wise
   qword add/sub/mul/bitwise/shift/compare, software shift-subtract division emitted as helper
   routines (`mvs_u128_divmod` and friends), decimal printing via `io.out`, and hidden-pointer
@@ -1019,8 +1047,6 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 
 ### Remaining
 
-- **Dynamic dispatch (`dyn Trait` / vtable)** and multi-condition `where`. This is also the prerequisite for
-  making `io.out`'s `{}` form a real library function (see below).
 - **`io.out` as a library** instead of an intrinsic. This needs three things, in order:
   1. trait objects / `dyn Trait` (a fat pointer `{data, vtable}`), with a per-(type, trait) vtable and dynamic
      dispatch through it.

@@ -21,6 +21,7 @@ static const Keyword KEYWORDS[] = {
     {"case", TK_CASE}, {"default", TK_DEFAULT}, {"break", TK_BREAK},
     {"continue", TK_CONTINUE}, {"import", TK_IMPORT}, {"from", TK_FROM},
     {"extern", TK_EXTERN}, {"export", TK_EXPORT}, {"impl", TK_IMPL}, {"trait", TK_TRAIT},
+    {"dyn", TK_DYN}, {"where", TK_WHERE},
     {"true", TK_TRUE}, {"false", TK_FALSE}, {"as", TK_AS},
     /* Data types */
     {"i8", TK_TYPE_I8}, {"i16", TK_TYPE_I16}, {"i32", TK_TYPE_I32}, {"i64", TK_TYPE_I64},

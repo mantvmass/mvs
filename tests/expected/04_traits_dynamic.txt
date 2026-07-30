@@ -1,0 +1,10 @@
+rect area   = 12
+circle area = 75
+rect x10    = 120
+circle x2   = 150
+d = rect    = 12
+d = circle  = 75
+describe(r) = 12
+describe(c) = 75
+total       = 87
+both(r)     = 13

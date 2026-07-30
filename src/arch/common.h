@@ -70,6 +70,7 @@ typedef struct {
 /* All backend state gathered into one structure (the compiler processes one file at a time) */
 typedef struct {
     FILE *out;
+    Node *program;          /* the whole merged program (used to look up traits for dyn dispatch) */
 
     Sym  locals[MAX_SYM];   int nlocals;   /* variables of the current function (all reserved in a pre-pass) */
     Sym  globals[MAX_SYM];  int nglobals;  /* global variables of the whole program */
@@ -90,6 +91,7 @@ typedef struct {
     int cur_ret_float;      /* 1 if the function being generated returns a float (must return via xmm0) */
     int cur_ret_f32c;       /* 1 if an exported function returns f32 (must convert double -> single for C) */
     int cur_ret_i128;       /* 1 if the function returns i128/u128 (goes through the hidden sret pointer) */
+    const char *cur_ret_dyn;/* trait name if the function returns dyn Trait (hidden sret pointer), else NULL */
     int io_imported;        /* 1 if the io module was imported (gates the built-in io.out function) */
 
     /* String pool: stores string bytes to be declared in the .data section */
@@ -100,6 +102,7 @@ typedef struct {
 
     int label_id;           /* counter for unique labels */
     int need_i128;          /* 1 = emit the 128-bit divmod/print helper routines at the end */
+    int need_vtables;       /* 1 = the program uses dyn Trait; emit vtables + keep impl methods */
     int had_error;
 } Gen;
 
@@ -108,6 +111,16 @@ typedef struct {
  * address of a 16-byte blob, and arithmetic goes through pair-wise qword ops. */
 static inline int is_i128(DataType base, int ptr) {
     return ptr == 0 && (base == TYPE_I128 || base == TYPE_U128);
+}
+
+/* Trait object VALUE (dyn Trait): a 16-byte fat pointer {data, vtable}, address-as-value */
+static inline int is_dyn(DataType base, int ptr) {
+    return ptr == 0 && base == TYPE_DYN;
+}
+
+/* Any 16-byte address-as-value kind (i128/u128 or dyn Trait) */
+static inline int is_blob16(DataType base, int ptr) {
+    return is_i128(base, ptr) || is_dyn(base, ptr);
 }
 
 /* --- label counter and symbol naming (rules shared by all backends) --- */

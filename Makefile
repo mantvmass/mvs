@@ -39,7 +39,7 @@ EXAMPLES = examples/demo \
            examples/02_functions/funcptr examples/02_functions/defaults \
            examples/03_structs/structs examples/03_structs/methods examples/03_structs/pointers \
            examples/03_structs/compound \
-           examples/04_traits/traits examples/04_traits/display \
+           examples/04_traits/traits examples/04_traits/display examples/04_traits/dynamic \
            examples/05_strings/strings \
            examples/06_modules/use_import \
            examples/07_c_interop/extern_c \

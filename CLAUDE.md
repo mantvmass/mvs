@@ -93,10 +93,11 @@ default parameter values · single-eval compound assignment · math-style `**` p
 golden test suite (`make test`) · Rust-style diagnostics (multi-error recovery, source excerpt +
 caret + help, missing-return check, unused/unreachable warnings) · real `[T; N]` array type
 (literals, indexing, `a.len`, const-index bounds check, arrays in structs, decay to `*T`) ·
-full 128-bit `i128`/`u128` arithmetic (software divmod helpers + decimal io.out).
+full 128-bit `i128`/`u128` arithmetic (software divmod helpers + decimal io.out) ·
+`dyn Trait` trait objects (fat pointer + vtable dispatch) · multi-bound generics
+(`<T: A + B>`, `where` clauses).
 
-**Remaining:** dynamic dispatch (`dyn`/vtable) + multi-condition `where` ·
-io.out as a library (variadic + reflection) · ARM64/Linux backends.
+**Remaining:** io.out as a library (variadic + reflection) · ARM64/Linux backends.
 
 ## Project-specific cautions (full list in RULES.md)
 

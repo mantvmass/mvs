@@ -100,6 +100,18 @@ static int is_type_token(TokenType t) {
     return datatype_from_token(t) != TYPE_UNKNOWN;
 }
 
+/* Parse a '+'-separated trait bound list (A + B + C) into buf as "A+B+C" */
+static void parse_bound_list(Parser *p, char *buf, size_t cap) {
+    size_t bl = 0; buf[0] = '\0';
+    do {
+        if (!check(p, TK_IDENT)) { error(p, "expected a trait name in bound"); break; }
+        if (bl && bl + 1 < cap) buf[bl++] = '+';
+        bl += (size_t)snprintf(buf + bl, cap - bl, "%s", p->cur.lexeme);
+        if (bl >= cap) bl = cap - 1;
+        advance(p);
+    } while (match(p, TK_PLUS));
+}
+
 /* Forward declarations (mutual recursion) */
 static Node *parse_expr(Parser *p);
 static Node *parse_stmt(Parser *p);
@@ -545,6 +557,14 @@ static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out
         if (sig_out) *sig_out = sig;
         return TYPE_FUNC;
     }
+    if (check(p, TK_DYN)) {
+        /* trait object: dyn Trait (a fat pointer {data, vtable}); type_name = the trait */
+        advance(p);
+        if (!check(p, TK_IDENT)) { error(p, "expected a trait name after 'dyn'"); return TYPE_UNKNOWN; }
+        *type_name = strdup(p->cur.lexeme);
+        advance(p);
+        return TYPE_DYN;
+    }
     if (is_type_token(p->cur.type)) {
         DataType dt = datatype_from_token(p->cur.type);
         advance(p);
@@ -754,11 +774,11 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
             int gi = fn->ngen < 4 ? fn->ngen : 3;
             if (fn->ngen < 4) fn->gen[fn->ngen++] = strdup(p->cur.lexeme);
             advance(p);
-            /* Trait bound: <T: Display> stores the trait name to check at instantiation time */
+            /* Trait bound: <T: Display> or <T: A + B>; stored as "A+B" and checked at instantiation */
             if (match(p, TK_COLON)) {
-                if (!check(p, TK_IDENT)) { error(p, "expected trait name after ':'"); break; }
-                fn->gen_bound[gi] = strdup(p->cur.lexeme);
-                advance(p);
+                char bounds[256];
+                parse_bound_list(p, bounds, sizeof(bounds));
+                fn->gen_bound[gi] = strdup(bounds);
             }
         } while (match(p, TK_COMMA));
         expect(p, TK_GT, "expected '>' after generic type parameters");
@@ -792,6 +812,21 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
     }
     expect(p, TK_ARROW, "expected '->' before return type");
     fn->type = parse_type(p, &fn->ptr, &fn->type_name, NULL, NULL); /* nested func-ptr return not supported */
+    /* where clause: `where T: A + B, U: C` fills the same bound slots as <T: A> */
+    if (match(p, TK_WHERE)) {
+        do {
+            if (!check(p, TK_IDENT)) { error(p, "expected a generic parameter name in where clause"); break; }
+            int gi = -1;
+            for (int i = 0; i < fn->ngen; i++)
+                if (strcmp(fn->gen[i], p->cur.lexeme) == 0) { gi = i; break; }
+            if (gi < 0) error(p, "where clause names a type that is not a generic parameter");
+            advance(p);
+            expect(p, TK_COLON, "expected ':' in where clause");
+            char bounds[256];
+            parse_bound_list(p, bounds, sizeof(bounds));
+            if (gi >= 0) { free(fn->gen_bound[gi]); fn->gen_bound[gi] = strdup(bounds); }
+        } while (match(p, TK_COMMA));
+    }
     if (is_extern) {
         expect(p, TK_SEMICOLON, "expected ';' after extern declaration");
         fn->body = NULL; /* foreign function has no body */

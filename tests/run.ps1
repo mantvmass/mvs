@@ -52,6 +52,7 @@ $runPass = @(
     "examples/03_structs/compound",
     "examples/04_traits/traits",
     "examples/04_traits/display",
+    "examples/04_traits/dynamic",
     "examples/05_strings/strings",
     "examples/06_modules/use_import",
     "examples/08_stdlib/io_demo",

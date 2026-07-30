@@ -1,0 +1,11 @@
+//~ ERROR: does not implement trait
+// storing a pointer to a struct that lacks the impl into a dyn is rejected
+struct A { x: i32; }
+struct B { y: i32; }
+trait T { func f(self: *Self) -> i32; }
+impl T for A { func f(self: *A) -> i32 { return 1; } }
+func main() -> i8 {
+    let b: B = B { y: 1 };
+    let d: dyn T = &b;
+    return 0;
+}

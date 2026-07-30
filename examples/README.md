@@ -59,6 +59,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 |------|----------|
 | `traits.mvs` | trait + `impl Trait for` + `<T: Trait>` (static dispatch) |
 | `display.mvs` | trait `Display` + `fmt.println` (library-style formatting) |
+| `dynamic.mvs` | `dyn Trait` objects: vtable dispatch, dyn arrays/params, `where T: A + B` |
 
 ## 05_strings: strings
 

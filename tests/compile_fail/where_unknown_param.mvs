@@ -1,0 +1,5 @@
+//~ ERROR: not a generic parameter
+// a where clause can only constrain the function's own generic parameters
+trait T { func f(self: *Self) -> i32; }
+func g<A>(v: A) -> i32 where B: T { return 0; }
+func main() -> i8 { return 0; }

@@ -44,6 +44,8 @@ typedef enum {
     TK_EXPORT,       /* export  - export a function so C can call it (uses the raw symbol name) */
     TK_IMPL,         /* impl    - block defining methods of a struct (Rust-style) */
     TK_TRAIT,        /* trait   - define a contract (set of method signatures), Rust-style */
+    TK_DYN,          /* dyn     - trait object type (dyn Trait = fat pointer {data, vtable}) */
+    TK_WHERE,        /* where   - trait bound clause after the signature (where T: A + B) */
     TK_TRUE,         /* true    - boolean true */
     TK_FALSE,        /* false   - boolean false */
     TK_AS,           /* as      - explicit type cast (e.g. x as i32) */

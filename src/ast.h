@@ -15,7 +15,10 @@ typedef enum {
     TYPE_I8, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I128, TYPE_ISIZE,
     TYPE_U8, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U128, TYPE_USIZE,
     TYPE_BOOL, TYPE_VOID, TYPE_STR, TYPE_CHAR, TYPE_F32, TYPE_F64,
-    TYPE_STRUCT, TYPE_FUNC, TYPE_UNKNOWN
+    TYPE_STRUCT, TYPE_FUNC,
+    TYPE_DYN,      /* trait object `dyn Trait`: a 16-byte fat pointer {data, vtable};
+                    * type_name holds the trait name; uses address-as-value like structs */
+    TYPE_UNKNOWN
 } DataType;
 
 /* Kinds of AST nodes */

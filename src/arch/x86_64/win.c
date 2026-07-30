@@ -100,7 +100,7 @@ static void gen_load_var(Gen *g, Sym *s) {
     else              { fprintf(g->out, "    lea rax, [rbp - %d]\n", s->offset); }
     if (s->arr > 0) return;                            /* [T; N]: decays to the array's address */
     if (s->type == TYPE_STRUCT && s->ptr == 0) return; /* struct: keep the address in rax */
-    if (is_i128(s->type, s->ptr)) return;              /* i128: address-as-value */
+    if (is_blob16(s->type, s->ptr)) return;            /* i128/dyn: address-as-value */
     gen_load_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, s->size); /* pointer = load 8 bytes */
 }
 
@@ -303,6 +303,100 @@ static void gen_i128_store(Gen *g, ExprType rhs_t) {
     } else {
         fprintf(g->out, "    mov [rax], rcx\n    mov rdx, rcx\n    sar rdx, 63\n    mov [rax + 8], rdx\n");
     }
+}
+
+/* ---------- dyn Trait (trait objects) ----------
+ *
+ * A `dyn Trait` value is a 16-byte fat pointer {data, vtable} using the same
+ * address-as-value convention. Vtables (one per impl Trait for Type pair) are
+ * emitted in .data as mvs_vt_<Trait>_<Type>: one qword per trait method, in
+ * trait declaration order. d.m(...) loads the vtable and calls indirectly. */
+
+/* Store the rhs (value in rcx, per its own convention) into the dyn blob at [rax]:
+ * another dyn copies both qwords; a pointer-to-struct becomes {ptr, vtable} */
+static void gen_dyn_store(Gen *g, ExprType rhs_t, const char *trait) {
+    if (is_dyn(rhs_t.base, rhs_t.ptr)) {
+        fprintf(g->out, "    mov rdx, [rcx]\n    mov [rax], rdx\n");
+        fprintf(g->out, "    mov rdx, [rcx + 8]\n    mov [rax + 8], rdx\n");
+        return;
+    }
+    if (rhs_t.ptr == 1 && rhs_t.base == TYPE_STRUCT && rhs_t.sname && trait) {
+        g->need_vtables = 1;
+        fprintf(g->out, "    mov [rax], rcx\n");
+        fprintf(g->out, "    lea rdx, [rel mvs_vt_%s_%s]\n    mov [rax + 8], rdx\n", trait, rhs_t.sname);
+        return;
+    }
+    fprintf(stderr, "codegen error: a dyn value can only come from another dyn or a pointer to an implementing struct\n");
+    g->had_error = 1;
+}
+
+/* Gen a dynamic-dispatch call d.m(args): resolve the method's vtable slot from the
+ * trait's declaration order, stage [sret]? [self=data] args..., and call through
+ * [vtable + slot*8]. The blob's address is kept in one extra top temp so both the
+ * self pointer and the vtable can be read from it without re-evaluating the base. */
+static void gen_dyn_call(Gen *g, Node *n, int has_sret, const char *trait) {
+    Node *tr = NULL;
+    for (int i = 0; g->program && i < g->program->nitems; i++) {
+        Node *d = g->program->items[i];
+        if (d->kind == ND_TRAIT && d->name && strcmp(d->name, trait) == 0) { tr = d; break; }
+    }
+    if (!tr) { fprintf(stderr, "codegen error: unknown trait '%s'\n", trait); g->had_error = 1; return; }
+    int idx = -1, mi = 0;
+    Node *msig = NULL;
+    for (int i = 0; i < tr->nitems; i++) {
+        if (tr->items[i]->kind != ND_FUNC) continue;
+        if (strcmp(tr->items[i]->name, n->operand->name) == 0) { idx = mi; msig = tr->items[i]; break; }
+        mi++;
+    }
+    if (idx < 0) {
+        fprintf(stderr, "codegen error: trait '%s' has no method '%s'\n", trait, n->operand->name);
+        g->had_error = 1; return;
+    }
+    g->need_vtables = 1;
+
+    int total = n->nitems + 1 + (has_sret ? 1 : 0);   /* +1 = self */
+    int nstack = total > 4 ? total - 4 : 0;
+    int callspace = 32 + nstack * 8;
+    callspace = (callspace + 15) / 16 * 16;
+    const char *regs[4] = { "rcx", "rdx", "r8", "r9" };
+    int selfpos = has_sret ? 1 : 0;
+
+    if (has_sret) push_tmp(g);                        /* destination address (already in rax) */
+    gen_expr(g, n->operand->operand);                 /* rax = the dyn blob's address */
+    push_tmp(g);                                      /* "self" slot: holds the BLOB address */
+    for (int i = 0; i < n->nitems; i++) {             /* the declared arguments */
+        gen_expr(g, n->items[i]);
+        if (i + 1 < msig->nitems) {                   /* msig items[0] = self */
+            Node *pp = msig->items[i + 1];
+            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 }, at = type_of(g, n->items[i]);
+            gen_coerce_num(g, at, pt);
+        }
+        push_tmp(g);
+    }
+    /* extra top temp: a second copy of the blob address for the vtable fetch */
+    fprintf(g->out, "    mov rax, [rsp + %d]\n", (n->nitems) * 16);   /* the self slot from the top */
+    push_tmp(g);
+
+    fprintf(g->out, "    sub rsp, %d\n", callspace);
+    for (int i = 0; i < total; i++) {
+        int srcoff = callspace + (total + 1 - 1 - i) * 16;   /* +1 = the extra blob temp on top */
+        fprintf(g->out, "    mov rax, [rsp + %d]\n", srcoff);
+        if (i == selfpos) fprintf(g->out, "    mov rax, [rax]\n");    /* blob -> data pointer */
+        if (i < 4) fprintf(g->out, "    mov %s, rax\n", regs[i]);
+        else       fprintf(g->out, "    mov [rsp + %d], rax\n", 32 + (i - 4) * 8);
+        if (i > selfpos && i < 4) {                    /* float args go in xmm too */
+            int pi = i - selfpos;                      /* parameter index in msig (self = 0) */
+            if (pi < msig->nitems && is_float_type(msig->items[pi]->type) && msig->items[pi]->ptr == 0)
+                fprintf(g->out, "    movq xmm%d, rax\n", i);
+        }
+    }
+    fprintf(g->out, "    mov rax, [rsp + %d]\n", callspace);          /* blob address (top temp) */
+    fprintf(g->out, "    mov rax, [rax + 8]\n");                      /* vtable */
+    fprintf(g->out, "    call qword [rax + %d]\n", idx * 8);
+    fprintf(g->out, "    add rsp, %d\n", callspace);
+    fprintf(g->out, "    add rsp, %d\n", (total + 1) * 16);
+    if (is_float_type(msig->type) && msig->ptr == 0)
+        fprintf(g->out, "    movq rax, xmm0\n");                      /* float result back to rax bits */
 }
 
 /* Gen a 128-bit binary operation. Slots: result at ro, lhs at ro-16, rhs at ro-32.
@@ -733,6 +827,15 @@ static void gen_expr(Gen *g, Node *n) {
                 gen_i128_store(g, rvt);
                 break;                                     /* rax = target address as the expr value */
             }
+            if (is_dyn(tt.base, tt.ptr)) {
+                ExprType rvt = type_of(g, n->rhs);
+                gen_expr(g, n->rhs);
+                push_tmp(g);
+                gen_addr(g, target);
+                pop_tmp(g, "rcx");
+                gen_dyn_store(g, rvt, tt.sname);
+                break;
+            }
             /* whole-struct assignment (copy/literal) */
             if (tt.base == TYPE_STRUCT && tt.ptr == 0 && n->op == TK_ASSIGN) {
                 gen_addr(g, target);          /* rax = destination address */
@@ -858,7 +961,7 @@ static void gen_expr(Gen *g, Node *n) {
              * rvalue, e.g. f(make()) */
             {
                 ExprType rt = type_of(g, n);
-                if ((rt.base == TYPE_STRUCT || is_i128(rt.base, rt.ptr)) && rt.ptr == 0 && n->int_val) {
+                if ((rt.base == TYPE_STRUCT || is_blob16(rt.base, rt.ptr)) && rt.ptr == 0 && n->int_val) {
                     fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val); /* sret = the temp slot */
                     gen_call(g, n, 1);
                     fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val); /* result = the value's address */
@@ -882,7 +985,7 @@ static void gen_expr(Gen *g, Node *n) {
             gen_addr(g, n);
             if (et.base == TYPE_STRUCT && et.ptr == 0) break; /* nested struct field: keep the address */
             if (et.arr > 0) break;                            /* [T; N] field: decays to its address */
-            if (is_i128(et.base, et.ptr)) break;              /* i128 field: address-as-value */
+            if (is_blob16(et.base, et.ptr)) break;            /* i128/dyn field: address-as-value */
             gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
             break;
         }
@@ -891,7 +994,7 @@ static void gen_expr(Gen *g, Node *n) {
             ExprType et = type_of(g, n);
             gen_addr(g, n);
             if (et.base == TYPE_STRUCT && et.ptr == 0) break; /* struct element: keep the address */
-            if (is_i128(et.base, et.ptr)) break;              /* i128 element: address-as-value */
+            if (is_blob16(et.base, et.ptr)) break;            /* i128/dyn element: address-as-value */
             gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
             break;
         }
@@ -938,7 +1041,9 @@ static void gen_stmt(Gen *g, Node *n) {
                             gen_coerce_num(g, vt2, dt2);
                             fprintf(g->out, "    mov rcx, rax\n");
                             fprintf(g->out, "    lea rax, [rbp - %d]\n", eoff);
-                            gen_store_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, esz);
+                            if (is_dyn(s->type, s->ptr))       gen_dyn_store(g, vt2, s->sname);
+                            else if (is_i128(s->type, s->ptr)) gen_i128_store(g, vt2);
+                            else gen_store_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, esz);
                         }
                     }
                 } else if (s->type == TYPE_STRUCT && s->ptr == 0) {
@@ -947,15 +1052,16 @@ static void gen_stmt(Gen *g, Node *n) {
                     if (s->is_global) { global_label(s->name, lbl); fprintf(g->out, "    lea rax, [rel %s]\n", lbl); }
                     else              { fprintf(g->out, "    lea rax, [rbp - %d]\n", s->offset); }
                     gen_store_struct(g, n->operand);
-                } else if (is_i128(s->type, s->ptr)) {
-                    /* 128-bit variable: store through the address-as-value convention */
+                } else if (is_blob16(s->type, s->ptr)) {
+                    /* 128-bit or dyn variable: store through the address-as-value convention */
                     ExprType rvt = type_of(g, n->operand);
                     gen_expr(g, n->operand);
                     fprintf(g->out, "    mov rcx, rax\n");
                     char lbl[LABEL_MAX];
                     if (s->is_global) { global_label(s->name, lbl); fprintf(g->out, "    lea rax, [rel %s]\n", lbl); }
                     else              { fprintf(g->out, "    lea rax, [rbp - %d]\n", s->offset); }
-                    gen_i128_store(g, rvt);
+                    if (is_dyn(s->type, s->ptr)) gen_dyn_store(g, rvt, s->sname);
+                    else                         gen_i128_store(g, rvt);
                 } else {
                     gen_expr(g, n->operand);     /* rax = value */
                     ExprType vt = type_of(g, n->operand), dt = { s->type, s->ptr, s->sname, s->sig, s->arr };
@@ -972,13 +1078,14 @@ static void gen_stmt(Gen *g, Node *n) {
             break;
         case ND_RETURN:
             if (g->sret_off != 0 && n->operand) {
-                if (g->cur_ret_i128) {
-                    /* function returns i128: write the value through the hidden pointer */
+                if (g->cur_ret_i128 || g->cur_ret_dyn) {
+                    /* function returns i128/dyn: write the value through the hidden pointer */
                     ExprType rvt = type_of(g, n->operand);
                     gen_expr(g, n->operand);
                     fprintf(g->out, "    mov rcx, rax\n");
                     fprintf(g->out, "    mov rax, [rbp - %d]\n", g->sret_off);
-                    gen_i128_store(g, rvt);
+                    if (g->cur_ret_dyn) gen_dyn_store(g, rvt, g->cur_ret_dyn);
+                    else                gen_i128_store(g, rvt);
                     fprintf(g->out, "    mov rax, [rbp - %d]\n", g->sret_off);
                 } else {
                     /* function returns a struct: write the value through the hidden pointer, then return it */
@@ -1203,6 +1310,15 @@ static void gen_store_struct(Gen *g, Node *value) {
 static void gen_call(Gen *g, Node *n, int has_sret) {
     Node *callee = n->operand;
     Node *target = NULL;
+
+    /* dynamic dispatch: the callee is a member access on a dyn Trait value */
+    if (callee->kind == ND_MEMBER) {
+        ExprType bt0 = type_of(g, callee->operand);
+        if (is_dyn(bt0.base, bt0.ptr) && bt0.sname) {
+            gen_dyn_call(g, n, has_sret, bt0.sname);
+            return;
+        }
+    }
     Node *self_expr = NULL;   /* if this is a method: the receiver expression */
     int   self_is_ptr = 0;    /* whether the receiver is already a pointer (if so, pass it directly, no &) */
 
@@ -1233,7 +1349,7 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
         sig = target;   /* direct call: target is both the signature and the destination */
     }
 
-    int returns_struct = ((sig->type == TYPE_STRUCT || is_i128(sig->type, sig->ptr)) && sig->ptr == 0);
+    int returns_struct = ((sig->type == TYPE_STRUCT || is_blob16(sig->type, sig->ptr)) && sig->ptr == 0);
     if (returns_struct && !has_sret) {
         fprintf(stderr, "codegen error: a struct-returning call must be assigned to a variable\n");
         g->had_error = 1; return;
@@ -1263,6 +1379,13 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
             Node *pp = sig->items[i + poff];
             ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 }, at = type_of(g, n->items[i]);
             gen_coerce_num(g, at, pt);
+            /* wrap a *Struct argument into a dyn blob when the parameter is a trait object */
+            if (is_dyn(pp->type, pp->ptr) && !is_dyn(at.base, at.ptr) && n->items[i]->int_val) {
+                fprintf(g->out, "    mov rcx, rax\n");
+                fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->items[i]->int_val);
+                gen_dyn_store(g, at, pp->type_name);
+                fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->items[i]->int_val);
+            }
         }
         push_tmp(g);
     }
@@ -1342,13 +1465,14 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
 
     /* a struct-returning (or i128-returning) function uses a hidden pointer (sret): reserve a slot
      * for that pointer first; the real parameters shift one register position (rcx is taken) */
-    int returns_struct = ((fn->type == TYPE_STRUCT || is_i128(fn->type, fn->ptr)) && fn->ptr == 0 && !fn->is_extern);
+    int returns_struct = ((fn->type == TYPE_STRUCT || is_blob16(fn->type, fn->ptr)) && fn->ptr == 0 && !fn->is_extern);
     if (returns_struct)
         g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, NULL, NULL, &frame);
     /* a float-returning function must return via xmm0 (flag used at return time) */
     g->cur_ret_float = is_float_type(fn->type) && fn->ptr == 0;
     g->cur_ret_f32c = fn->is_export && fn->type == TYPE_F32 && fn->ptr == 0; /* export f32 -> return single to C */
     g->cur_ret_i128 = is_i128(fn->type, fn->ptr);
+    g->cur_ret_dyn = is_dyn(fn->type, fn->ptr) ? fn->type_name : NULL;
 
     int param_start = g->nlocals;
     for (int i = 0; i < fn->nitems; i++) /* parameters (never arrays: the parser rejects [T; N] params) */
@@ -1384,7 +1508,7 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
         int is_float_param = is_float_type(p->type) && p->ptr == 0;
         /* struct (or i128) by-value parameter: the caller passes the value's address
          * the callee copies it into its own slot (by-value: mutation does not affect the caller) */
-        if ((p->type == TYPE_STRUCT || p->type == TYPE_I128 || p->type == TYPE_U128) && p->ptr == 0) {
+        if ((p->type == TYPE_STRUCT || p->type == TYPE_I128 || p->type == TYPE_U128 || p->type == TYPE_DYN) && p->ptr == 0) {
             int ssize = type_size(g, p->type, 0, p->type_name);
             if (pos < 4) fprintf(g->out, "    mov r10, %s\n", argregs[pos]);              /* src ptr */
             else         fprintf(g->out, "    mov r10, [rbp + %d]\n", 48 + (pos - 4) * 8);
@@ -1446,20 +1570,23 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
                             fprintf(g->out, "    mov rcx, rax\n");
                             fprintf(g->out, "    lea rax, [rel %s]\n", gl);
                             if (j) fprintf(g->out, "    add rax, %d\n", j * esz);
-                            gen_store_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, esz);
+                            if (is_dyn(s->type, s->ptr))       gen_dyn_store(g, vt2, s->sname);
+                            else if (is_i128(s->type, s->ptr)) gen_i128_store(g, vt2);
+                            else gen_store_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, esz);
                         }
                     }
                 } else if (s->type == TYPE_STRUCT && s->ptr == 0) {
                     char gl[LABEL_MAX]; global_label(s->name, gl);
                     fprintf(g->out, "    lea rax, [rel %s]\n", gl);
                     gen_store_struct(g, d->operand);
-                } else if (is_i128(s->type, s->ptr)) {
+                } else if (is_blob16(s->type, s->ptr)) {
                     ExprType rvt = type_of(g, d->operand);
                     gen_expr(g, d->operand);
                     fprintf(g->out, "    mov rcx, rax\n");
                     char gl[LABEL_MAX]; global_label(s->name, gl);
                     fprintf(g->out, "    lea rax, [rel %s]\n", gl);
-                    gen_i128_store(g, rvt);
+                    if (is_dyn(s->type, s->ptr)) gen_dyn_store(g, rvt, s->sname);
+                    else                         gen_i128_store(g, rvt);
                 } else {
                     gen_expr(g, d->operand);
                     gen_store_var(g, s);
@@ -1585,10 +1712,24 @@ static void emit_i128_helpers(Gen *g) {
 }
 
 /* Main entry point of the backend */
+/* Does any node in the tree mention a dyn Trait type? Decides whether vtables are
+ * needed and whether trait-impl methods must be kept by tree-shaking. */
+static int scan_uses_dyn(Node *n) {
+    if (!n) return 0;
+    if (n->type == TYPE_DYN) return 1;
+    if (scan_uses_dyn(n->lhs) || scan_uses_dyn(n->rhs) || scan_uses_dyn(n->operand) ||
+        scan_uses_dyn(n->cond) || scan_uses_dyn(n->then_branch) || scan_uses_dyn(n->else_branch) ||
+        scan_uses_dyn(n->init) || scan_uses_dyn(n->step) || scan_uses_dyn(n->body) ||
+        scan_uses_dyn(n->sig)) return 1;
+    for (int i = 0; i < n->nitems; i++) if (scan_uses_dyn(n->items[i])) return 1;
+    return 0;
+}
+
 int x86_64_win_generate(Node *program, FILE *out) {
     Gen g;
     memset(&g, 0, sizeof(g));
     g.out = out;
+    g.program = program;   /* traits are looked up here for dyn dispatch */
 
     /* pass 1: register every struct, then compute the layouts to a fixpoint
      * (two steps so a struct can have fields whose struct type is declared later) */
@@ -1634,6 +1775,26 @@ int x86_64_win_generate(Node *program, FILE *out) {
         if (program->items[i]->kind == ND_VAR_DECL && program->items[i]->operand)
             reach_node(&g, program->items[i]->operand, "", reached);
 
+    /* dyn Trait: when trait objects appear anywhere, every `impl Trait for Type` method can be
+     * reached through a vtable, so keep them all and emit the vtables later */
+    int uses_dyn = scan_uses_dyn(program);
+    if (uses_dyn) {
+        for (int i = 0; i < program->nitems; i++) {
+            Node *d = program->items[i];
+            if (d->kind != ND_TRAIT_IMPL) continue;
+            for (int t = 0; t < program->nitems; t++) {
+                Node *tr = program->items[t];
+                if (tr->kind != ND_TRAIT || !tr->name || strcmp(tr->name, d->name) != 0) continue;
+                for (int m = 0; m < tr->nitems; m++) {
+                    if (tr->items[m]->kind != ND_FUNC) continue;
+                    Node *fn = find_func(&g, d->type_name, tr->items[m]->name);
+                    if (fn) reach_func(&g, func_index(&g, fn), reached);
+                }
+                break;
+            }
+        }
+    }
+
     /* assembly file header */
     fprintf(out, "; ===== MVS compiler output (x86-64 Windows, NASM syntax) =====\n");
     fprintf(out, "default rel\n");          /* use RIP-relative addressing */
@@ -1669,6 +1830,30 @@ int x86_64_win_generate(Node *program, FILE *out) {
         fprintf(out, "mvs_str_%d: db ", i);
         for (int j = 0; j < g.strs[i].len; j++) fprintf(out, "%d,", g.strs[i].data[j]);
         fprintf(out, "0\n"); /* terminate with 0 to make it a C-style string */
+    }
+
+    /* vtables: one per `impl Trait for Type`, one qword per trait method in declaration order */
+    if (uses_dyn) {
+        for (int i = 0; i < program->nitems; i++) {
+            Node *d = program->items[i];
+            if (d->kind != ND_TRAIT_IMPL) continue;
+            for (int t = 0; t < program->nitems; t++) {
+                Node *tr = program->items[t];
+                if (tr->kind != ND_TRAIT || !tr->name || strcmp(tr->name, d->name) != 0) continue;
+                fprintf(out, "mvs_vt_%s_%s:\n", d->name, d->type_name);
+                for (int m = 0; m < tr->nitems; m++) {
+                    if (tr->items[m]->kind != ND_FUNC) continue;
+                    Node *fn = find_func(&g, d->type_name, tr->items[m]->name);
+                    if (fn) {
+                        char mlbl[LABEL_MAX]; func_label_of(fn, mlbl);
+                        fprintf(out, "    dq %s\n", mlbl);
+                    } else {
+                        fprintf(out, "    dq 0\n");   /* missing impl: already a type error upstream */
+                    }
+                }
+                break;
+            }
+        }
     }
 
     /* global variable section (reserve the actual size rounded up to a multiple of 8, zero-initialized) */

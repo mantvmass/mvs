@@ -99,6 +99,7 @@ const char *datatype_name(DataType t) {
         case TYPE_STR: return "str";     case TYPE_CHAR: return "char";
         case TYPE_F32: return "f32";     case TYPE_F64: return "f64";
         case TYPE_STRUCT: return "struct"; case TYPE_FUNC: return "func";
+        case TYPE_DYN: return "dyn";
         default: return "unknown";
     }
 }

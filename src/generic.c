@@ -36,6 +36,20 @@ static int type_impls_trait(Node *prog, const char *sname, const char *trait) {
     return 0;
 }
 
+/* Check a '+'-separated bound list ("A+B") against a struct; returns 1 when every part
+ * is implemented, else 0 with the first missing trait copied into missing (cap bytes) */
+static int type_impls_all(Node *prog, const char *sname, const char *bounds, char *missing, size_t cap) {
+    char tmp[256];
+    snprintf(tmp, sizeof(tmp), "%s", bounds ? bounds : "");
+    for (char *tok = strtok(tmp, "+"); tok; tok = strtok(NULL, "+")) {
+        if (!type_impls_trait(prog, sname, tok)) {
+            snprintf(missing, cap, "%s", tok);
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int mono_err; /* number of trait bound violation errors (reset in monomorphize) */
 
 /* Find a trait declaration by name */
@@ -210,6 +224,16 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
                  * matching ns win first (avoids clashes with extern C, e.g. method accept vs Winsock accept) */
                 const char *scope = NULL;
                 CType bt = infer(prog, callee->operand, map, nmap);
+                if (bt.ptr == 0 && bt.base == TYPE_DYN && bt.sname) {
+                    /* dynamic dispatch: the result type comes from the trait's signature */
+                    Node *tr = find_trait(prog, bt.sname);
+                    if (tr) for (int i = 0; i < tr->nitems; i++)
+                        if (tr->items[i]->kind == ND_FUNC && callee->name &&
+                            strcmp(tr->items[i]->name, callee->name) == 0) {
+                            CType ct = { tr->items[i]->type, tr->items[i]->ptr, tr->items[i]->type_name, NULL, 0 };
+                            return ct;
+                        }
+                }
                 if (bt.base == TYPE_STRUCT && bt.sname) scope = bt.sname;
                 else if (callee->operand->kind == ND_IDENT) scope = callee->operand->name;
                 Node *best = NULL;
@@ -342,17 +366,21 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                 }
                 gmap[gi].name = tmpl->gen[gi]; gmap[gi].t = concrete;
             }
-            /* Check trait bounds: with <T: Trait> the concrete type must impl that trait (a marked struct) */
+            /* Check trait bounds: with <T: A + B> the concrete type must impl every listed trait */
             for (int gi = 0; gi < tmpl->ngen; gi++) {
                 if (!tmpl->gen_bound[gi]) continue;
                 CType ct = gmap[gi].t;
-                if (!(ct.base == TYPE_STRUCT && ct.sname && type_impls_trait(prog, ct.sname, tmpl->gen_bound[gi]))) {
+                char missing[128];
+                snprintf(missing, sizeof(missing), "%s", tmpl->gen_bound[gi]);
+                int ok = ct.base == TYPE_STRUCT && ct.sname &&
+                         type_impls_all(prog, ct.sname, tmpl->gen_bound[gi], missing, sizeof(missing));
+                if (!ok) {
                     const char *tn = (ct.base == TYPE_STRUCT && ct.sname) ? ct.sname : datatype_name(ct.base);
                     diag_print(n->file, n->line, n->col, "error",
                                "type '%s' does not implement trait '%s' (required by %s<%s: %s>)",
-                               tn, tmpl->gen_bound[gi], tmpl->name, tmpl->gen[gi], tmpl->gen_bound[gi]);
+                               tn, missing, tmpl->name, tmpl->gen[gi], tmpl->gen_bound[gi]);
                     if (ct.base == TYPE_STRUCT && ct.sname)
-                        diag_help("add 'impl %s for %s { ... }' to satisfy the bound", tmpl->gen_bound[gi], tn);
+                        diag_help("add 'impl %s for %s { ... }' to satisfy the bound", missing, tn);
                     else
                         diag_help("traits can only be implemented for structs; '%s' cannot satisfy the bound", tn);
                     mono_err++;
@@ -732,10 +760,11 @@ static int tc_isstr(CType t)    { return t.ptr == 0 && t.base == TYPE_STR; }
 static int tc_isstruct(CType t) { return t.ptr == 0 && t.base == TYPE_STRUCT; }
 static int tc_isvoid(CType t)   { return t.ptr == 0 && t.base == TYPE_VOID; }
 
-/* Write a readable type name into buf (e.g. "u8", "*i32", "str", "Point") */
+/* Write a readable type name into buf (e.g. "u8", "*i32", "str", "Point", "dyn Area") */
 static void tc_name(CType t, char *buf) {
     char *p = buf;
     for (int i = 0; i < t.ptr; i++) *p++ = '*';
+    if (t.base == TYPE_DYN && t.sname) { sprintf(p, "dyn %s", t.sname); return; }
     const char *b = (t.base == TYPE_STRUCT && t.sname) ? t.sname : datatype_name(t.base);
     strcpy(p, b);
 }
@@ -748,6 +777,13 @@ static int tc_assignable(CType d, CType s) {
      * convert to/from i128 implicitly (no 128-bit float path in codegen) */
     if (tc_is128(s) && !tc_is128(d)) return 0;
     if (tc_is128(d) && s.ptr == 0 && (s.base == TYPE_F32 || s.base == TYPE_F64)) return 0;
+    /* trait objects: dyn Trait accepts another dyn of the SAME trait or a pointer to a
+     * struct (the impl is verified at the assignment site); dyn converts to nothing else */
+    if (d.ptr == 0 && d.base == TYPE_DYN) {
+        if (s.ptr == 0 && s.base == TYPE_DYN) return d.sname && s.sname && strcmp(d.sname, s.sname) == 0;
+        return s.ptr == 1 && s.base == TYPE_STRUCT;
+    }
+    if (s.ptr == 0 && s.base == TYPE_DYN) return 0;
     if (d.arr > 0 || s.arr > 0) {
         /* whole arrays never assign; a [T; N] value decays to a pointer when the target is one */
         if (d.arr > 0) return 0;                        /* array targets are handled at the declaration */
@@ -870,7 +906,7 @@ static Bind *tc_find(TcCtx *c, const char *name) {
     return NULL;
 }
 
-/* A bare i128 in a boolean context would test its ADDRESS (always true); require != 0 */
+/* A bare i128 or dyn value in a boolean context would test its ADDRESS (always true) */
 static void tc_check_cond128(TcCtx *c, Node *cond) {
     if (!cond) return;
     CType t = infer(c->prog, cond, c->map, *c->nmap);
@@ -878,6 +914,22 @@ static void tc_check_cond128(TcCtx *c, Node *cond) {
         diag_print(cond->file, cond->line, cond->col, "error",
                    "a 128-bit integer cannot be used directly as a condition");
         diag_help("compare it explicitly: write 'x != 0'");
+        (*c->errc)++;
+    } else if (t.ptr == 0 && t.base == TYPE_DYN) {
+        diag_print(cond->file, cond->line, cond->col, "error",
+                   "a trait object cannot be used as a condition");
+        (*c->errc)++;
+    }
+}
+
+/* When a dyn Trait target receives a pointer-to-struct, the struct must impl the trait */
+static void tc_dyn_impl_check(TcCtx *c, Node *site, CType d, CType s) {
+    if (!(d.ptr == 0 && d.base == TYPE_DYN) || !d.sname) return;
+    if (s.ptr == 1 && s.base == TYPE_STRUCT && s.sname &&
+        !type_impls_trait(c->prog, s.sname, d.sname)) {
+        diag_print(site->file, site->line, site->col, "error",
+                   "type '%s' does not implement trait '%s'", s.sname, d.sname);
+        diag_help("add 'impl %s for %s { ... }' before storing it in a 'dyn %s'", d.sname, s.sname, d.sname);
         (*c->errc)++;
     }
 }
@@ -957,6 +1009,7 @@ static void tc_check(TcCtx *c, Node *n) {
                     CType dt = { n->type, n->ptr, n->type_name, NULL, 0 };
                     CType vt = infer(c->prog, n->operand, c->map, *c->nmap);
                     if (!tc_assignable(dt, vt)) tc_err(c, n, "cannot initialize variable: type mismatch between", dt, vt);
+                    else tc_dyn_impl_check(c, n, dt, vt);
                 }
             }
             tc_add(c, n);
@@ -1072,10 +1125,12 @@ static void tc_check(TcCtx *c, Node *n) {
         } else if (op == TK_AMP || op == TK_PIPE || op == TK_CARET || op == TK_SHL || op == TK_SHR) {
             if (!(tc_integer(lt) && tc_integer(rt))) tc_err(c, n, "bitwise/shift requires integer operands, got", lt, rt);
         } else if (op == TK_EQ || op == TK_NEQ || op == TK_LT || op == TK_GT || op == TK_LE || op == TK_GE) {
-            if (tc_isstruct(lt) || tc_isstruct(rt) || tc_isvoid(lt) || tc_isvoid(rt))
+            if (tc_isstruct(lt) || tc_isstruct(rt) || tc_isvoid(lt) || tc_isvoid(rt) ||
+                (lt.ptr == 0 && lt.base == TYPE_DYN) || (rt.ptr == 0 && rt.base == TYPE_DYN))
                 tc_err(c, n, "cannot compare", lt, rt);
         } else if (op == TK_AND || op == TK_OR) {
-            if (tc_isstruct(lt) || tc_isstruct(rt) || tc_isvoid(lt) || tc_isvoid(rt))
+            if (tc_isstruct(lt) || tc_isstruct(rt) || tc_isvoid(lt) || tc_isvoid(rt) ||
+                (lt.ptr == 0 && lt.base == TYPE_DYN) || (rt.ptr == 0 && rt.base == TYPE_DYN))
                 tc_err(c, n, "logical operator requires scalar operands, got", lt, rt);
         }
     } else if (n->kind == ND_ASSIGN) {
@@ -1091,6 +1146,7 @@ static void tc_check(TcCtx *c, Node *n) {
             diag_help("write it out: x = x + y");
             (*c->errc)++;
         } else if (!tc_assignable(lt, rt)) tc_err(c, n, "cannot assign value of type", rt, lt); /* "... rt to lt" */
+        else tc_dyn_impl_check(c, n, lt, rt);
         tc_check_const_target(c, n->lhs, n);                       /* const is read-only */
     } else if (n->kind == ND_UNARY && (n->op == TK_PLUSPLUS || n->op == TK_MINUSMINUS)) {
         tc_check_const_target(c, n->operand, n);                   /* x++ / x-- also writes x */
@@ -1106,6 +1162,7 @@ static void tc_check(TcCtx *c, Node *n) {
     } else if (n->kind == ND_RETURN && n->operand) {
         CType vt = infer(c->prog, n->operand, c->map, *c->nmap);
         if (!tc_assignable(c->ret, vt)) tc_err(c, n, "return type mismatch between", c->ret, vt);
+        else tc_dyn_impl_check(c, n, c->ret, vt);
     } else if (n->kind == ND_CAST) {
         /* floats never convert to/from 128-bit integers (no such codegen path) */
         CType st = infer(c->prog, n->operand, c->map, *c->nmap);
@@ -1170,6 +1227,21 @@ static void tc_check(TcCtx *c, Node *n) {
                     if (d->kind == ND_FUNC && d->is_method && d->ngen == 0 && d->ns && callee->name &&
                         strcmp(d->ns, bt.sname) == 0 && strcmp(d->name, callee->name) == 0) { fn = d; argoff = 1; break; }
                 }
+            } else if (bt.ptr == 0 && bt.base == TYPE_DYN && bt.sname && callee->name) {
+                /* dynamic dispatch d.m(...): the method must exist in the trait; check
+                 * arguments against the trait's signature (items[0] = self) */
+                Node *tr = find_trait(c->prog, bt.sname);
+                if (tr) {
+                    for (int i = 0; i < tr->nitems; i++)
+                        if (tr->items[i]->kind == ND_FUNC && strcmp(tr->items[i]->name, callee->name) == 0) {
+                            fn = tr->items[i]; argoff = 1; break;
+                        }
+                    if (!fn) {
+                        diag_print(n->file, n->line, n->col, "error",
+                                   "trait '%s' has no method '%s'", bt.sname, callee->name);
+                        (*c->errc)++;
+                    }
+                }
             }
         }
         if (fn) {
@@ -1207,6 +1279,8 @@ static void tc_check(TcCtx *c, Node *n) {
                         if ((tc_isstr(at) && tc_numeric(pt)) || (tc_numeric(at) && tc_isstr(pt)))
                             diag_help("MVS never converts between strings and numbers implicitly; use extern atoi/strtod");
                         (*c->errc)++;
+                    } else {
+                        tc_dyn_impl_check(c, n->items[i], pt, at);
                     }
                 }
             }
