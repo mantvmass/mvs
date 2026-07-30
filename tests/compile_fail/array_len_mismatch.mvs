@@ -1,0 +1,6 @@
+//~ ERROR: needs exactly
+// the literal length must match the declared [T; N] length
+func main() -> i8 {
+    let a: [i32; 5] = [1, 2, 3];
+    return 0;
+}

@@ -1,0 +1,4 @@
+//~ ERROR: not allowed here
+// array parameters are rejected; pass a pointer (arrays decay at call sites)
+func f(a: [i32; 3]) -> i32 { return a[0]; }
+func main() -> i8 { return 0; }

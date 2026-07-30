@@ -104,7 +104,7 @@ static int is_type_token(TokenType t) {
 static Node *parse_expr(Parser *p);
 static Node *parse_stmt(Parser *p);
 static Node *parse_block(Parser *p);
-static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out);
+static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out, int *arr_out);
 
 #define MAX_PARSE_DEPTH 300  /* guard against stack overflow from abnormally deep expressions/blocks/unary chains */
 
@@ -184,6 +184,18 @@ static Node *parse_primary(Parser *p) {
         n->paren = 1;   /* remember the parentheses: (-2) ** 2 must not be re-anchored by parse_power */
         return n;
     }
+    if (check(p, TK_LBRACKET)) {
+        /* Array literal [e1, e2, ...]; valid only as a variable initializer (checked later) */
+        Node *lit = node_new(ND_ARRAY_LIT, t.line);
+        advance(p); /* consume [ */
+        if (!check(p, TK_RBRACKET)) {
+            do {
+                node_add_item(lit, parse_expr(p));
+            } while (match(p, TK_COMMA));
+        }
+        expect(p, TK_RBRACKET, "expected ']' to close array literal");
+        return lit;
+    }
     error(p, "expected expression");
     advance(p); /* consume the bad token to avoid an infinite loop */
     return node_new(ND_INT, t.line);
@@ -217,6 +229,13 @@ static Node *parse_postfix(Parser *p) {
             }
             expect(p, TK_RPAREN, "expected ')' after arguments");
             node = call;
+        } else if (match(p, TK_LBRACKET)) {
+            /* Indexing a[i]: works on arrays and on pointers (p[i] = *(p + i)) */
+            Node *ix = node_new(ND_INDEX, p->cur.line);
+            ix->lhs = node;
+            ix->rhs = parse_expr(p);
+            expect(p, TK_RBRACKET, "expected ']' after index");
+            node = ix;
         } else if (check(p, TK_PLUSPLUS) || check(p, TK_MINUSMINUS)) {
             /* Postfix increment/decrement: i++ , i-- */
             Node *u = node_new(ND_UNARY, p->cur.line);
@@ -270,7 +289,7 @@ static Node *parse_cast(Parser *p) {
         Node *c = node_new(ND_CAST, p->cur.line);
         advance(p); /* consume 'as' */
         c->operand = node;
-        c->type = parse_type(p, &c->ptr, &c->type_name, &c->sig);
+        c->type = parse_type(p, &c->ptr, &c->type_name, &c->sig, NULL);
         node = c;
     }
     return node;
@@ -473,10 +492,29 @@ static Node *parse_expr(Parser *p) {
 
 /* ---------- Type parsing ---------- */
 
-/* type := ('*')* (type_keyword | IDENT)
+/* type := '[' type ';' INT ']' | ('*')* (type_keyword | IDENT)
  * Leading '*' counts as pointer depth; IDENT = struct name.
- * Stores pointer depth into *ptr and the struct name into *type_name (NULL if not a struct) */
-static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out) {
+ * Stores pointer depth into *ptr and the struct name into *type_name (NULL if not a struct).
+ * arr_out receives the element count of a [T; N] array type (NULL = arrays not allowed here) */
+static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out, int *arr_out) {
+    if (arr_out) *arr_out = 0;
+    /* array type [T; N]: parse the element type recursively, then the fixed length */
+    if (check(p, TK_LBRACKET)) {
+        if (!arr_out) {
+            error(p, "an array type [T; N] is not allowed here (only variables and struct fields)");
+            /* keep parsing to recover sensibly */
+        }
+        advance(p); /* consume [ */
+        DataType elem = parse_type(p, ptr, type_name, sig_out, NULL); /* no arrays of arrays */
+        expect(p, TK_SEMICOLON, "expected ';' between element type and length in [T; N]");
+        int len = 0;
+        if (check(p, TK_INT)) { len = (int)p->cur.int_val; advance(p); }
+        else error(p, "expected a constant integer length in [T; N]");
+        if (len <= 0 && !p->panic) error(p, "array length must be at least 1");
+        expect(p, TK_RBRACKET, "expected ']' to close the array type");
+        if (arr_out) *arr_out = len;
+        return elem;
+    }
     int depth = 0;
     /* Count pointer depth: '*' = 1 level, '**' (a single token) = 2 levels */
     for (;;) {
@@ -497,13 +535,13 @@ static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out
         if (!check(p, TK_RPAREN)) {
             do {
                 Node *par = node_new(ND_PARAM, p->cur.line);
-                par->type = parse_type(p, &par->ptr, &par->type_name, &par->sig);
+                par->type = parse_type(p, &par->ptr, &par->type_name, &par->sig, NULL);
                 node_add_item(sig, par);
             } while (match(p, TK_COMMA));
         }
         expect(p, TK_RPAREN, "expected ')' in function-pointer type");
         expect(p, TK_ARROW, "expected '->' before return type in function-pointer type");
-        sig->type = parse_type(p, &sig->ptr, &sig->type_name, NULL); /* nested func-ptr return not supported */
+        sig->type = parse_type(p, &sig->ptr, &sig->type_name, NULL, NULL); /* nested func-ptr return not supported */
         if (sig_out) *sig_out = sig;
         return TYPE_FUNC;
     }
@@ -533,7 +571,7 @@ static Node *parse_var_decl(Parser *p) {
     n->name = strdup(p->cur.lexeme);
     advance(p);
     expect(p, TK_COLON, "expected ':' after variable name");
-    n->type = parse_type(p, &n->ptr, &n->type_name, &n->sig);
+    n->type = parse_type(p, &n->ptr, &n->type_name, &n->sig, &n->arr);
     if (match(p, TK_ASSIGN)) {
         n->operand = parse_expr(p); /* initial value */
     } else if (is_const) {
@@ -733,7 +771,7 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
             param->name = strdup(p->cur.lexeme);
             advance(p);
             expect(p, TK_COLON, "expected ':' after parameter name");
-            param->type = parse_type(p, &param->ptr, &param->type_name, &param->sig);
+            param->type = parse_type(p, &param->ptr, &param->type_name, &param->sig, NULL); /* pass *T, not [T; N] */
             /* Default value: stored in the param's operand; call sites missing trailing
              * arguments get a clone of this expression (fill_default_args in generic.c) */
             if (match(p, TK_ASSIGN)) param->operand = parse_expr(p);
@@ -753,7 +791,7 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
         }
     }
     expect(p, TK_ARROW, "expected '->' before return type");
-    fn->type = parse_type(p, &fn->ptr, &fn->type_name, NULL); /* nested func-ptr return not supported */
+    fn->type = parse_type(p, &fn->ptr, &fn->type_name, NULL, NULL); /* nested func-ptr return not supported */
     if (is_extern) {
         expect(p, TK_SEMICOLON, "expected ';' after extern declaration");
         fn->body = NULL; /* foreign function has no body */
@@ -866,7 +904,7 @@ static Node *parse_struct(Parser *p) {
         f->name = strdup(p->cur.lexeme);
         advance(p);
         expect(p, TK_COLON, "expected ':' after field name");
-        f->type = parse_type(p, &f->ptr, &f->type_name, &f->sig);
+        f->type = parse_type(p, &f->ptr, &f->type_name, &f->sig, &f->arr);
         node_add_item(n, f);
         /* Field separator: ';' or ',' (flexible) */
         if (!match(p, TK_SEMICOLON)) match(p, TK_COMMA);

@@ -1,0 +1,7 @@
+//~ ERROR: out of bounds
+// a constant index past the end must be caught at compile time
+func main() -> i8 {
+    let a: [i32; 5] = [1, 2, 3, 4, 5];
+    let x: i32 = a[5];
+    return 0;
+}

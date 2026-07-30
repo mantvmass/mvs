@@ -39,6 +39,7 @@ $runPass = @(
     "examples/01_language/control",
     "examples/01_language/bitwise",
     "examples/01_language/args",
+    "examples/01_language/arrays",
     "examples/02_functions/generics",
     "examples/02_functions/overload",
     "examples/02_functions/recursion",

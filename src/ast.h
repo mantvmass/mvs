@@ -33,6 +33,8 @@ typedef enum {
     ND_MEMBER,     /* member access a.b: uses operand (base), name (member name) */
     ND_ASSIGN,     /* assignment: uses op, lhs (target), rhs (value) */
     ND_CAST,       /* type cast x as T: uses operand (value), type/ptr/type_name (target type) */
+    ND_INDEX,      /* indexing a[i]: lhs = base (array or pointer), rhs = index */
+    ND_ARRAY_LIT,  /* array literal [e1, e2, ...]: items = elements (only valid as an initializer) */
     ND_FRAMEREF,   /* lvalue at a temp frame slot [rbp - int_val] (internal to codegen io.out) */
 
     /* --- statements --- */
@@ -73,6 +75,8 @@ typedef struct Node {
 
     DataType type;        /* data type of the node (for exprs) or return type (for funcs) */
     int      ptr;         /* pointer depth (0 = not a pointer, 1 = *T, 2 = **T) */
+    int      arr;         /* array length for [T; N] declarations (0 = not an array);
+                           * type/ptr/type_name then describe the ELEMENT type */
     char    *type_name;   /* struct name when type == TYPE_STRUCT */
     struct Node *sig;     /* signature when type == TYPE_FUNC (function pointer):
                            *   an ND_FUNC-style node; items = parameters (ND_PARAM),

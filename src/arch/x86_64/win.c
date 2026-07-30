@@ -98,6 +98,7 @@ static void gen_load_var(Gen *g, Sym *s) {
     char lbl[LABEL_MAX];
     if (s->is_global) { global_label(s->name, lbl); fprintf(g->out, "    lea rax, [rel %s]\n", lbl); }
     else              { fprintf(g->out, "    lea rax, [rbp - %d]\n", s->offset); }
+    if (s->arr > 0) return;                            /* [T; N]: decays to the array's address */
     if (s->type == TYPE_STRUCT && s->ptr == 0) return; /* struct: keep the address in rax */
     gen_load_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, s->size); /* pointer = load 8 bytes */
 }
@@ -151,6 +152,28 @@ static void gen_addr(Gen *g, Node *n) {
             if (bt.ptr > 0) gen_expr(g, n->operand);  /* base is pointer-to-struct: use its value as address */
             else            gen_addr(g, n->operand);  /* base is a struct value: use its address */
             if (f->offset) fprintf(g->out, "    add rax, %d\n", f->offset);
+            break;
+        }
+        case ND_INDEX: {
+            /* a[i]: element address = base address (array) or base value (pointer) + i * element size */
+            ExprType bt = type_of(g, n->lhs);
+            int esz;
+            if (bt.arr > 0) {
+                esz = type_size(g, bt.base, bt.ptr, bt.sname);   /* element type = base/ptr/sname */
+                gen_addr(g, n->lhs);                             /* rax = &a[0] */
+            } else if (bt.ptr > 0) {
+                esz = type_size(g, bt.base, bt.ptr - 1, bt.sname);
+                gen_expr(g, n->lhs);                             /* rax = the pointer's value */
+            } else {
+                fprintf(stderr, "codegen error: cannot index a non-array, non-pointer value\n");
+                g->had_error = 1;
+                return;
+            }
+            push_tmp(g);
+            gen_expr(g, n->rhs);                                 /* rax = index */
+            if (esz != 1) fprintf(g->out, "    imul rax, %d\n", esz);
+            pop_tmp(g, "rcx");
+            fprintf(g->out, "    add rax, rcx\n");
             break;
         }
         case ND_UNARY:
@@ -491,12 +514,16 @@ static void gen_expr(Gen *g, Node *n) {
         }
         case ND_ASSIGN: {
             Node *target = n->lhs;
-            /* the target must be an lvalue: ident, member (a.b), or deref (*p) */
-            if (target->kind != ND_IDENT && target->kind != ND_MEMBER &&
+            /* the target must be an lvalue: ident, member (a.b), index (a[i]), or deref (*p) */
+            if (target->kind != ND_IDENT && target->kind != ND_MEMBER && target->kind != ND_INDEX &&
                 !(target->kind == ND_UNARY && target->op == TK_STAR)) {
                 fprintf(stderr, "codegen error: invalid assignment target\n"); g->had_error = 1; break;
             }
             ExprType tt = type_of(g, target);
+            if (tt.arr > 0) {
+                fprintf(stderr, "codegen error: whole-array assignment is not supported; copy element by element\n");
+                g->had_error = 1; break;
+            }
             /* whole-struct assignment (copy/literal) */
             if (tt.base == TYPE_STRUCT && tt.ptr == 0 && n->op == TK_ASSIGN) {
                 gen_addr(g, target);          /* rax = destination address */
@@ -623,13 +650,34 @@ static void gen_expr(Gen *g, Node *n) {
             break;
         }
         case ND_MEMBER: {
+            /* arr.len: the length of a [T; N] is a compile-time constant */
+            {
+                ExprType bt = type_of(g, n->operand);
+                if (bt.arr > 0 && n->name && strcmp(n->name, "len") == 0) {
+                    fprintf(g->out, "    mov rax, %d\n", bt.arr);
+                    break;
+                }
+            }
             /* member access a.b as an rvalue: find the field's address, then load by size */
             ExprType et = type_of(g, n);
             gen_addr(g, n);
             if (et.base == TYPE_STRUCT && et.ptr == 0) break; /* nested struct field: keep the address */
+            if (et.arr > 0) break;                            /* [T; N] field: decays to its address */
             gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
             break;
         }
+        case ND_INDEX: {
+            /* a[i] as an rvalue: compute the element address, then load the element */
+            ExprType et = type_of(g, n);
+            gen_addr(g, n);
+            if (et.base == TYPE_STRUCT && et.ptr == 0) break; /* struct element: keep the address */
+            gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
+            break;
+        }
+        case ND_ARRAY_LIT:
+            fprintf(stderr, "codegen error: an array literal can only initialize a variable\n");
+            g->had_error = 1;
+            break;
         case ND_FRAMEREF:   /* struct temp slot: the value is its address (a struct uses its address as value) */
             gen_addr(g, n);
             break;
@@ -650,7 +698,29 @@ static void gen_stmt(Gen *g, Node *n) {
         case ND_VAR_DECL: {
             Sym *s = &g->locals[n->int_val]; /* the slot reserved in the pre-pass (this exact one, not a shadow) */
             if (n->operand && s) { /* has an initializer */
-                if (s->type == TYPE_STRUCT && s->ptr == 0) {
+                if (s->arr > 0) {
+                    /* [T; N] variable: store each literal element into its slot */
+                    if (n->operand->kind != ND_ARRAY_LIT) {
+                        fprintf(stderr, "codegen error: an array variable can only be initialized with an array literal\n");
+                        g->had_error = 1; break;
+                    }
+                    int esz = type_size(g, s->type, s->ptr, s->sname);
+                    for (int i = 0; i < n->operand->nitems && i < s->arr; i++) {
+                        Node *el = n->operand->items[i];
+                        int eoff = s->offset - i * esz;          /* element i lives at [rbp - offset + i*esz] */
+                        if (s->type == TYPE_STRUCT && s->ptr == 0) {
+                            fprintf(g->out, "    lea rax, [rbp - %d]\n", eoff);
+                            gen_store_struct(g, el);
+                        } else {
+                            gen_expr(g, el);
+                            ExprType vt2 = type_of(g, el), dt2 = { s->type, s->ptr, s->sname, s->sig, 0 };
+                            gen_coerce_num(g, vt2, dt2);
+                            fprintf(g->out, "    mov rcx, rax\n");
+                            fprintf(g->out, "    lea rax, [rbp - %d]\n", eoff);
+                            gen_store_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, esz);
+                        }
+                    }
+                } else if (s->type == TYPE_STRUCT && s->ptr == 0) {
                     /* struct variable: write the value (literal/copy/function result) into its space */
                     char lbl[LABEL_MAX];
                     if (s->is_global) { global_label(s->name, lbl); fprintf(g->out, "    lea rax, [rel %s]\n", lbl); }
@@ -658,7 +728,7 @@ static void gen_stmt(Gen *g, Node *n) {
                     gen_store_struct(g, n->operand);
                 } else {
                     gen_expr(g, n->operand);     /* rax = value */
-                    ExprType vt = type_of(g, n->operand), dt = { s->type, s->ptr, s->sname, s->sig };
+                    ExprType vt = type_of(g, n->operand), dt = { s->type, s->ptr, s->sname, s->sig, s->arr };
                     gen_coerce_num(g, vt, dt);   /* implicit int<->float conversion if needed */
                     gen_store_var(g, s);
                 }
@@ -836,7 +906,29 @@ static void gen_store_struct(Gen *g, Node *value) {
             Node *fi = value->items[i];                 /* ND_ASSIGN: lhs = field name, rhs = expression */
             Field *f = find_field(s, fi->lhs->name);
             if (!f) { fprintf(stderr, "codegen error: no field '%s' in struct '%s'\n", fi->lhs->name, s->name); g->had_error = 1; continue; }
-            if (f->type == TYPE_STRUCT && f->ptr == 0) {
+            if (f->arr > 0) {
+                /* [T; N] field: fill from an array literal, element by element */
+                if (fi->rhs->kind != ND_ARRAY_LIT) {
+                    fprintf(stderr, "codegen error: array field '%s' can only be initialized with an array literal\n", f->name);
+                    g->had_error = 1; continue;
+                }
+                int esz = f->size / f->arr;
+                for (int j = 0; j < fi->rhs->nitems && j < f->arr; j++) {
+                    Node *el = fi->rhs->items[j];
+                    if (f->type == TYPE_STRUCT && f->ptr == 0) {
+                        fprintf(g->out, "    mov rax, [rsp]\n    add rax, %d\n", f->offset + j * esz);
+                        gen_store_struct(g, el);
+                    } else {
+                        gen_expr(g, el);
+                        ExprType vt2 = type_of(g, el), dt2 = { f->type, f->ptr, f->sname, f->sig, 0 };
+                        gen_coerce_num(g, vt2, dt2);
+                        fprintf(g->out, "    mov rcx, rax\n");
+                        fprintf(g->out, "    mov rax, [rsp]\n");
+                        if (f->offset + j * esz) fprintf(g->out, "    add rax, %d\n", f->offset + j * esz);
+                        gen_store_typed(g, f->ptr > 0 ? TYPE_USIZE : f->type, esz);
+                    }
+                }
+            } else if (f->type == TYPE_STRUCT && f->ptr == 0) {
                 /* nested struct field: compute the field's address and write the value recursively */
                 fprintf(g->out, "    mov rax, [rsp]\n");
                 if (f->offset) fprintf(g->out, "    add rax, %d\n", f->offset);
@@ -929,7 +1021,7 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
         gen_expr(g, n->items[i]);
         if (i + poff < sig->nitems) {     /* coerce int<->float to the parameter type (except varargs) */
             Node *pp = sig->items[i + poff];
-            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig }, at = type_of(g, n->items[i]);
+            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 }, at = type_of(g, n->items[i]);
             gen_coerce_num(g, at, pt);
         }
         push_tmp(g);
@@ -1012,14 +1104,14 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
      * and the real parameters shift one register position (rcx is taken by sret) */
     int returns_struct = (fn->type == TYPE_STRUCT && fn->ptr == 0 && !fn->is_extern);
     if (returns_struct)
-        g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, NULL, NULL, &frame);
+        g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, NULL, NULL, &frame);
     /* a float-returning function must return via xmm0 (flag used at return time) */
     g->cur_ret_float = is_float_type(fn->type) && fn->ptr == 0;
     g->cur_ret_f32c = fn->is_export && fn->type == TYPE_F32 && fn->ptr == 0; /* export f32 -> return single to C */
 
     int param_start = g->nlocals;
-    for (int i = 0; i < fn->nitems; i++) /* parameters */
-        add_local(g, fn->items[i]->name, fn->items[i]->type, fn->items[i]->ptr, fn->items[i]->type_name, fn->items[i]->sig, &frame);
+    for (int i = 0; i < fn->nitems; i++) /* parameters (never arrays: the parser rejects [T; N] params) */
+        add_local(g, fn->items[i]->name, fn->items[i]->type, fn->items[i]->ptr, 0, fn->items[i]->type_name, fn->items[i]->sig, &frame);
     collect_locals(g, fn->body, &frame);   /* locals inside the body */
     /* temp slots for structs returned from functions when used as rvalues
      * every local must be temporarily visible so type_of can infer method receiver types
@@ -1093,7 +1185,30 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
             if (d->kind == ND_VAR_DECL && d->operand) {
                 Sym *s = find_var(g, d->name); /* must be a global */
                 if (!s) continue;
-                if (s->type == TYPE_STRUCT && s->ptr == 0) {
+                if (s->arr > 0) {
+                    /* [T; N] global with a literal: store each element at label + i*esz */
+                    if (d->operand->kind != ND_ARRAY_LIT) {
+                        fprintf(stderr, "codegen error: an array variable can only be initialized with an array literal\n");
+                        g->had_error = 1; continue;
+                    }
+                    char gl[LABEL_MAX]; global_label(s->name, gl);
+                    int esz = type_size(g, s->type, s->ptr, s->sname);
+                    for (int j = 0; j < d->operand->nitems && j < s->arr; j++) {
+                        Node *el = d->operand->items[j];
+                        if (s->type == TYPE_STRUCT && s->ptr == 0) {
+                            fprintf(g->out, "    lea rax, [rel %s]\n    add rax, %d\n", gl, j * esz);
+                            gen_store_struct(g, el);
+                        } else {
+                            gen_expr(g, el);
+                            ExprType vt2 = type_of(g, el), dt2 = { s->type, s->ptr, s->sname, s->sig, 0 };
+                            gen_coerce_num(g, vt2, dt2);
+                            fprintf(g->out, "    mov rcx, rax\n");
+                            fprintf(g->out, "    lea rax, [rel %s]\n", gl);
+                            if (j) fprintf(g->out, "    add rax, %d\n", j * esz);
+                            gen_store_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, esz);
+                        }
+                    }
+                } else if (s->type == TYPE_STRUCT && s->ptr == 0) {
                     char gl[LABEL_MAX]; global_label(s->name, gl);
                     fprintf(g->out, "    lea rax, [rel %s]\n", gl);
                     gen_store_struct(g, d->operand);
@@ -1135,7 +1250,9 @@ int x86_64_win_generate(Node *program, FILE *out) {
             if (g.nglobals >= MAX_SYM) { fprintf(stderr, "codegen error: too many global variables (max %d)\n", MAX_SYM); g.had_error = 1; break; }
             Sym *s = &g.globals[g.nglobals++];
             s->name = d->name; s->type = d->type; s->ptr = d->ptr; s->sname = d->type_name;
+            s->arr = d->arr;
             s->size = type_size(&g, d->type, d->ptr, d->type_name);
+            if (s->arr > 0) s->size *= s->arr;   /* [T; N] global spans N elements in .bss */
             s->is_global = 1; s->offset = 0;
         }
     }

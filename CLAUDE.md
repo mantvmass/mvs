@@ -91,10 +91,11 @@ trait + associated function (`Type::new`) + `<T: Trait>` + default method · `St
 function pointer (`func(...) -> T` as a value + indirect `call rax`) · const enforcement ·
 default parameter values · single-eval compound assignment · math-style `**` precedence ·
 golden test suite (`make test`) · Rust-style diagnostics (multi-error recovery, source excerpt +
-caret + help, missing-return check, unused/unreachable warnings).
+caret + help, missing-return check, unused/unreachable warnings) · real `[T; N]` array type
+(literals, indexing, `a.len`, const-index bounds check, arrays in structs, decay to `*T`).
 
 **Remaining:** full 128-bit i128/u128 math · dynamic dispatch (`dyn`/vtable) + multi-condition `where` ·
-a real array type · io.out as a library (variadic + reflection) · ARM64/Linux backends.
+io.out as a library (variadic + reflection) · ARM64/Linux backends.
 
 ## Project-specific cautions (full list in RULES.md)
 

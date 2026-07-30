@@ -30,8 +30,9 @@ typedef struct {
     char    *name;
     DataType type;
     int      ptr;       /* pointer depth (0 = not a pointer) */
+    int      arr;       /* array length for [T; N] (0 = not an array); type/ptr describe the element */
     char    *sname;     /* struct name when type == TYPE_STRUCT */
-    int      size;      /* size of the variable in bytes */
+    int      size;      /* size of the variable in bytes (element size * length for arrays) */
     int      is_global; /* 1 = global variable, 0 = local variable on the stack */
     int      offset;    /* for locals: distance from rbp (positive, used as [rbp - offset]) */
     Node    *sig;       /* signature when type == TYPE_FUNC (function pointer), else NULL */
@@ -42,9 +43,10 @@ typedef struct {
     char    *name;
     DataType type;
     int      ptr;
+    int      arr;       /* array length for [T; N] fields (0 = not an array) */
     char    *sname;     /* struct name when the field is a nested struct */
     int      offset;    /* offset of the field within the struct (bytes) */
-    int      size;      /* size of the field (bytes) */
+    int      size;      /* size of the field (bytes; element size * length for arrays) */
     Node    *sig;       /* signature when the field is TYPE_FUNC (function pointer), else NULL */
 } Field;
 
@@ -62,6 +64,7 @@ typedef struct {
     int      ptr;
     char    *sname;
     Node    *sig;       /* signature when base == TYPE_FUNC (function pointer), else NULL */
+    int      arr;       /* array length when the expression names a whole [T; N] (0 = not an array) */
 } ExprType;
 
 /* All backend state gathered into one structure (the compiler processes one file at a time) */
@@ -127,7 +130,7 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
                      Node **vals, int *out_nv, int vals_cap);
 
 /* --- reserving variable space on the stack (frame layout) --- */
-int   add_local(Gen *g, const char *name, DataType type, int ptr, char *sname, Node *sig, int *frame);
+int   add_local(Gen *g, const char *name, DataType type, int ptr, int arr, char *sname, Node *sig, int *frame);
 void  collect_locals(Gen *g, Node *n, int *frame);
 void  collect_struct_temps(Gen *g, Node *n, int *frame);  /* reserve temps for struct-returning calls (rvalues) */
 

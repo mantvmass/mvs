@@ -1,0 +1,7 @@
+//~ ERROR: cannot index
+// only arrays and pointers can be indexed
+func main() -> i8 {
+    let x: i32 = 5;
+    let y: i32 = x[0];
+    return 0;
+}

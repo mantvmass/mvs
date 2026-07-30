@@ -31,6 +31,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `casts.mvs` | `as` conversions + compile-time type checking |
 | `control.mvs` | if/elseif/else, while, for, do-while, switch/case |
 | `args.mvs` | command-line args via `main(argc, argv)` |
+| `arrays.mvs` | `[T; N]` arrays: literals, indexing, `.len`, structs, decay to `*T` |
 
 ## 02_functions: functions / generics / overloading
 
@@ -40,6 +41,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `generics.mvs` | generic functions (monomorphization) |
 | `overload.mvs` | overloading by type + a generic calling an overload |
 | `funcptr.mvs` | function pointers: `func(...) -> T` as a value, pass/store/call (indirect) |
+| `defaults.mvs` | default parameter values (functions + methods, filled at compile time) |
 
 ## 03_structs: struct / method / pointer
 
@@ -48,6 +50,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `structs.mvs` | structs, members, struct return, io.out on a struct |
 | `methods.mvs` | methods + associated `Type::new` + chaining |
 | `pointers.mvs` | `&`/`*`/`**`, pointer arithmetic, arrays via malloc |
+| `compound.mvs` | compound assignment evaluates its lvalue (incl. calls) exactly once |
 
 ## 04_traits: trait / Display
 

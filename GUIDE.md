@@ -112,6 +112,7 @@ A new backend (say `arch/x86_64/sysv.c` for ELF/Linux) reuses `common.c` and onl
 | `str` | string literal `"..."` (pointer to bytes + 0) | 8 | - |
 | `void` | no value (a function return type) | 0 | - |
 | `*T` | pointer to T | 8 | - |
+| `[T; N]` | fixed-size array of N elements | N * sizeof(T) | - |
 | `struct` | a struct | sum of fields | - |
 
 Values are always computed in 64-bit registers, but the real width is respected when **storing**
@@ -139,6 +140,26 @@ owned.drop();                           // free it yourself
 ```
 
 Rule of thumb: `str` for fixed text and read-only parameters; `String` when you build or append at runtime.
+
+#### Arrays `[T; N]`
+
+```rust
+let a: [i32; 5] = [10, 20, 30, 40, 50];  // literal must have exactly N elements
+a[0] = 99;  a[1] += 5;                   // element read/write (any expression as index)
+io.out("{}", a);                         // [99, 25, 30, 40, 50]  (expands like Rust's {:?})
+io.out("{}", a.len);                     // 5 (compile-time constant)
+
+struct Grid { cells: [i32; 4]; }         // arrays work as struct fields (and print inline)
+let pts: [Point; 2] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];  // arrays of structs
+
+func sum(p: *i32, n: i32) -> i32 { ... }
+sum(a, 5);                               // an array decays to a pointer at a call site
+```
+
+Rules: a `[T; N]` lives on the stack (globals in `.bss`); a constant index out of range is a
+compile error; the literal length must match N exactly; parameters cannot be arrays (pass `*T`,
+the array decays); whole-array assignment (`a = b`) is rejected, copy element by element.
+For dynamically-sized buffers use `malloc` + pointer arithmetic as before.
 
 ### 4.3 Variables
 
@@ -525,7 +546,8 @@ In a real OS you own physical/virtual memory and page allocation; nobody frees f
   `main` (not baked into the file).
 - **String constants** live in `.data` (bytes + trailing 0); a `str` variable is a pointer to those bytes.
 
-There is **no array type**: buffers are made with `malloc` + pointer + pointer arithmetic (`*(buf + i)`).
+Fixed-size buffers use the `[T; N]` array type (stack/.bss); dynamically-sized buffers are made
+with `malloc` + pointer + pointer arithmetic (`*(buf + i)` or `buf[i]`).
 
 ---
 
@@ -711,17 +733,21 @@ let buf: *u8 = malloc(256);
 free(buf);                       // always free yourself
 ```
 
-### "Arrays" via pointers (there's no array type)
+### Fixed-size arrays (stack) and dynamic buffers (malloc)
 
 ```rust
+let a: [i32; 10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];   // fixed size: a real array, no malloc
+for (let i: i32 = 0; i < 10; i++) { a[i] = i * i; }
+io.out("a[3] = {}", a[3]);           // 9
+
 extern func malloc(n: usize) -> *u8;
-let arr: *i32 = malloc(40);      // 10 i32 slots (10 * 4 bytes)
+let arr: *i32 = malloc(40);          // dynamic size: 10 i32 slots (10 * 4 bytes)
 let i: i32 = 0;
 while (i < 10) {
-    *(arr + i) = i * i;          // pointer math scales by sizeof(i32) automatically
+    arr[i] = i * i;                  // pointer indexing scales by sizeof(i32) automatically
     i++;
 }
-io.out("arr[3] = {}", *(arr + 3));   // 9
+io.out("arr[3] = {}", arr[3]);       // 9
 ```
 
 ### Command-line arguments (argc/argv)
@@ -871,7 +897,6 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 
 ### Language / types
 
-- **No array type**: use pointer + malloc.
 - Full bitwise (`& | ^ ~ << >>`); power is `**` (e.g. `2 ** 8`, `2.0 ** 10`); a float base works (repeated
   `mulsd` by an integer exponent); a negative exponent isn't supported (returns 1.0).
 - generics + overloading + traits are all present (monomorphization); overloads distinguish int **width**
@@ -970,6 +995,10 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
   slots 5+, for extern C calls, C callers of exports, and MVS callers of its own exports.
 - Golden test suite (`make test`): run-pass output diffs, compile-only, and compile-fail
   (expected-error) tests in `tests/`, run by CI.
+- Real `[T; N]` array type: stack/.bss storage, literals with exact-length checking, indexing
+  (arrays and pointers, `p[i]` = `*(p + i)`), `a.len`, compile-time bounds check for constant
+  indices, arrays in structs and structs in arrays, io.out expansion (`[1, 2, 3]`), and decay
+  to `*T` at call sites.
 - Rust-style diagnostics (`src/diag.c`): every error shows `file:line:col`, the offending
   source line with a caret, and a `help:` note; the parser recovers at `;`/`}` and reports
   many errors per run (capped at 20); non-void functions must return on every path
@@ -986,7 +1015,6 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
   (x86 has no 128/128 divide). Today the 16 bytes are stored but computed as 64-bit.
 - **Dynamic dispatch (`dyn Trait` / vtable)** and multi-condition `where`. This is also the prerequisite for
   making `io.out`'s `{}` form a real library function (see below).
-- **A real array type.**
 - **`io.out` as a library** instead of an intrinsic. This needs three things, in order:
   1. trait objects / `dyn Trait` (a fat pointer `{data, vtable}`), with a per-(type, trait) vtable and dynamic
      dispatch through it.
@@ -1004,7 +1032,7 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 
 ### Known minor limits (low risk, not yet fixed)
 
-- `[`/`]` are lexed but there's no array type; generic params beyond 4 are clamped.
+- Generic params beyond 4 are clamped; arrays of arrays (`[[T; N]; M]`) are not supported yet.
 - Function pointers (v1): the type doesn't take varargs in its signature; can't overload by function-pointer type
   (all mangle to `func`); assignment to a func-ptr variable is type-checked leniently; pointing a func-ptr at a C
   `extern` taking/returning `f32` won't narrow double↔single (func pointers are meant for MVS functions).

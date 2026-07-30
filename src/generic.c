@@ -14,8 +14,9 @@
 #include "generic.h"
 #include "diag.h"
 
-/* Inferred concrete type (base + pointer depth + struct name + signature if it is a function pointer) */
-typedef struct { DataType base; int ptr; char *sname; Node *sig; } CType;
+/* Inferred concrete type (base + pointer depth + struct name + signature if it is a function pointer).
+ * arr > 0 marks a whole [T; N] array value; base/ptr/sname then describe the element */
+typedef struct { DataType base; int ptr; char *sname; Node *sig; int arr; } CType;
 
 /* Mapping entry, name -> type (used as the per-function var-type map and the generic-param map).
  * is_const marks let/const so the type checker can reject writes to constants;
@@ -105,7 +106,9 @@ static int struct_field_type(Node *prog, const char *sname, const char *field, C
             for (int j = 0; j < d->nitems; j++) {
                 Node *f = d->items[j];
                 if (strcmp(f->name, field) == 0) {
-                    out->base = f->type; out->ptr = f->ptr; out->sname = f->type_name; out->sig = f->sig; return 1;
+                    out->base = f->type; out->ptr = f->ptr; out->sname = f->type_name; out->sig = f->sig;
+                    out->arr = f->arr;
+                    return 1;
                 }
             }
         }
@@ -128,7 +131,7 @@ static int int_rank(DataType t) {
 /* ---------- expression type inference (uses the var-type map built from declared types) ---------- */
 
 static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
-    CType r = { TYPE_I64, 0, NULL, NULL };
+    CType r = { TYPE_I64, 0, NULL, NULL, 0 };
     if (!n) return r;
     switch (n->kind) {
         case ND_INT: r.base = TYPE_I64; break;
@@ -150,9 +153,19 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
             break;
         case ND_MEMBER: {
             CType bt = infer(prog, n->operand, map, nmap);
+            if (bt.arr > 0 && n->name && strcmp(n->name, "len") == 0) { r.base = TYPE_USIZE; break; }
             CType ft; if (struct_field_type(prog, bt.sname, n->name, &ft)) return ft;
             break;
         }
+        case ND_INDEX: {
+            CType bt = infer(prog, n->lhs, map, nmap);
+            if (bt.arr > 0)      { r = bt; r.arr = 0; }   /* array element */
+            else if (bt.ptr > 0) { r = bt; r.ptr--; }     /* pointer indexing */
+            break;
+        }
+        case ND_ARRAY_LIT:
+            if (n->nitems > 0) { r = infer(prog, n->items[0], map, nmap); r.arr = n->nitems; }
+            break;
         case ND_UNARY:
             if (n->op == TK_AMP)       { r = infer(prog, n->operand, map, nmap); r.ptr++; }
             else if (n->op == TK_STAR) { r = infer(prog, n->operand, map, nmap); if (r.ptr > 0) r.ptr--; }
@@ -185,7 +198,7 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
             {
                 CType cc = infer(prog, callee, map, nmap);
                 if (cc.base == TYPE_FUNC && cc.sig) {
-                    CType ct = { cc.sig->type, cc.sig->ptr, cc.sig->type_name, NULL };
+                    CType ct = { cc.sig->type, cc.sig->ptr, cc.sig->type_name, NULL, 0 };
                     return ct;
                 }
             }
@@ -206,7 +219,7 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
                     if (scope && f->ns && strcmp(f->ns, scope) == 0) { best = f; break; }
                     if (!best) best = f;
                 }
-                if (best) { CType ct = { best->type, best->ptr, best->type_name, NULL }; return ct; }
+                if (best) { CType ct = { best->type, best->ptr, best->type_name, NULL, 0 }; return ct; }
             }
             break;
         }
@@ -221,6 +234,7 @@ static void add_bind(Bind *map, int *nmap, Node *d) {
     if (*nmap >= 512 || !d->name) return;
     map[*nmap].name = d->name;
     map[*nmap].t.base = d->type; map[*nmap].t.ptr = d->ptr; map[*nmap].t.sname = d->type_name; map[*nmap].t.sig = d->sig;
+    map[*nmap].t.arr = d->arr;
     map[*nmap].is_const = (d->kind == ND_VAR_DECL) ? d->is_const : 0;
     map[*nmap].decl = d;
     map[*nmap].used = 0;
@@ -313,13 +327,14 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
             /* Infer each generic parameter's type from the arguments */
             Bind gmap[4];
             for (int gi = 0; gi < tmpl->ngen; gi++) {
-                CType concrete = { TYPE_I64, 0, NULL, NULL };
+                CType concrete = { TYPE_I64, 0, NULL, NULL, 0 };
                 /* Find the first parameter whose type refers to this generic param */
                 for (int pi = 0; pi < tmpl->nitems && pi < n->nitems; pi++) {
                     Node *pp = tmpl->items[pi];
                     if (pp->type == TYPE_STRUCT && pp->type_name &&
                         strcmp(pp->type_name, tmpl->gen[gi]) == 0) {
                         CType at = infer(prog, n->items[pi], map, *nmap);
+                        if (at.arr > 0) { at.arr = 0; at.ptr++; }   /* [T; N] decays to *T for inference */
                         concrete.base = at.base; concrete.sname = at.sname; concrete.sig = at.sig;
                         concrete.ptr = at.ptr - pp->ptr; if (concrete.ptr < 0) concrete.ptr = 0;
                         break;
@@ -422,7 +437,7 @@ static void sig_func(Node *fn, char *buf, int exact) {
     if (fn->nitems == 0) { strcpy(buf, "void"); return; }
     size_t len = 0;
     for (int i = 0; i < fn->nitems; i++) {
-        CType t = { fn->items[i]->type, fn->items[i]->ptr, fn->items[i]->type_name, NULL };
+        CType t = { fn->items[i]->type, fn->items[i]->ptr, fn->items[i]->type_name, NULL, 0 };
         char c[128]; if (exact) width_code(t, c); else cat_code(t, c);
         sig_append(buf, &len, i == 0, c);
     }
@@ -435,6 +450,7 @@ static void sig_call(Node *prog, Node *call, Bind *map, int nmap, char *buf, int
     size_t len = 0;
     for (int i = 0; i < call->nitems; i++) {
         CType t = infer(prog, call->items[i], map, nmap);
+        if (t.arr > 0) { t.arr = 0; t.ptr++; }   /* [T; N] argument decays to *T for overload matching */
         char c[128]; if (exact) width_code(t, c); else cat_code(t, c);
         sig_append(buf, &len, i == 0, c);
     }
@@ -726,6 +742,11 @@ static void tc_name(CType t, char *buf) {
 
 /* Check whether a value (s) can be assigned to a target (d) */
 static int tc_assignable(CType d, CType s) {
+    if (d.arr > 0 || s.arr > 0) {
+        /* whole arrays never assign; a [T; N] value decays to a pointer when the target is one */
+        if (d.arr > 0) return 0;                        /* array targets are handled at the declaration */
+        return tc_isptr(d) || tc_isstr(d);
+    }
     if (tc_isstruct(d)) return tc_isstruct(s) && d.sname && s.sname && strcmp(d.sname, s.sname) == 0;
     if (tc_isstruct(s)) return 0;                       /* a struct value only fits the same struct type */
     if (tc_isptr(d) || tc_isstr(d))                     /* pointer/str target: accepts pointer/str/integer (address/null) */
@@ -813,6 +834,7 @@ static void tc_add(TcCtx *c, Node *d) {
     c->map[*c->nmap].t.ptr = d->ptr;
     c->map[*c->nmap].t.sname = d->type_name;
     c->map[*c->nmap].t.sig = d->sig;
+    c->map[*c->nmap].t.arr = d->arr;
     c->map[*c->nmap].is_const = (d->kind == ND_VAR_DECL) ? d->is_const : 0;
     c->map[*c->nmap].decl = d;
     c->map[*c->nmap].used = 0;
@@ -887,9 +909,37 @@ static void tc_check(TcCtx *c, Node *n) {
         case ND_VAR_DECL: {                    /* check the initializer in the current scope, then add the var */
             if (n->operand) {
                 tc_check(c, n->operand);
-                CType dt = { n->type, n->ptr, n->type_name, NULL };
-                CType vt = infer(c->prog, n->operand, c->map, *c->nmap);
-                if (!tc_assignable(dt, vt)) tc_err(c, n, "cannot initialize variable: type mismatch between", dt, vt);
+                if (n->arr > 0) {
+                    /* [T; N]: only an array literal with exactly N assignable elements */
+                    if (n->operand->kind != ND_ARRAY_LIT) {
+                        diag_print(n->file, n->line, n->col, "error",
+                                   "an array variable can only be initialized with an array literal [e1, e2, ...]");
+                        (*c->errc)++;
+                    } else {
+                        if (n->operand->nitems != n->arr) {
+                            diag_print(n->operand->file, n->operand->line, n->operand->col, "error",
+                                       "array literal has %d element(s) but the type needs exactly %d",
+                                       n->operand->nitems, n->arr);
+                            diag_help("[T; %d] requires exactly %d elements in the literal", n->arr, n->arr);
+                            (*c->errc)++;
+                        }
+                        CType et = { n->type, n->ptr, n->type_name, n->sig, 0 };
+                        for (int i = 0; i < n->operand->nitems; i++) {
+                            CType vt2 = infer(c->prog, n->operand->items[i], c->map, *c->nmap);
+                            if (!tc_assignable(et, vt2))
+                                tc_err(c, n->operand->items[i], "array element type mismatch between", et, vt2);
+                        }
+                    }
+                } else if (n->operand->kind == ND_ARRAY_LIT) {
+                    diag_print(n->file, n->line, n->col, "error",
+                               "an array literal can only initialize a [T; N] variable");
+                    diag_help("declare the variable as e.g. 'let x: [i32; %d] = ...'", n->operand->nitems);
+                    (*c->errc)++;
+                } else {
+                    CType dt = { n->type, n->ptr, n->type_name, NULL, 0 };
+                    CType vt = infer(c->prog, n->operand, c->map, *c->nmap);
+                    if (!tc_assignable(dt, vt)) tc_err(c, n, "cannot initialize variable: type mismatch between", dt, vt);
+                }
             }
             tc_add(c, n);
             return;
@@ -943,6 +993,27 @@ static void tc_check(TcCtx *c, Node *n) {
                 CType ft;
                 if (fi->lhs && fi->lhs->kind == ND_IDENT &&
                     struct_field_type(c->prog, n->name, fi->lhs->name, &ft)) {
+                    if (ft.arr > 0) {
+                        /* [T; N] field: needs an array literal with exactly N assignable elements */
+                        if (fi->rhs->kind != ND_ARRAY_LIT) {
+                            diag_print(fi->file, fi->line, fi->col, "error",
+                                       "array field '%s' can only be initialized with an array literal", fi->lhs->name);
+                            (*c->errc)++;
+                        } else if (fi->rhs->nitems != ft.arr) {
+                            diag_print(fi->rhs->file, fi->rhs->line, fi->rhs->col, "error",
+                                       "array literal has %d element(s) but field '%s' needs exactly %d",
+                                       fi->rhs->nitems, fi->lhs->name, ft.arr);
+                            (*c->errc)++;
+                        } else {
+                            CType et = ft; et.arr = 0;
+                            for (int j = 0; j < fi->rhs->nitems; j++) {
+                                CType vt2 = infer(c->prog, fi->rhs->items[j], c->map, *c->nmap);
+                                if (!tc_assignable(et, vt2))
+                                    tc_err(c, fi->rhs->items[j], "array element type mismatch between", et, vt2);
+                            }
+                        }
+                        continue;
+                    }
                     CType vt = infer(c->prog, fi->rhs, c->map, *c->nmap);
                     if (!tc_assignable(ft, vt)) tc_err(c, fi, "struct field type mismatch between", ft, vt);
                 }
@@ -989,13 +1060,40 @@ static void tc_check(TcCtx *c, Node *n) {
     } else if (n->kind == ND_ASSIGN) {
         CType lt = infer(c->prog, n->lhs, c->map, *c->nmap);
         CType rt = infer(c->prog, n->rhs, c->map, *c->nmap);
-        if (!tc_assignable(lt, rt)) tc_err(c, n, "cannot assign value of type", rt, lt);   /* "... rt to lt" */
+        if (lt.arr > 0) {
+            diag_print(n->file, n->line, n->col, "error", "whole-array assignment is not supported");
+            diag_help("copy element by element instead");
+            (*c->errc)++;
+        } else if (!tc_assignable(lt, rt)) tc_err(c, n, "cannot assign value of type", rt, lt); /* "... rt to lt" */
         tc_check_const_target(c, n->lhs, n);                       /* const is read-only */
     } else if (n->kind == ND_UNARY && (n->op == TK_PLUSPLUS || n->op == TK_MINUSMINUS)) {
         tc_check_const_target(c, n->operand, n);                   /* x++ / x-- also writes x */
     } else if (n->kind == ND_RETURN && n->operand) {
         CType vt = infer(c->prog, n->operand, c->map, *c->nmap);
         if (!tc_assignable(c->ret, vt)) tc_err(c, n, "return type mismatch between", c->ret, vt);
+    } else if (n->kind == ND_INDEX) {
+        /* a[i]: the base must be indexable, the index an integer, and a constant
+         * index into a [T; N] must be inside the bounds (checked at compile time) */
+        CType bt = infer(c->prog, n->lhs, c->map, *c->nmap);
+        CType it = infer(c->prog, n->rhs, c->map, *c->nmap);
+        if (bt.arr == 0 && bt.ptr == 0) {
+            char bn[128]; tc_name(bt, bn);
+            diag_print(n->file, n->line, n->col, "error", "cannot index a value of type '%s'", bn);
+            diag_help("indexing works on arrays ([T; N]) and pointers (*T)");
+            (*c->errc)++;
+        }
+        if (!tc_integer(it)) {
+            char in2[128]; tc_name(it, in2);
+            diag_print(n->rhs->file, n->rhs->line, n->rhs->col, "error",
+                       "array index must be an integer, got '%s'", in2);
+            (*c->errc)++;
+        }
+        if (bt.arr > 0 && n->rhs->kind == ND_INT &&
+            (n->rhs->int_val < 0 || n->rhs->int_val >= bt.arr)) {
+            diag_print(n->rhs->file, n->rhs->line, n->rhs->col, "error",
+                       "index out of bounds: the length is %d but the index is %lld", bt.arr, n->rhs->int_val);
+            (*c->errc)++;
+        }
     } else if (n->kind == ND_UNARY && n->op == TK_STAR) {
         /* dereference `*x` only works on a pointer (avoids silent segfaults) */
         CType ot = infer(c->prog, n->operand, c->map, *c->nmap);
@@ -1042,7 +1140,7 @@ static void tc_check(TcCtx *c, Node *n) {
             } else {
                 for (int i = 0; i < n->nitems; i++) {
                     Node *pp = fn->items[i + argoff];
-                    CType pt = { pp->type, pp->ptr, pp->type_name, pp->sig };
+                    CType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 };
                     CType at = infer(c->prog, n->items[i], c->map, *c->nmap);
                     if (!tc_assignable(pt, at)) {
                         char an[128], pn[128]; tc_name(at, an); tc_name(pt, pn);
@@ -1067,7 +1165,7 @@ int typecheck(Node *prog) {
         Node *f = prog->items[i];
         if (f->kind == ND_FUNC && f->body && f->ngen == 0) {
             Bind map[512]; int nmap = 0;
-            CType ret = { f->type, f->ptr, f->type_name, NULL };
+            CType ret = { f->type, f->ptr, f->type_name, NULL, 0 };
             TcCtx c = { prog, map, &nmap, ret, &errc };
             seed_globals(prog, map, &nmap);            /* globals live in the base scope */
             int param_base = nmap;
@@ -1094,13 +1192,38 @@ int typecheck(Node *prog) {
             }
         } else if (f->kind == ND_VAR_DECL && f->operand) {  /* also check global initializers */
             Bind map[512]; int nmap = 0;
-            CType ret = { TYPE_VOID, 0, NULL, NULL };
+            CType ret = { TYPE_VOID, 0, NULL, NULL, 0 };
             TcCtx c = { prog, map, &nmap, ret, &errc };
             seed_globals(prog, map, &nmap);
             tc_check(&c, f->operand);
-            CType dt = { f->type, f->ptr, f->type_name, NULL };
-            CType vt = infer(prog, f->operand, map, nmap);
-            if (!tc_assignable(dt, vt)) tc_err(&c, f, "cannot initialize global: type mismatch between", dt, vt);
+            if (f->arr > 0) {
+                /* [T; N] global: same rules as a local array declaration */
+                if (f->operand->kind != ND_ARRAY_LIT) {
+                    diag_print(f->file, f->line, f->col, "error",
+                               "an array variable can only be initialized with an array literal [e1, e2, ...]");
+                    errc++;
+                } else if (f->operand->nitems != f->arr) {
+                    diag_print(f->operand->file, f->operand->line, f->operand->col, "error",
+                               "array literal has %d element(s) but the type needs exactly %d",
+                               f->operand->nitems, f->arr);
+                    errc++;
+                } else {
+                    CType et = { f->type, f->ptr, f->type_name, f->sig, 0 };
+                    for (int j = 0; j < f->operand->nitems; j++) {
+                        CType vt2 = infer(prog, f->operand->items[j], map, nmap);
+                        if (!tc_assignable(et, vt2))
+                            tc_err(&c, f->operand->items[j], "array element type mismatch between", et, vt2);
+                    }
+                }
+            } else if (f->operand->kind == ND_ARRAY_LIT) {
+                diag_print(f->file, f->line, f->col, "error",
+                           "an array literal can only initialize a [T; N] variable");
+                errc++;
+            } else {
+                CType dt = { f->type, f->ptr, f->type_name, NULL, 0 };
+                CType vt = infer(prog, f->operand, map, nmap);
+                if (!tc_assignable(dt, vt)) tc_err(&c, f, "cannot initialize global: type mismatch between", dt, vt);
+            }
         }
     }
     return errc;
