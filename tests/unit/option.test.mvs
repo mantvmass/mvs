@@ -1,0 +1,46 @@
+// unit tests for Option<T> / Result<T, E> and generic structs
+import { test } from "std";
+import { Option, Some, None } from "std/option";
+import { Result, Ok, Err } from "std/result";
+
+struct Pt<T> { x: T; y: T; }
+impl Pt<T> {
+    func sum(self: *Pt<T>) -> T { return self.x + self.y; }
+}
+
+@test
+func option_some_and_none() -> void {
+    let a: Option<i64> = Some(5);
+    test.ok(a.is_some());
+    test.eq(a.unwrap(), 5);
+    let b: Option<i64> = None<i64>();
+    test.ok(b.is_none());
+    test.eq(b.unwrap_or(7), 7);
+}
+
+@test
+func option_other_types() -> void {
+    let s: Option<str> = Some("hi");
+    test.eq(s.unwrap(), "hi");
+    let f: Option<f64> = Some(1.5);
+    test.eq(f.unwrap_or(0.0), 1.5);
+}
+
+@test
+func result_ok_and_err() -> void {
+    let g: Result<i64, str> = Ok<i64, str>(42);
+    test.ok(g.is_ok());
+    test.eq(g.unwrap(), 42);
+    let b: Result<i64, str> = Err<i64, str>("boom");
+    test.ok(b.is_err());
+    test.eq(b.unwrap_err(), "boom");
+    test.eq(b.unwrap_or(0 - 1), 0 - 1);
+}
+
+@test
+func generic_struct_methods() -> void {
+    let p: Pt<i64> = Pt<i64> { x: 3, y: 4 };
+    test.eq(p.sum(), 7);
+    let q: Pt<f64> = Pt<f64> { x: 0.5, y: 0.25 };
+    test.near(q.sum(), 0.75, 0.000001);
+}

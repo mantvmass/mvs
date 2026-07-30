@@ -1805,8 +1805,8 @@ int x86_64_win_generate(Node *program, FILE *out) {
     /* pass 1: register every struct, then compute the layouts to a fixpoint
      * (two steps so a struct can have fields whose struct type is declared later) */
     for (int i = 0; i < program->nitems; i++)
-        if (program->items[i]->kind == ND_STRUCT_DECL)
-            register_struct(&g, program->items[i]);
+        if (program->items[i]->kind == ND_STRUCT_DECL && program->items[i]->ngen == 0)
+            register_struct(&g, program->items[i]);   /* generic templates never reach codegen */
     layout_structs(&g);
 
     /* pass 2: register functions and global variables (supports forward references) */

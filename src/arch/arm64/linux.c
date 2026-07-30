@@ -1623,7 +1623,7 @@ int arm64_linux_generate(Node *program, FILE *out) {
     g.program = program;
 
     for (int i = 0; i < program->nitems; i++)
-        if (program->items[i]->kind == ND_STRUCT_DECL)
+        if (program->items[i]->kind == ND_STRUCT_DECL && program->items[i]->ngen == 0)
             register_struct(&g, program->items[i]);
     layout_structs(&g);
     if (g.had_error) return 1;

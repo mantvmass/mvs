@@ -1826,7 +1826,7 @@ int x86_64_sysv_generate(Node *program, FILE *out) {
     /* pass 1: register every struct, then compute the layouts to a fixpoint
      * (two steps so a struct can have fields whose struct type is declared later) */
     for (int i = 0; i < program->nitems; i++)
-        if (program->items[i]->kind == ND_STRUCT_DECL)
+        if (program->items[i]->kind == ND_STRUCT_DECL && program->items[i]->ngen == 0)
             register_struct(&g, program->items[i]);
     layout_structs(&g);
 

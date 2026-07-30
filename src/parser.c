@@ -41,6 +41,7 @@ static int match(Parser *p, TokenType t) {
  * suppressed until synchronize() finds a safe point to resume from, so one real
  * mistake does not cascade into a wall of noise. */
 static void error(Parser *p, const char *msg) {
+    if (p->trying) { p->panic = 1; return; }  /* speculative parse: fail quietly, caller restores */
     p->had_error = 1;
     if (p->panic || p->fatal) return;      /* one report per bad region */
     p->panic = 1;
@@ -117,10 +118,44 @@ static Node *parse_expr(Parser *p);
 static Node *parse_stmt(Parser *p);
 static Node *parse_block(Parser *p);
 static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out, int *arr_out);
+static int parse_generic_cname(Parser *p, const char *base, char *out, size_t on,
+                               char *out_args[4], int *out_nargs);
+
+/* Consume one closing '>' of a generic argument list. A '>>' (lexed as TK_SHR when
+ * generics nest, e.g. Vec<Vec<i64>>) counts as two: the first consumer takes the
+ * token and leaves a debt; the second consumer just clears the debt. */
+static int expect_gt(Parser *p) {
+    if (p->gt_debt) { p->gt_debt = 0; return 1; }
+    if (check(p, TK_GT)) { advance(p); return 1; }
+    if (check(p, TK_SHR)) { advance(p); p->gt_debt = 1; return 1; }
+    return 0;
+}
 
 #define MAX_PARSE_DEPTH 300  /* guard against stack overflow from abnormally deep expressions/blocks/unary chains */
 
 /* ---------- Expression parsing ---------- */
+
+/* The body of a struct literal after its (possibly generic) name: '{' fields '}'.
+ * Takes ownership of name. Each field is an ND_ASSIGN: lhs = field name, rhs = value */
+static Node *parse_struct_lit_body(Parser *p, char *name, int line) {
+    Node *lit = node_new(ND_STRUCT_LIT, line);
+    lit->name = name;
+    advance(p); /* consume { */
+    if (!check(p, TK_RBRACE)) {
+        do {
+            Node *fi = node_new(ND_ASSIGN, p->cur.line);
+            Node *fname = node_new(ND_IDENT, p->cur.line);
+            if (!check(p, TK_IDENT)) { error(p, "expected field name in struct literal"); break; }
+            fname->name = strdup(p->cur.lexeme); advance(p);
+            expect(p, TK_COLON, "expected ':' in struct literal");
+            fi->lhs = fname;
+            fi->rhs = parse_expr(p);
+            node_add_item(lit, fi);
+        } while (match(p, TK_COMMA));
+    }
+    expect(p, TK_RBRACE, "expected '}' to close struct literal");
+    return lit;
+}
 
 /* primary := INT | FLOAT | STRING | CHAR | true | false | IDENT | '(' expr ')' */
 static Node *parse_primary(Parser *p) {
@@ -165,27 +200,40 @@ static Node *parse_primary(Parser *p) {
         char *idname = strdup(t.lexeme);
         int line = t.line;
         advance(p);
-        /* If followed by '{', this is a struct literal: Name { field: expr, ... } */
-        if (check(p, TK_LBRACE)) {
-            Node *lit = node_new(ND_STRUCT_LIT, line);
-            lit->name = idname;
-            advance(p); /* consume { */
-            if (!check(p, TK_RBRACE)) {
-                do {
-                    /* Each field is stored as ND_ASSIGN: lhs = field name, rhs = expression */
-                    Node *fi = node_new(ND_ASSIGN, p->cur.line);
-                    Node *fname = node_new(ND_IDENT, p->cur.line);
-                    if (!check(p, TK_IDENT)) { error(p, "expected field name in struct literal"); break; }
-                    fname->name = strdup(p->cur.lexeme); advance(p);
-                    expect(p, TK_COLON, "expected ':' in struct literal");
-                    fi->lhs = fname;
-                    fi->rhs = parse_expr(p);
-                    node_add_item(lit, fi);
-                } while (match(p, TK_COMMA));
+        /* Name<...> in an expression: a generic struct literal (Vec<i64> { ... }) or an
+         * explicit-argument generic call (none<i64>()). '<' is also plain less-than, so
+         * parse speculatively and restore on anything else. */
+        if (check(p, TK_LT)) {
+            Lexer lsave = *p->lx;
+            Token csave = p->cur;
+            int sav_err = p->had_error, sav_panic = p->panic;
+            int sav_debt = p->gt_debt, sav_n = p->nerrors, sav_try = p->trying;
+            p->trying = 1;
+            char cname[256];
+            char *gargs[4]; int ngargs = 0;
+            int ok = parse_generic_cname(p, idname, cname, sizeof(cname), gargs, &ngargs);
+            p->trying = sav_try;
+            if (ok && !p->panic && check(p, TK_LBRACE)) {
+                free(idname);
+                for (int i = 0; i < ngargs; i++) free(gargs[i]);
+                return parse_struct_lit_body(p, strdup(cname), line);
             }
-            expect(p, TK_RBRACE, "expected '}' to close struct literal");
-            return lit;
+            if (ok && !p->panic && check(p, TK_LPAREN)) {
+                /* the args ride on the callee ident; monomorphize reads them instead of inferring */
+                Node *n = node_new(ND_IDENT, line);
+                n->name = idname; n->type = TYPE_UNKNOWN;
+                for (int i = 0; i < ngargs && i < 4; i++) n->gen[i] = gargs[i];
+                n->ngen = ngargs;
+                return n;   /* parse_postfix attaches the call */
+            }
+            /* plain less-than after all: rewind and fall through */
+            for (int i = 0; i < ngargs; i++) free(gargs[i]);
+            *p->lx = lsave; p->cur = csave;
+            p->had_error = sav_err; p->panic = sav_panic;
+            p->gt_debt = sav_debt; p->nerrors = sav_n;
         }
+        /* If followed by '{', this is a struct literal: Name { field: expr, ... } */
+        if (check(p, TK_LBRACE)) return parse_struct_lit_body(p, idname, line);
         Node *n = node_new(ND_IDENT, line);
         n->name = idname; n->type = TYPE_UNKNOWN;
         return n;
@@ -570,13 +618,59 @@ static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out
         advance(p);
         return dt;
     }
-    if (check(p, TK_IDENT)) { /* struct name */
-        *type_name = strdup(p->cur.lexeme);
+    if (check(p, TK_IDENT)) { /* struct name, possibly generic: Vec<i64>, Pair<i64,str> */
+        char base[128];
+        snprintf(base, sizeof(base), "%s", p->cur.lexeme);
         advance(p);
+        if (check(p, TK_LT)) {
+            char cname[256];
+            if (!parse_generic_cname(p, base, cname, sizeof(cname), NULL, NULL))
+                return TYPE_UNKNOWN;
+            *type_name = strdup(cname);   /* canonical "Vec<i64>"; monomorphized later */
+            return TYPE_STRUCT;
+        }
+        *type_name = strdup(base);
         return TYPE_STRUCT;
     }
     error(p, "expected a type");
     return TYPE_UNKNOWN;
+}
+
+/* After Name, parse '<' type {',' type} '>' into out = the canonical "Name<a,b>"
+ * (no spaces; nested generics keep their own angles). Optionally captures each
+ * top-level argument's canonical text in out_args (strdup'd, max 4).
+ * Returns 1 on success; on failure reports an error (silently in trying mode). */
+static int parse_generic_cname(Parser *p, const char *base, char *out, size_t on,
+                               char *out_args[4], int *out_nargs) {
+    advance(p);   /* consume '<' */
+    size_t len = (size_t)snprintf(out, on, "%s<", base);
+    if (out_nargs) *out_nargs = 0;
+    do {
+        int aptr = 0, aarr = 0;
+        char *aname = NULL;
+        DataType at = parse_type(p, &aptr, &aname, NULL, &aarr);
+        if (p->panic || p->fatal) { free(aname); return 0; }
+        if (aptr > 0 || aarr > 0 || at == TYPE_FUNC || at == TYPE_DYN ||
+            at == TYPE_UNKNOWN || at == TYPE_VOID) {
+            free(aname);
+            error(p, "generic type arguments must be primitive types or struct names");
+            return 0;
+        }
+        const char *an = (at == TYPE_STRUCT) ? aname : datatype_name(at);
+        if (len + strlen(an) + 3 >= on) { free(aname); error(p, "generic type name too long"); return 0; }
+        if (out[len - 1] != '<') out[len++] = ',';
+        strcpy(out + len, an);
+        len += strlen(an);
+        if (out_args && out_nargs && *out_nargs < 4) out_args[(*out_nargs)++] = strdup(an);
+        free(aname);
+    } while (match(p, TK_COMMA));
+    if (!expect_gt(p)) {
+        error(p, "expected '>' to close the generic type arguments");
+        return 0;
+    }
+    out[len++] = '>';
+    out[len] = '\0';
+    return 1;
 }
 
 /* ---------- Statement parsing ---------- */
@@ -868,9 +962,21 @@ static Node *parse_impl(Parser *p) {
     /* Forms:  impl Type { ... }   (inherent)
      *         impl Trait for Type { ... }   (trait impl) */
     char *first = NULL, *trait = NULL, *sname = NULL;
+    char *gnames[4]; int ngnames = 0;
     if (!check(p, TK_IDENT)) error(p, "expected type/trait name after impl");
     else { first = strdup(p->cur.lexeme); advance(p); }
+    /* generic impl: impl Vec<T> { ... } (the methods become templates tied to the struct) */
+    if (match(p, TK_LT)) {
+        do {
+            if (!check(p, TK_IDENT)) { error(p, "expected a generic parameter name"); break; }
+            if (ngnames < 4) gnames[ngnames++] = strdup(p->cur.lexeme);
+            else error(p, "too many generic parameters (max 4)");
+            advance(p);
+        } while (match(p, TK_COMMA));
+        expect(p, TK_GT, "expected '>' after the generic parameters");
+    }
     if (match(p, TK_FOR)) {                 /* impl Trait for Type (structs AND primitives) */
+        if (ngnames > 0) error(p, "generic trait impls are not supported yet");
         trait = first;
         if (check(p, TK_IDENT) || is_type_token(p->cur.type)) {
             sname = strdup(p->cur.lexeme);  /* a primitive keyword keeps its spelling, e.g. "i64" */
@@ -884,9 +990,13 @@ static Node *parse_impl(Parser *p) {
         Node *m = parse_func_decl(p, 0);
         m->ns = sname ? strdup(sname) : NULL; /* method/associated fn lives in the type's namespace */
         m->is_method = 1;
+        /* methods of a generic struct carry its parameters (template until instantiated) */
+        for (int gi = 0; gi < ngnames && m->ngen < 4; gi++)
+            m->gen[m->ngen++] = strdup(gnames[gi]);
         node_add_item(n, m);
         if (p->panic) synchronize(p);
     }
+    for (int gi = 0; gi < ngnames; gi++) free(gnames[gi]);
     expect(p, TK_RBRACE, "expected '}' to close impl block");
     /* If this is a trait impl, leave a marker for the checker (which type impls which trait) */
     if (trait && sname) {
@@ -955,6 +1065,17 @@ static Node *parse_struct(Parser *p) {
     if (!check(p, TK_IDENT)) error(p, "expected struct name");
     n->name = strdup(p->cur.lexeme);
     advance(p);
+    /* generic struct: struct Vec<T> / struct Pair<T, U> (a template; instances are
+     * created per concrete argument list during monomorphization) */
+    if (match(p, TK_LT)) {
+        do {
+            if (!check(p, TK_IDENT)) { error(p, "expected a generic parameter name"); break; }
+            if (n->ngen < 4) n->gen[n->ngen++] = strdup(p->cur.lexeme);
+            else error(p, "too many generic parameters (max 4)");
+            advance(p);
+        } while (match(p, TK_COMMA));
+        expect(p, TK_GT, "expected '>' after the generic parameters");
+    }
     expect(p, TK_LBRACE, "expected '{' after struct name");
     while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
         Node *f = node_new(ND_PARAM, p->cur.line);
@@ -1040,6 +1161,8 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
     p.panic = 0;
     p.fatal = 0;
     p.depth = 0;
+    p.gt_debt = 0;
+    p.trying = 0;
     ast_set_file(filename);  /* nodes made during this parse belong to this file */
     advance(&p); /* load the first token */
 

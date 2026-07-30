@@ -529,6 +529,8 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `process` | `run(cmd)` (shell command), `pid()`, `exit(code)` (the extern, reached through the namespace) |
 | `rand` | xorshift64 in pure MVS: `seed`/`next`/`range(lo, hi)`/`unit()`; the same seed gives the SAME sequence on every platform |
 | `test` | assertions for `*.test.mvs` files: `ok(cond)`, `eq(got, want)` (i64/f64/str overloads), `near(got, want, eps)`, `fail(msg)`; see section 4.14 |
+| `option` | `Option<T>` + `Some(v)` / `None<T>()` + `is_some`/`is_none`/`unwrap`/`unwrap_or`; see section 4.15 |
+| `result` | `Result<T, E>` + `Ok<T, E>(v)` / `Err<T, E>(e)` + `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` |
 
 Two resolution rules make modules pleasant to use:
 
@@ -621,6 +623,45 @@ Assertions: `test.ok(cond)` · `test.eq(got, want)` (overloaded for i64/f64/str;
 str compares CONTENT via strcmp) · `test.near(got, want, eps)` for floats ·
 `test.fail(msg)`. In the MVS repository itself, `mvs test` additionally runs the
 golden example suite when it finds `tests/expected/`.
+
+### 4.15 Generic structs + Option/Result
+
+Structs take type parameters like functions do. Each concrete use (`Vec<i64>`)
+clones the template with the parameters substituted (monomorphization); methods
+declared in an `impl Vec<T>` block come along:
+
+```txt
+struct Pair<T, U> { a: T; b: U; }
+
+impl Pair<T, U> {
+    func first(self: *Pair<T, U>) -> T { return self.a; }
+}
+
+let p: Pair<i64, str> = Pair<i64, str> { a: 42, b: "hi" };
+io.out("{}", p.first());          // 42
+let n: Boxed<Pair<i64, i64>>;     // generics nest ('>>' is handled)
+```
+
+Generic functions may also take EXPLICIT type arguments when there is nothing to
+infer from: `none<i64>()`. That powers `Option`/`Result` in std:
+
+```txt
+import { Option, Some, None } from "std/option";
+import { Result, Ok, Err } from "std/result";
+
+func find(...) -> Option<i64> {
+    if (found) { return Some(i); }     // T inferred from the argument
+    return None<i64>();                // nothing to infer: explicit
+}
+let r: Result<i64, str> = Ok<i64, str>(42);   // two params: both explicit
+if (r.is_ok()) { io.out("{}", r.unwrap()); }  // unwrap aborts on the wrong side
+```
+
+Methods: `is_some`/`is_none`/`unwrap`/`unwrap_or` on Option;
+`is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` on Result.
+Limits (v1): type arguments must be primitives or named structs (no pointers,
+arrays, or function types), max 4 parameters, and `impl Trait for Vec<T>` is
+not supported yet. `match` is the planned next step (see ROADMAP).
 
 ---
 

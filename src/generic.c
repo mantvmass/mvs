@@ -106,6 +106,7 @@ static Node *find_template(Node *prog, const char *name) {
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
         if (d->kind != ND_FUNC || d->ngen == 0 || strcmp(d->name, name) != 0) continue;
+        if (d->is_method) continue;   /* generic-struct methods instantiate with their struct */
         const char *ns = d->ns ? d->ns : "";
         if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) return d;
         if (!ns[0] && !global) global = d;
@@ -313,10 +314,54 @@ static void type_code(CType t, char *buf) {
     strcpy(p, base);
 }
 
+/* The canonical text of a bound type for use INSIDE a composite generic name,
+ * e.g. T=i64 -> "i64", T=String -> "String". Pointer/func bindings cannot appear
+ * inside generic argument lists (the parser rejects them), so those return NULL. */
+static const char *bind_canon(CType t) {
+    if (t.ptr > 0 || t.base == TYPE_FUNC || t.base == TYPE_DYN) return NULL;
+    if (t.base == TYPE_STRUCT) return t.sname;
+    return datatype_name(t.base);
+}
+
+/* Textually substitute generic parameter names inside a composite type name:
+ * "Vec<T>" with T=i64 becomes "Vec<i64>". Whole identifiers only. Returns 1 if changed */
+static int subst_in_cname(const char *src, Bind *gmap, int ngmap, char *out, size_t on) {
+    size_t o = 0;
+    int changed = 0;
+    for (const char *s = src; *s && o + 2 < on; ) {
+        if ((*s >= 'A' && *s <= 'Z') || (*s >= 'a' && *s <= 'z') || *s == '_') {
+            const char *e = s;
+            while ((*e >= 'A' && *e <= 'Z') || (*e >= 'a' && *e <= 'z') ||
+                   (*e >= '0' && *e <= '9') || *e == '_') e++;
+            size_t idl = (size_t)(e - s);
+            const char *rep = NULL;
+            for (int i = 0; i < ngmap; i++)
+                if (strlen(gmap[i].name) == idl && strncmp(gmap[i].name, s, idl) == 0) {
+                    rep = bind_canon(gmap[i].t);
+                    break;
+                }
+            if (rep) {
+                if (o + strlen(rep) + 1 >= on) return 0;
+                strcpy(out + o, rep); o += strlen(rep);
+                changed = 1;
+            } else {
+                if (o + idl + 1 >= on) return 0;
+                memcpy(out + o, s, idl); o += idl;
+            }
+            s = e;
+        } else {
+            out[o++] = *s++;
+        }
+    }
+    out[o] = '\0';
+    return changed;
+}
+
 /* Substitute the generic type parameters with concrete types in every node of the instance */
 static void substitute(Node *n, Bind *gmap, int ngmap) {
     if (!n) return;
     if (n->type == TYPE_STRUCT && n->type_name) {
+        int exact = 0;
         for (int i = 0; i < ngmap; i++) {
             if (strcmp(n->type_name, gmap[i].name) == 0) {
                 n->type = gmap[i].t.base;
@@ -327,7 +372,41 @@ static void substitute(Node *n, Bind *gmap, int ngmap) {
                  * or calling f(...) fails. Clone to avoid mutating shared structure
                  * (a real function's signature has no generic params anyway) */
                 if (n->type == TYPE_FUNC) n->sig = gmap[i].t.sig ? node_clone(gmap[i].t.sig) : NULL;
+                exact = 1;
                 break;
+            }
+        }
+        if (!exact && strchr(n->type_name, '<')) {
+            /* composite name using the parameters, e.g. a local `let v: Vec<T>` */
+            char buf[512];
+            if (subst_in_cname(n->type_name, gmap, ngmap, buf, sizeof(buf))) {
+                free(n->type_name);
+                n->type_name = strdup(buf);
+            }
+        }
+    }
+    /* generic struct literals inside a template body: Option<T> { ... } */
+    if (n->kind == ND_STRUCT_LIT && n->name && strchr(n->name, '<')) {
+        char buf[512];
+        if (subst_in_cname(n->name, gmap, ngmap, buf, sizeof(buf))) {
+            free(n->name);
+            n->name = strdup(buf);
+        }
+    }
+    /* explicit generic call arguments: none<T>() cloned into an instance becomes none<i64>() */
+    for (int i = 0; i < n->ngen && n->kind == ND_IDENT; i++) {
+        if (!n->gen[i]) continue;
+        for (int g = 0; g < ngmap; g++)
+            if (strcmp(n->gen[i], gmap[g].name) == 0) {
+                const char *rep = bind_canon(gmap[g].t);
+                if (rep) { free(n->gen[i]); n->gen[i] = strdup(rep); }
+                break;
+            }
+        if (n->gen[i] && strchr(n->gen[i], '<')) {
+            char buf[512];
+            if (subst_in_cname(n->gen[i], gmap, ngmap, buf, sizeof(buf))) {
+                free(n->gen[i]);
+                n->gen[i] = strdup(buf);
             }
         }
     }
@@ -338,6 +417,192 @@ static void substitute(Node *n, Bind *gmap, int ngmap) {
     substitute(n->body, gmap, ngmap);
     substitute(n->sig, gmap, ngmap);   /* generic params inside func-ptr signatures, e.g. f: func(T) -> T */
     for (int i = 0; i < n->nitems; i++) substitute(n->items[i], gmap, ngmap);
+}
+
+/* ---------- generic structs (struct Vec<T>) ----------
+ *
+ * Struct templates (ND_STRUCT_DECL with ngen > 0) never reach codegen. Every
+ * concrete use site carries a canonical name like "Vec<i64>" (built by the
+ * parser or by substitute() inside function/method instances); the sweep below
+ * finds those names, clones the template with the parameters substituted, adds
+ * the instance under a mangled name ("Vec__i64"), instantiates the template's
+ * methods for it, and rewrites the use site to the mangled name. Runs inside
+ * the monomorphize fixpoint loop so functions and structs can instantiate
+ * each other in any order. */
+
+static void gs_resolve_node(Node *prog, Node *n, int *made);
+
+/* "Vec<i64,str>" -> "Vec__i64_str" (angle brackets never reach assembly labels) */
+static void gs_mangle(const char *cname, char *out, size_t on) {
+    size_t o = 0;
+    for (const char *s = cname; *s && o + 3 < on; s++) {
+        if (*s == '<') { out[o++] = '_'; out[o++] = '_'; }
+        else if (*s == ',') out[o++] = '_';
+        else if (*s == '>') { /* dropped */ }
+        else out[o++] = *s;
+    }
+    out[o] = '\0';
+}
+
+/* find a struct declaration by exact name (template or instance) */
+static Node *gs_find_struct(Node *prog, const char *name) {
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *d = prog->items[i];
+        if (d->kind == ND_STRUCT_DECL && d->name && strcmp(d->name, name) == 0) return d;
+    }
+    return NULL;
+}
+
+/* split "Vec<i64,Pair<u8,str>>" into base "Vec" and top-level args (strdup'd) */
+static int gs_split(const char *cname, char *base, size_t bn, char *args[4]) {
+    const char *lt = strchr(cname, '<');
+    if (!lt) return -1;
+    size_t bl = (size_t)(lt - cname);
+    if (bl + 1 > bn) return -1;
+    memcpy(base, cname, bl); base[bl] = '\0';
+    int nargs = 0, depth = 0;
+    const char *s = lt + 1, *start = lt + 1;
+    for (; *s; s++) {
+        if (*s == '<') depth++;
+        else if (*s == '>' && depth > 0) depth--;
+        else if ((*s == ',' && depth == 0) || (*s == '>' && depth == 0)) {
+            if (nargs >= 4) return -1;
+            size_t al = (size_t)(s - start);
+            args[nargs] = (char *)malloc(al + 1);
+            memcpy(args[nargs], start, al); args[nargs][al] = '\0';
+            nargs++;
+            start = s + 1;
+            if (*s == '>') break;
+        }
+    }
+    return nargs;
+}
+
+static void gs_instantiate(Node *prog, const char *cname, char *out_mangled, size_t on,
+                           int *made, const char *file, int line, int col);
+
+/* canonical argument text -> a concrete CType (instantiating nested generics) */
+static CType gs_text_type(Node *prog, const char *text, int *made,
+                          const char *file, int line, int col) {
+    CType t = { TYPE_UNKNOWN, 0, NULL, NULL, 0 };
+    DataType prim = datatype_from_name(text);
+    if (prim != TYPE_UNKNOWN) { t.base = prim; return t; }
+    t.base = TYPE_STRUCT;
+    if (strchr(text, '<')) {
+        char m[256];
+        gs_instantiate(prog, text, m, sizeof(m), made, file, line, col);
+        t.sname = strdup(m);
+    } else {
+        t.sname = strdup(text);
+    }
+    return t;
+}
+
+/* ensure an instance exists for canonical cname; writes the mangled name to out_mangled */
+static void gs_instantiate(Node *prog, const char *cname, char *out_mangled, size_t on,
+                           int *made, const char *file, int line, int col) {
+    gs_mangle(cname, out_mangled, on);
+    if (gs_find_struct(prog, out_mangled)) return;      /* already instantiated */
+
+    char base[128]; char *args[4];
+    int nargs = gs_split(cname, base, sizeof(base), args);
+    if (nargs < 0) {
+        diag_print(file, line, col, "error", "malformed generic type name '%s'", cname);
+        mono_err++;
+        return;
+    }
+    Node *tmpl = gs_find_struct(prog, base);
+    if (!tmpl || tmpl->ngen == 0) {
+        diag_print(file, line, col, "error", "unknown generic struct '%s'", base);
+        if (tmpl) diag_help("'%s' is declared without generic parameters", base);
+        mono_err++;
+        for (int i = 0; i < nargs; i++) free(args[i]);
+        return;
+    }
+    if (nargs != tmpl->ngen) {
+        diag_print(file, line, col, "error",
+                   "generic struct '%s' takes %d type argument(s) but got %d", base, tmpl->ngen, nargs);
+        mono_err++;
+        for (int i = 0; i < nargs; i++) free(args[i]);
+        return;
+    }
+
+    /* register the instance BEFORE resolving its fields so self-referential
+     * templates (struct Node<T> { next: *Node<T>; }) terminate */
+    Node *inst = node_clone(tmpl);
+    free(inst->name);
+    inst->name = strdup(out_mangled);
+    inst->ngen = 0;
+    node_add_item(prog, inst);
+    (*made)++;
+
+    Bind gmap[4];
+    for (int i = 0; i < nargs; i++) {
+        gmap[i].name = tmpl->gen[i];
+        gmap[i].t = gs_text_type(prog, args[i], made, file, line, col);
+        gmap[i].is_const = 0; gmap[i].decl = NULL; gmap[i].used = 0;
+    }
+    substitute(inst, gmap, nargs);            /* field types: T -> the argument */
+    gs_resolve_node(prog, inst, made);        /* nested composite fields -> mangled names */
+
+    /* instantiate the template's methods for this instance (impl Vec<T> { ... }) */
+    int nprog = prog->nitems;
+    for (int i = 0; i < nprog; i++) {
+        Node *m = prog->items[i];
+        if (m->kind != ND_FUNC || !m->is_method || m->ngen != tmpl->ngen || !m->ns) continue;
+        if (strcmp(m->ns, base) != 0) continue;
+        Node *mi = node_clone(m);
+        mi->ngen = 0;
+        free(mi->ns);
+        mi->ns = strdup(out_mangled);
+        Bind mm[4];
+        for (int j = 0; j < m->ngen; j++) {   /* the method carries the SAME param names */
+            mm[j].name = m->gen[j];
+            mm[j].t = gmap[j].t;
+            mm[j].is_const = 0; mm[j].decl = NULL; mm[j].used = 0;
+        }
+        substitute(mi, mm, m->ngen);
+        gs_resolve_node(prog, mi, made);
+        node_add_item(prog, mi);
+        (*made)++;
+    }
+    for (int i = 0; i < nargs; i++) free(args[i]);
+}
+
+/* rewrite every concrete "Base<...>" type reference in a subtree to its mangled
+ * instance name, instantiating on first sight */
+static void gs_resolve_node(Node *prog, Node *n, int *made) {
+    if (!n) return;
+    if (n->type == TYPE_STRUCT && n->type_name && strchr(n->type_name, '<')) {
+        char m[256];
+        gs_instantiate(prog, n->type_name, m, sizeof(m), made, n->file, n->line, n->col);
+        free(n->type_name);
+        n->type_name = strdup(m);
+    }
+    if (n->kind == ND_STRUCT_LIT && n->name && strchr(n->name, '<')) {
+        char m[256];
+        gs_instantiate(prog, n->name, m, sizeof(m), made, n->file, n->line, n->col);
+        free(n->name);
+        n->name = strdup(m);
+    }
+    gs_resolve_node(prog, n->lhs, made);   gs_resolve_node(prog, n->rhs, made);
+    gs_resolve_node(prog, n->operand, made); gs_resolve_node(prog, n->cond, made);
+    gs_resolve_node(prog, n->then_branch, made); gs_resolve_node(prog, n->else_branch, made);
+    gs_resolve_node(prog, n->init, made);  gs_resolve_node(prog, n->step, made);
+    gs_resolve_node(prog, n->body, made);  gs_resolve_node(prog, n->sig, made);
+    for (int i = 0; i < n->nitems; i++) gs_resolve_node(prog, n->items[i], made);
+}
+
+/* one sweep over every CONCRETE item (templates wait for their instances) */
+static int gs_sweep(Node *prog) {
+    int made = 0;
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *d = prog->items[i];
+        if (d->kind == ND_FUNC && d->ngen == 0) gs_resolve_node(prog, d, &made);
+        else if (d->kind == ND_VAR_DECL) gs_resolve_node(prog, d, &made);
+        else if (d->kind == ND_STRUCT_DECL && d->ngen == 0) gs_resolve_node(prog, d, &made);
+    }
+    return made;
 }
 
 /* ---------- main driver ---------- */
@@ -379,8 +644,25 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
     if (is_gcall) {
         Node *tmpl = find_template(prog, n->operand->name);
         if (tmpl) {
-            /* Infer each generic parameter's type from the arguments */
             Bind gmap[4];
+            if (n->operand->ngen > 0) {
+                /* explicit type arguments: none<i64>() overrides inference entirely */
+                if (n->operand->ngen != tmpl->ngen) {
+                    diag_print(n->file, n->line, n->col, "error",
+                               "'%s' takes %d type argument(s) but got %d",
+                               tmpl->name, tmpl->ngen, n->operand->ngen);
+                    mono_err++;
+                    return *made;
+                }
+                int gmade = 0;
+                for (int gi = 0; gi < tmpl->ngen; gi++) {
+                    gmap[gi].name = tmpl->gen[gi];
+                    gmap[gi].t = gs_text_type(prog, n->operand->gen[gi], &gmade,
+                                              n->file, n->line, n->col);
+                }
+                *made += gmade;
+            } else {
+            /* Infer each generic parameter's type from the arguments */
             for (int gi = 0; gi < tmpl->ngen; gi++) {
                 CType concrete = { TYPE_I64, 0, NULL, NULL, 0 };
                 /* Find the first parameter whose type refers to this generic param */
@@ -396,6 +678,7 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                     }
                 }
                 gmap[gi].name = tmpl->gen[gi]; gmap[gi].t = concrete;
+            }
             }
             /* Check trait bounds: with <T: A + B> the concrete type must impl every listed trait */
             for (int gi = 0; gi < tmpl->ngen; gi++) {
@@ -1550,9 +1833,11 @@ int monomorphize(Node *prog) {
     mono_err = 0;
     apply_trait_defaults(prog); /* fill in default methods first, then check completeness */
     check_trait_impls(prog);   /* impl Trait for Type must be complete and the trait must exist */
-    /* loop until no new instances appear (supports generics calling generics) */
+    /* loop until no new instances appear (supports generics calling generics,
+     * and generic functions/structs instantiating each other in either order) */
     for (int round = 0; round < 64; round++) {
         int made = 0;
+        made += gs_sweep(prog);    /* struct templates: resolve Vec<i64>-style names first */
         int nfuncs = prog->nitems; /* scan only what existed at round start (new instances wait a round) */
         for (int i = 0; i < nfuncs; i++) {
             Node *f = prog->items[i];

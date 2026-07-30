@@ -1,0 +1,6 @@
+//~ ERROR: unknown generic struct 'Vec'
+// no struct Vec<T> template exists in this program
+func main() -> i8 {
+    let v: Vec<i64>;
+    return 0;
+}

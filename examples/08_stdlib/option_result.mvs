@@ -1,0 +1,40 @@
+// Option<T> and Result<T, E> from std: absence and errors without C-style
+// sentinel values. Some(v) infers T; None/Ok/Err take the types explicitly.
+import { io } from "std";
+import { Option, Some, None } from "std/option";
+import { Result, Ok, Err } from "std/result";
+
+func find(xs: *i64, n: i64, want: i64) -> Option<i64> {
+    let i: i64 = 0;
+    while (i < n) {
+        if (xs[i] == want) { return Some(i); }
+        i = i + 1;
+    }
+    return None<i64>();
+}
+
+func parse_positive(x: i64) -> Result<i64, str> {
+    if (x < 0) { return Err<i64, str>("negative input"); }
+    return Ok<i64, str>(x * 2);
+}
+
+func main() -> i8 {
+    let data: [i64; 4] = [10, 20, 30, 40];
+    let hit: Option<i64> = find(data, 4, 30);
+    let miss: Option<i64> = find(data, 4, 99);
+    io.out("hit: some={} at {}", hit.is_some(), hit.unwrap());
+    io.out("miss: none={} fallback={}", miss.is_none(), miss.unwrap_or(0 - 1));
+
+    let good: Result<i64, str> = parse_positive(21);
+    let bad: Result<i64, str> = parse_positive(0 - 5);
+    io.out("good: ok={} val={}", good.is_ok(), good.unwrap());
+    io.out("bad: err={} msg={}", bad.is_err(), bad.unwrap_err());
+    io.out("bad fallback = {}", bad.unwrap_or(0));
+
+    // Option over non-integer types
+    let s: Option<str> = Some("text");
+    io.out("str option = {}", s.unwrap());
+    let f: Option<f64> = None<f64>();
+    io.out("f64 fallback = {}", f.unwrap_or(2.5));
+    return 0;
+}

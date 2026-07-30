@@ -1,0 +1,62 @@
+/*
+ * std/option.mvs - Option<T>: a value that may be absent (Rust style)
+ *
+ * Usage:
+ *     import { Option, Some, None } from "std/option";
+ *
+ *     func find(xs: *i64, n: i64, want: i64) -> Option<i64> {
+ *         let i: i64 = 0;
+ *         while (i < n) {
+ *             if (xs[i] == want) { return Some(i); }
+ *             i = i + 1;
+ *         }
+ *         return None<i64>();
+ *     }
+ *
+ *     let r: Option<i64> = find(data, 4, 30);
+ *     if (r.is_some()) { io.out("found at {}", r.unwrap()); }
+ *
+ * Note: Some(v) infers T from the value; None has no value to infer from, so
+ * it takes the type explicitly: None<i64>().
+ */
+
+extern func printf(fmt: str) -> i32;
+extern func exit(code: i32) -> void;
+
+struct Option<T> {
+    has: bool;
+    val: T;
+}
+
+impl Option<T> {
+    // does this Option hold a value?
+    func is_some(self: *Option<T>) -> bool { return self.has; }
+    func is_none(self: *Option<T>) -> bool { return !self.has; }
+
+    // the value; aborts the program when there is none
+    func unwrap(self: *Option<T>) -> T {
+        if (!self.has) {
+            printf("panic: called unwrap() on a None value\n");
+            exit(1);
+        }
+        return self.val;
+    }
+
+    // the value, or the fallback when there is none
+    func unwrap_or(self: *Option<T>, fallback: T) -> T {
+        if (self.has) { return self.val; }
+        return fallback;
+    }
+}
+
+// a present value (T inferred from the argument)
+func Some<T>(v: T) -> Option<T> {
+    let o: Option<T> = Option<T> { has: true, val: v };
+    return o;
+}
+
+// an absent value (give T explicitly: None<i64>())
+func None<T>() -> Option<T> {
+    let o: Option<T> = Option<T> { has: false };
+    return o;
+}

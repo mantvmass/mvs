@@ -56,6 +56,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `pointers.mvs` | `&`/`*`/`**`, pointer arithmetic, arrays via malloc |
 | `compound.mvs` | compound assignment evaluates its lvalue (incl. calls) exactly once |
 | `blob_fields.mvs` | i128/f64/f32 fields initialized from plain literals (widen/convert) + i128 accumulation |
+| `generic_structs.mvs` | generic structs: `Pair<T, U>` + `impl` methods + nested `Boxed<Pair<i64, i64>>` |
 
 ## 04_traits: trait / Display
 
@@ -103,6 +104,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `lib_rand.mvs` | `std/rand`: pure-MVS xorshift64, identical sequences on every platform |
 | `lib_sys.mvs` | `std/time` + `std/env` + `std/process` (prints deterministic properties) |
 | `out_width.mvs` | io.out width/precision specs: `{:8.2}` `{:08}` `{:.3}` `{:04x}` |
+| `option_result.mvs` | `Option<T>` / `Result<T, E>`: Some/None/Ok/Err, unwrap and fallbacks |
 
 ## 09_no_std: freestanding (OS / bare-metal, `--nostd`)
 

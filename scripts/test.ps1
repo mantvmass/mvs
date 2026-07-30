@@ -54,6 +54,7 @@ $runPass = @(
     "examples/03_structs/pointers",
     "examples/03_structs/compound",
     "examples/03_structs/blob_fields",
+    "examples/03_structs/generic_structs",
     "examples/04_traits/traits",
     "examples/04_traits/display",
     "examples/04_traits/dynamic",
@@ -68,6 +69,7 @@ $runPass = @(
     "examples/08_stdlib/lib_rand",
     "examples/08_stdlib/lib_sys",
     "examples/08_stdlib/out_width",
+    "examples/08_stdlib/option_result",
     "examples/08_stdlib/net_loop"
 )
 
@@ -232,6 +234,7 @@ $elfTests = @(
     "examples/02_functions/defaults",
     "examples/03_structs/methods",
     "examples/03_structs/blob_fields",
+    "examples/03_structs/generic_structs",
     "examples/06_modules/shadow_std",
     "examples/04_traits/dynamic",
     "examples/05_strings/strings",
@@ -242,6 +245,7 @@ $elfTests = @(
     "examples/08_stdlib/lib_rand",
     "examples/08_stdlib/lib_sys",
     "examples/08_stdlib/out_width",
+    "examples/08_stdlib/option_result",
     "examples/08_stdlib/net_loop"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan

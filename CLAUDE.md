@@ -123,10 +123,14 @@ width/precision (`{:8.2}`, `{:08}`, `{:04x}`) · `mvs test` built-in runner
 (discovers `*.test.mvs`, `@test` decorator or `test_*` naming, `std/test`
 assertions, auto-generated main via `--test-main`; the repo golden suite joins
 in when tests/expected/ exists) · `mvs --version` · `-O` peephole (safe NASM
-patterns, x86 targets).
+patterns, x86 targets) · GENERIC STRUCTS (`struct Pair<T, U>` + `impl Pair<T, U>`
+methods, monomorphized in the same fixpoint loop as generic functions; canonical
+names like `Vec<i64>` mangle to `Vec__i64`; nested arguments and `>>` handled) ·
+explicit generic call arguments (`none<i64>()`) · `std/option`
+(`Option<T>`/`Some`/`None`) + `std/result` (`Result<T, E>`/`Ok`/`Err`).
 
-**Remaining:** see [ROADMAP.md](ROADMAP.md) (generic structs -> `Option`/`Result`,
-the freestanding `core` library, macOS target).
+**Remaining:** see [ROADMAP.md](ROADMAP.md) (`match`, collections (`Vec<T>`),
+the freestanding `core` packaging, macOS target).
 
 ## Project-specific cautions (full list in docs/rules.md)
 

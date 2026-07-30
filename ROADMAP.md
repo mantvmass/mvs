@@ -48,20 +48,24 @@ Today `std/` is CRT-backed: `io`, `fs`, `net` (cross-platform via `@compile`),
 | `core::panic` | panic/abort support with a `--nostd` hook |
 | `core::arch` | architecture intrinsics (inline `asm`, SIMD, `pause`/`wfe`) |
 
-`std/mem` and `std/math` are the first (CRT-backed) slice of this plan.
-`Option`/`Result` need generic STRUCTS (today only functions are generic); that is
-the main prerequisite left now that conditional compilation exists.
+`std/mem`, `std/math`, `std/option`, and `std/result` are the first (CRT-backed)
+slices of this plan; generic structs (the old prerequisite) are done. What is left
+for a true `core` is the freestanding packaging: the same modules importable under
+`--nostd` without the C runtime.
 
 ## Language
 
-- Generic structs (`struct Vec<T>`), the gateway to `Option`/`Result`/collections.
-- Pattern matching (`match`) once `Option`/`Result` exist.
+- Pattern matching (`match`) over `Option`/`Result` (both exist now).
+- Generic struct extensions: pointer/array type arguments, `impl Trait for Vec<T>`.
+- Collections on top of generic structs: `Vec<T>` (growable), then a hash map.
 - Arrays of arrays (`[[T; N]; M]`) and slice syntax (`&a[1..3]`).
 - Macros are deliberately NOT planned; the decorator form above plus intrinsics
   cover the current needs without a second language layer.
 
-Done from earlier revisions of this list: `io.out` width/precision specs
-(`{:8.2}`, `{:08}`, `{:04x}`).
+Done from earlier revisions of this list: generic structs (`struct Pair<T, U>`,
+monomorphized with their `impl` methods, nested arguments supported), explicit
+generic call arguments (`none<i64>()`), `Option<T>`/`Result<T, E>` in std,
+`io.out` width/precision specs (`{:8.2}`, `{:08}`, `{:04x}`).
 
 ## Tooling
 

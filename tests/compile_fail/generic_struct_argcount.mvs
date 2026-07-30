@@ -1,0 +1,7 @@
+//~ ERROR: generic struct 'Pair' takes 2 type argument(s) but got 1
+struct Pair<T, U> { a: T; b: U; }
+
+func main() -> i8 {
+    let p: Pair<i64>;
+    return 0;
+}

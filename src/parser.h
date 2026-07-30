@@ -19,6 +19,8 @@ typedef struct {
     int    panic;       /* 1 = inside a bad region; suppress errors until synchronize() */
     int    fatal;       /* 1 = too many errors, stop parsing */
     int    depth;       /* current recursion depth (guards against stack overflow from deeply nested input) */
+    int    gt_debt;     /* 1 = a '>>' token was split; one '>' is still pending (closing nested generics) */
+    int    trying;      /* 1 = speculative parse (Name<...> in an expression); errors stay silent */
 } Parser;
 
 /* Parse a whole source file into an AST (ND_PROGRAM node). Returns NULL on a fatal error */

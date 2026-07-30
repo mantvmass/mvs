@@ -43,6 +43,7 @@ EXAMPLES = examples/demo \
            examples/02_functions/funcptr examples/02_functions/defaults \
            examples/03_structs/structs examples/03_structs/methods examples/03_structs/pointers \
            examples/03_structs/compound examples/03_structs/blob_fields \
+           examples/03_structs/generic_structs \
            examples/04_traits/traits examples/04_traits/display examples/04_traits/dynamic \
            examples/05_strings/strings \
            examples/06_modules/use_import examples/06_modules/shadow_std \
@@ -50,6 +51,7 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/io_demo examples/08_stdlib/floats examples/08_stdlib/files \
            examples/08_stdlib/lib_out examples/08_stdlib/lib_math examples/08_stdlib/lib_mem \
            examples/08_stdlib/lib_rand examples/08_stdlib/lib_sys examples/08_stdlib/out_width \
+           examples/08_stdlib/option_result \
            examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop
 
 # default target: build the compiler
