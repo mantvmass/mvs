@@ -65,6 +65,9 @@ $runPass = @(
     "examples/08_stdlib/lib_out",
     "examples/08_stdlib/lib_math",
     "examples/08_stdlib/lib_mem",
+    "examples/08_stdlib/lib_rand",
+    "examples/08_stdlib/lib_sys",
+    "examples/08_stdlib/out_width",
     "examples/08_stdlib/net_loop"
 )
 
@@ -236,6 +239,9 @@ $elfTests = @(
     "examples/08_stdlib/lib_out",
     "examples/08_stdlib/lib_math",
     "examples/08_stdlib/lib_mem",
+    "examples/08_stdlib/lib_rand",
+    "examples/08_stdlib/lib_sys",
+    "examples/08_stdlib/out_width",
     "examples/08_stdlib/net_loop"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan

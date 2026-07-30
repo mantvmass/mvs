@@ -57,12 +57,17 @@ the main prerequisite left now that conditional compilation exists.
 - Generic structs (`struct Vec<T>`), the gateway to `Option`/`Result`/collections.
 - Pattern matching (`match`) once `Option`/`Result` exist.
 - Arrays of arrays (`[[T; N]; M]`) and slice syntax (`&a[1..3]`).
-- `io.out` gaining width/precision format specs (`{:8.2}`).
 - Macros are deliberately NOT planned; the decorator form above plus intrinsics
   cover the current needs without a second language layer.
 
+Done from earlier revisions of this list: `io.out` width/precision specs
+(`{:8.2}`, `{:08}`, `{:04x}`).
+
 ## Tooling
 
-- `mvs test` subcommand running the golden suite without PowerShell.
-- Better `-O` story: peephole cleanup of the stack-machine output.
+- Growing the `-O` peephole (today: safe two/three-line NASM patterns on the x86
+  targets; ARM64 and register-liveness-aware rules are open).
 - Editor support: a tree-sitter grammar for highlighting.
+
+Done from earlier revisions of this list: `mvs test` (the built-in runner for
+the golden + compile-fail suite, no PowerShell needed), `mvs --version`.

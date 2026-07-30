@@ -1,0 +1,23 @@
+// std/time + std/env + std/process: values are inherently nondeterministic, so
+// the output prints deterministic PROPERTIES (the goldens stay identical on
+// every platform).
+import { io, time, env, process } from "std";
+
+func main() -> i8 {
+    // time: sleeping must advance the millisecond clock
+    let t1: i64 = time.millis();
+    time.sleep_ms(30);
+    let t2: i64 = time.millis();
+    io.out("slept = {}", t2 - t1 >= 1);
+    io.out("epoch ok = {}", time.now() > 1577836800);   // after 2020-01-01
+
+    // env: set + get round trip; missing variables read as ""
+    env.set("MVS_TEST_VAR", "hello");
+    io.out("env = {}", env.get("MVS_TEST_VAR"));
+    io.out("missing = [{}]", env.get("MVS_NO_SUCH_VAR_12345"));
+
+    // process: pid is positive; a trivial shell command succeeds on any OS
+    io.out("pid ok = {}", process.pid() > 0);
+    io.out("run ok = {}", process.run("exit 0") == 0);
+    return 0;
+}

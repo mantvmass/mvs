@@ -65,7 +65,11 @@ Build modes:
 | `mvs file.mvs -c` | `.obj` | link against a C program |
 | `mvs file.mvs --nostd` | `.obj` (freestanding) | OS / bare-metal |
 | `mvs file.mvs --target elf64` | `.o` (ELF64, SysV ABI) | link and run on Linux (`gcc file.o`) |
+| `mvs file.mvs --target arm64` | `.o` (AArch64) | link with the cross gcc, run under qemu |
 | `mvs file.mvs --nostd --target elf64` | `.o` (freestanding ELF) | GNU ld / GRUB multiboot OS dev |
+| `mvs file.mvs -O` | same, fewer instructions | peephole cleanup of the assembly (x86 targets) |
+| `mvs test` | test report | run the golden suite from the repo root (no PowerShell needed) |
+| `mvs --version` | version string | |
 
 ## 3. Compiler layout
 
@@ -449,6 +453,12 @@ io.out("{} + {} = {}", a, b, a+b);// several values
 io.out("hex = {:x}", 255);        // hex = ff
 io.out("pct {{}}");               // pct {}      ({{ }} = literal braces)
 io.out("{}", p);                  // p is a struct -> Point { x: 3, y: 4 }  (like Rust's {:?})
+
+// width / precision (the "0W.P" part goes to printf verbatim, so C semantics)
+io.out("[{:8.2}]", 3.14159);      // [    3.14]
+io.out("[{:08}]", 42);            // [00000042]
+io.out("[{:.3}]", 2.71828);       // [2.718]
+io.out("[{:04x}]", 255);          // [00ff]
 ```
 
 `io.out` is a **compiler intrinsic** (like Rust's `println!`): it parses `{}` at compile time and picks the
@@ -514,6 +524,10 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `fmt` | trait `Display { fmt(self) -> String }` (impl'd for every primitive) + `fmt.println(x)` / `fmt.print(x)` (static dispatch) + `fmt.outf(f, args...)`, a pure-MVS io.out with run-time `{}` handling |
 | `math` | `sqrt`/`pow`/`floor`/`ceil`/`round`/`fmod` (libm), `pi()`/`e()`, and overloaded `abs`/`min`/`max`/`clamp` (i64 + f64) plus `sign`/`gcd`/`lcm`/`ipow` |
 | `mem` | `alloc`/`alloc_zeroed`/`grow`/`dealloc`, `copy` (overlap-safe), `set`/`zero`, `eq`, `swap` |
+| `time` | `now()` (epoch seconds), `millis()` (duration measurement), `sleep_ms(ms)`; per-OS via `@compile` |
+| `env` | `get(name)` (missing reads as `""`), `set(name, value)`; per-OS via `@compile` |
+| `process` | `run(cmd)` (shell command), `pid()`, `exit(code)` (the extern, reached through the namespace) |
+| `rand` | xorshift64 in pure MVS: `seed`/`next`/`range(lo, hi)`/`unit()`; the same seed gives the SAME sequence on every platform |
 
 Two resolution rules make modules pleasant to use:
 

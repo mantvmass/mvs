@@ -100,6 +100,9 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `lib_out.mvs` | `fmt.outf`: io.out as a pure-MVS library (variadic `...dyn Display`, impl-on-primitive) |
 | `lib_math.mvs` | `std/math`: libm wrappers + overloaded `abs`/`min`/`max`/`clamp`, `gcd`/`lcm`/`ipow` |
 | `lib_mem.mvs` | `std/mem`: alloc/copy/set/eq/swap/grow over raw `*u8` buffers |
+| `lib_rand.mvs` | `std/rand`: pure-MVS xorshift64, identical sequences on every platform |
+| `lib_sys.mvs` | `std/time` + `std/env` + `std/process` (prints deterministic properties) |
+| `out_width.mvs` | io.out width/precision specs: `{:8.2}` `{:08}` `{:.3}` `{:04x}` |
 
 ## 09_no_std: freestanding (OS / bare-metal, `--nostd`)
 

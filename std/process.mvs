@@ -1,0 +1,35 @@
+/*
+ * std/process.mvs - the current process: exit, run a command, pid
+ *
+ * exit/system are portable C runtime calls (process.exit reaches the extern
+ * directly through the namespace); pid differs per OS (@compile).
+ *
+ * Example:
+ *     import { io, process } from "std";
+ *     io.out("pid = {}", process.pid());
+ *     let rc: i32 = process.run("echo hello");
+ *     process.exit(0);
+ */
+
+extern func exit(code: i32) -> void;
+extern func system(cmd: str) -> i32;
+
+@compile(target_os = "windows")
+extern func _getpid() -> i32;
+@compile(target_os = "linux")
+extern func getpid() -> i32;
+
+// run a shell command (cmd.exe on Windows, /bin/sh on Linux); returns its exit status
+func run(cmd: str) -> i32 {
+    return system(cmd);
+}
+
+// this process's id (always > 0)
+@compile(target_os = "windows")
+func pid() -> i32 {
+    return _getpid();
+}
+@compile(target_os = "linux")
+func pid() -> i32 {
+    return getpid();
+}

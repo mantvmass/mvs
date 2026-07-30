@@ -1,0 +1,43 @@
+/*
+ * std/rand.mvs - pseudo-random numbers (xorshift64, pure MVS)
+ *
+ * No C runtime involved, so the sequence is IDENTICAL on every platform for a
+ * given seed (unlike C rand(), which differs between libcs). Not for
+ * cryptography; it is a fast statistical PRNG.
+ *
+ * Example:
+ *     import { io, rand } from "std";
+ *     rand.seed(42);
+ *     io.out("d6 = {}", rand.range(1, 6));
+ */
+
+// generator state (one global stream; reseed with rand.seed)
+let rand_state: u64 = 88172645463325252;
+
+// reset the sequence; the same seed always yields the same sequence
+func seed(s: u64) -> void {
+    if (s == 0) { s = 1; }            // the xorshift state must never be zero
+    rand_state = s;
+}
+
+// next raw 64-bit value
+func next() -> u64 {
+    let x: u64 = rand_state;
+    x = x ^ (x << 13);
+    x = x ^ (x >> 7);
+    x = x ^ (x << 17);
+    rand_state = x;
+    return x;
+}
+
+// uniform integer in [lo, hi] (inclusive); lo when the range is empty
+func range(lo: i64, hi: i64) -> i64 {
+    if (hi <= lo) { return lo; }
+    let span: u64 = (hi - lo + 1) as u64;
+    return lo + ((next() % span) as i64);
+}
+
+// uniform f64 in [0, 1): the top 53 bits scaled by 2^-53
+func unit() -> f64 {
+    return ((next() >> 11) as i64 as f64) / 9007199254740992.0;
+}

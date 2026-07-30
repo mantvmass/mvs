@@ -49,6 +49,7 @@ EXAMPLES = examples/demo \
            examples/07_c_interop/extern_c \
            examples/08_stdlib/io_demo examples/08_stdlib/floats examples/08_stdlib/files \
            examples/08_stdlib/lib_out examples/08_stdlib/lib_math examples/08_stdlib/lib_mem \
+           examples/08_stdlib/lib_rand examples/08_stdlib/lib_sys examples/08_stdlib/out_width \
            examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop
 
 # default target: build the compiler

@@ -31,6 +31,8 @@ make
 
 # run the test suite (golden output + compile-only + compile-fail)
 make test
+# or without PowerShell (run-pass + compile-fail portable core, from the repo root):
+.\mvs.exe test
 
 # compile an MVS program to .exe, then run it
 .\mvs.exe examples\demo.mvs
@@ -114,7 +116,11 @@ front-end pass (typecheck/defaults/monomorphize match codegen: user functions ma
 shadow std names) · argument checking for `ns.func(...)` calls (count, types,
 variadic trait bounds) · hex/binary literals (`0xFF`, `0b1010`) + hard error on
 literals past 64 bits · struct-literal stores fixed for 16-byte fields (i128/dyn
-widen/copy) and int-to-float field init on all three backends.
+widen/copy) and int-to-float field init on all three backends · UTF-8 BOM
+tolerated by the lexer · `std/time`/`std/env`/`std/process` (per-OS via @compile)
++ `std/rand` (pure-MVS xorshift64, platform-identical sequences) · io.out
+width/precision (`{:8.2}`, `{:08}`, `{:04x}`) · `mvs test` built-in runner ·
+`mvs --version` · `-O` peephole (safe NASM patterns, x86 targets).
 
 **Remaining:** see [ROADMAP.md](ROADMAP.md) (generic structs -> `Option`/`Result`,
 the freestanding `core` library, macOS target).

@@ -325,17 +325,29 @@ static void buf_append(char **out, size_t *len, size_t *cap, const char *s) {
     *len += sl;
 }
 
-/* Pick a printf specifier by type (pointer=address, str=%s, char=%c, float=%f, unsigned=%llu, others=%lld) */
+/* Pick a printf specifier by type (pointer=address, str=%s, char=%c, float=%f, unsigned=%llu, others=%lld).
+ * The user spec supports width/precision Rust-style: {:8} {:8.2} {:.3} {:08} and {:x} / {:08x} for hex.
+ * The "0W.P" part is passed to printf verbatim, so semantics match C exactly. */
 static const char *spec_for(DataType base, int ptr, const char *user) {
-    /* 128-bit values are converted to decimal text at run time (mvs_i128_str), even for {:x} */
-    if (ptr == 0 && (base == TYPE_I128 || base == TYPE_U128)) return "%s";
-    if (user && (strcmp(user, "x") == 0 || strcmp(user, ":x") == 0)) return "%llx";
-    if (ptr > 0) return "%llu";                 /* pointer = address */
-    if (base == TYPE_STR) return "%s";
-    if (base == TYPE_CHAR) return "%c";
-    if (is_float_type(base)) return "%f";
-    if (base==TYPE_U8||base==TYPE_U16||base==TYPE_U32||base==TYPE_U64||base==TYPE_U128||base==TYPE_USIZE) return "%llu";
-    return "%lld";
+    static char buf[32];
+    const char *u = user ? user : "";
+    if (*u == ':') u++;                          /* both "8.2" and ":8.2" arrive here */
+    char wp[16]; int wi = 0;                     /* the width/precision part, verbatim */
+    while (*u && wi < 14 && ((*u >= '0' && *u <= '9') || *u == '.')) wp[wi++] = *u++;
+    wp[wi] = '\0';
+    int is_hex = (u[0] == 'x' && u[1] == '\0');
+    /* 128-bit values are converted to decimal text at run time (mvs_i128_str), even for {:x};
+     * width still applies because the text goes through %s */
+    if (ptr == 0 && (base == TYPE_I128 || base == TYPE_U128)) { snprintf(buf, sizeof(buf), "%%%ss", wp); return buf; }
+    if (is_hex)             { snprintf(buf, sizeof(buf), "%%%sllx", wp); return buf; }
+    if (ptr > 0)            { snprintf(buf, sizeof(buf), "%%%sllu", wp); return buf; }  /* pointer = address */
+    if (base == TYPE_STR)   { snprintf(buf, sizeof(buf), "%%%ss", wp); return buf; }
+    if (base == TYPE_CHAR)  { snprintf(buf, sizeof(buf), "%%%sc", wp); return buf; }
+    if (is_float_type(base)){ snprintf(buf, sizeof(buf), "%%%sf", wp); return buf; }
+    if (base==TYPE_U8||base==TYPE_U16||base==TYPE_U32||base==TYPE_U64||base==TYPE_U128||base==TYPE_USIZE)
+                            { snprintf(buf, sizeof(buf), "%%%sllu", wp); return buf; }
+    snprintf(buf, sizeof(buf), "%%%slld", wp);
+    return buf;
 }
 
 static void expand_struct(Gen *g, Node *base, const char *sname,

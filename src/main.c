@@ -22,6 +22,13 @@
 #include "codegen.h"
 #include "diag.h"
 
+#ifdef _WIN32
+#include <io.h>        /* _findfirst/_findnext for the built-in test runner */
+#else
+#include <dirent.h>
+#endif
+
+#define MVS_VERSION "0.2.0-dev"
 #define PATHBUF 1024
 
 /* popen is spelled _popen on Windows; everything else is portable */
@@ -69,17 +76,316 @@ static void dir_name(const char *path, char *dst) {
     else strcpy(dst, ".");
 }
 
+/* ---------- -O: peephole cleanup of the NASM output (x86 targets) ----------
+ *
+ * A tiny text pass over the generated .asm. Patterns are exact-line matches and
+ * conservative by construction (a label or any unexpected line breaks the window):
+ *   P1: mov REG, rax  directly followed by  mov rax, REG   -> drop the second (no-op)
+ *   P2: mov rax, IMM ; mov REG, rax ; <line redefining rax> -> mov REG, IMM
+ * Program OUTPUT is unchanged; only redundant instructions disappear. */
+
+/* the "REG" of "    mov REG, rax": returns the register name or NULL */
+static const char *peep_mov_from_rax(const char *line, char *reg, size_t rn) {
+    if (strncmp(line, "    mov ", 8) != 0) return NULL;
+    const char *comma = strstr(line + 8, ", rax");
+    if (!comma || comma[5] != '\n' || comma[6] != '\0') return NULL;
+    size_t len = (size_t)(comma - (line + 8));
+    if (len == 0 || len + 1 > rn) return NULL;
+    static const char *regs[] = { "rcx", "rdx", "r8", "r9", "r10", "r11", "rdi", "rsi" };
+    memcpy(reg, line + 8, len); reg[len] = '\0';
+    for (size_t i = 0; i < sizeof(regs) / sizeof(regs[0]); i++)
+        if (strcmp(reg, regs[i]) == 0) return reg;
+    return NULL;
+}
+
+/* does this line load an integer immediate into rax? ("    mov rax, 42") */
+static const char *peep_rax_imm(const char *line) {
+    if (strncmp(line, "    mov rax, ", 13) != 0) return NULL;
+    const char *v = line + 13;
+    if (*v == '-') v++;
+    if (*v < '0' || *v > '9') return NULL;
+    while (*v >= '0' && *v <= '9') v++;
+    return (*v == '\n' && v[1] == '\0') ? line + 13 : NULL;
+}
+
+/* does this line overwrite rax without reading it? (mov/lea rax, ...) */
+static int peep_redefines_rax(const char *line) {
+    return (strncmp(line, "    mov rax, ", 13) == 0 && !strstr(line, "rax]")) ||
+           strncmp(line, "    lea rax, ", 13) == 0;
+}
+
+static void peephole_x86(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    size_t cap = 1024, n = 0;
+    char **lines = (char **)malloc(cap * sizeof(char *));
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), f)) {
+        size_t bl = strlen(buf);      /* normalize CRLF -> LF so patterns match on Windows too */
+        if (bl >= 2 && buf[bl - 2] == '\r' && buf[bl - 1] == '\n') { buf[bl - 2] = '\n'; buf[bl - 1] = '\0'; }
+        if (n + 1 >= cap) { cap *= 2; lines = (char **)realloc(lines, cap * sizeof(char *)); }
+        lines[n++] = strdup(buf);
+    }
+    fclose(f);
+
+    int removed = 0;
+    for (size_t i = 0; i + 1 < n; i++) {
+        char reg[8];
+        /* P2: forward an immediate when rax is immediately redefined afterwards */
+        const char *imm = peep_rax_imm(lines[i]);
+        if (imm && i + 2 < n && peep_mov_from_rax(lines[i + 1], reg, sizeof(reg)) &&
+            peep_redefines_rax(lines[i + 2])) {
+            char merged[64];
+            snprintf(merged, sizeof(merged), "    mov %s, %s", reg, imm); /* imm keeps its \n */
+            free(lines[i]); lines[i] = strdup(merged);
+            free(lines[i + 1]);
+            memmove(&lines[i + 1], &lines[i + 2], (n - i - 2) * sizeof(char *));
+            n--; removed++;
+            continue;
+        }
+        /* P1: mov REG, rax ; mov rax, REG -> the second is a no-op */
+        if (peep_mov_from_rax(lines[i], reg, sizeof(reg))) {
+            char back[64];
+            snprintf(back, sizeof(back), "    mov rax, %s\n", reg);
+            if (strcmp(lines[i + 1], back) == 0) {
+                free(lines[i + 1]);
+                memmove(&lines[i + 1], &lines[i + 2], (n - i - 2) * sizeof(char *));
+                n--; removed++;
+            }
+        }
+    }
+
+    if (removed) {
+        f = fopen(path, "wb");
+        if (f) {
+            for (size_t i = 0; i < n; i++) fputs(lines[i], f);
+            fclose(f);
+        }
+        printf("[mvs] -O removed %d redundant instruction(s)\n", removed);
+    }
+    for (size_t i = 0; i < n; i++) free(lines[i]);
+    free(lines);
+}
+
+/* ---------- `mvs test`: the built-in test runner ----------
+ *
+ * Runs the portable core of the suite from the repo root without PowerShell:
+ *   - run-pass: every golden in tests/expected/ (compile + run + diff stdout)
+ *   - compile-fail: every .mvs file in tests/compile_fail must fail with its //~ ERROR text
+ * On Windows it uses the native win64 pipeline; on Linux it compiles with
+ * --target elf64 and links with gcc. C-interop and cross-target runs stay in
+ * scripts/ + CI (they need extra toolchains). */
+
+#define TR_MAX_FILES 512
+#define TR_NAME_LEN  256
+
+/* list the files in dir with the given extension (extension stripped), sorted */
+static int tr_cmp(const void *a, const void *b) { return strcmp((const char *)a, (const char *)b); }
+static int tr_list_dir(const char *dir, const char *ext, char names[][TR_NAME_LEN], int max) {
+    int n = 0;
+    size_t el = strlen(ext);
+#ifdef _WIN32
+    char pat[PATHBUF];
+    snprintf(pat, sizeof(pat), "%s/*%s", dir, ext);
+    struct _finddata_t fd;
+    intptr_t h = _findfirst(pat, &fd);
+    if (h == -1) return 0;
+    do {
+        size_t l = strlen(fd.name);
+        if (l > el && n < max) {
+            snprintf(names[n], TR_NAME_LEN, "%.*s", (int)(l - el), fd.name);
+            n++;
+        }
+    } while (_findnext(h, &fd) == 0);
+    _findclose(h);
+#else
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        size_t l = strlen(e->d_name);
+        if (l > el && strcmp(e->d_name + l - el, ext) == 0 && n < max) {
+            snprintf(names[n], TR_NAME_LEN, "%.*s", (int)(l - el), e->d_name);
+            n++;
+        }
+    }
+    closedir(d);
+#endif
+    qsort(names, (size_t)n, TR_NAME_LEN, tr_cmp);
+    return n;
+}
+
+/* golden name -> example path: "01_language_arrays" -> "examples/01_language/arrays"
+ * (groups are NN_word, so the SECOND underscore is the separator; no underscore = top level) */
+static void tr_name_to_path(const char *name, char *out, size_t on) {
+    const char *u1 = strchr(name, '_');
+    const char *u2 = u1 ? strchr(u1 + 1, '_') : NULL;
+    if (!u2) { snprintf(out, on, "examples/%s", name); return; }
+    snprintf(out, on, "examples/%.*s/%s", (int)(u2 - name), name, u2 + 1);
+}
+
+/* read a whole file/stream into a malloc'd string */
+static char *tr_read_all(FILE *f) {
+    size_t cap = 4096, len = 0;
+    char *s = (char *)malloc(cap);
+    size_t got;
+    while ((got = fread(s + len, 1, cap - len - 1, f)) > 0) {
+        len += got;
+        if (cap - len < 1024) { cap *= 2; s = (char *)realloc(s, cap); }
+    }
+    s[len] = '\0';
+    return s;
+}
+
+/* normalize in place: drop \r, trim trailing whitespace/newlines */
+static void tr_normalize(char *s) {
+    char *w = s;
+    for (char *r = s; *r; r++) if (*r != '\r') *w++ = *r;
+    *w = '\0';
+    while (w > s && (w[-1] == '\n' || w[-1] == ' ' || w[-1] == '\t')) *--w = '\0';
+}
+
+/* run a command line, capture stdout+stderr, return the exit status */
+static int tr_capture(const char *cmdline, char **out) {
+    char cmd[PATHBUF * 2];
+    snprintf(cmd, sizeof(cmd), "%s 2>&1", cmdline);
+    FILE *p = POPEN(cmd, "r");
+    if (!p) { *out = strdup(""); return -1; }
+    *out = tr_read_all(p);
+    return PCLOSE(p);
+}
+
+static int run_test_suite(const char *argv0) {
+    char names[TR_MAX_FILES][TR_NAME_LEN];
+    char cmd[PATHBUF * 2], path[PATHBUF], gold_path[PATHBUF];
+    int pass = 0, fail = 0;
+
+    int ngold = tr_list_dir("tests/expected", ".txt", names, TR_MAX_FILES);
+    if (ngold == 0) {
+        fprintf(stderr, "error: tests/expected/ not found; run `mvs test` from the repository root\n");
+        return 1;
+    }
+
+    printf("=== run-pass (golden output, %s) ===\n",
+#ifdef _WIN32
+           "win64"
+#else
+           "elf64"
+#endif
+    );
+    for (int i = 0; i < ngold; i++) {
+        if (strncmp(names[i], "interop_", 8) == 0) continue;   /* needs a C toolchain; covered by scripts/CI */
+#ifndef _WIN32
+        /* its golden embeds the Windows argv[0] path; the Linux CI scripts skip it too */
+        if (strcmp(names[i], "01_language_args") == 0) continue;
+#endif
+        tr_name_to_path(names[i], path, sizeof(path));
+        const char *runargs = strcmp(names[i], "01_language_args") == 0 ? " 10 32" : "";
+
+        char *out = NULL;
+#ifdef _WIN32
+        snprintf(cmd, sizeof(cmd), "\"%s\" %s.mvs", argv0, path);
+        int crc = tr_capture(cmd, &out);
+        if (crc != 0) { printf("  FAIL  %s (compile)\n%s", names[i], out); free(out); fail++; continue; }
+        free(out);
+        char exe[PATHBUF + 32];
+        snprintf(exe, sizeof(exe), "%s.exe%s", path, runargs);
+        for (char *c = exe; *c; c++) if (*c == '/') *c = '\\';   /* cmd.exe wants backslashes */
+        int rrc = tr_capture(exe, &out);
+#else
+        snprintf(cmd, sizeof(cmd), "\"%s\" %s.mvs --target elf64", argv0, path);
+        int crc = tr_capture(cmd, &out);
+        if (crc != 0) { printf("  FAIL  %s (compile)\n%s", names[i], out); free(out); fail++; continue; }
+        free(out);
+        snprintf(cmd, sizeof(cmd), "gcc %s.o -o /tmp/mvs_selftest -no-pie -lm", path);
+        int lrc = tr_capture(cmd, &out);
+        if (lrc != 0) { printf("  FAIL  %s (link)\n%s", names[i], out); free(out); fail++; continue; }
+        free(out);
+        snprintf(cmd, sizeof(cmd), "/tmp/mvs_selftest%s", runargs);
+        int rrc = tr_capture(cmd, &out);
+        snprintf(cmd, sizeof(cmd), "%s.o", path); remove(cmd);
+#endif
+        /* diff against the golden */
+        snprintf(gold_path, sizeof(gold_path), "tests/expected/%s.txt", names[i]);
+        FILE *gf = fopen(gold_path, "rb");
+        char *want = gf ? tr_read_all(gf) : strdup("");
+        if (gf) fclose(gf);
+        tr_normalize(out); tr_normalize(want);
+        if (rrc != 0) {
+            printf("  FAIL  %s (exit %d)\n%s\n", names[i], rrc, out); fail++;
+        } else if (strcmp(out, want) != 0) {
+            printf("  FAIL  %s (output mismatch)\n--- expected ---\n%s\n--- got ---\n%s\n", names[i], want, out);
+            fail++;
+        } else {
+            printf("  ok    %s\n", names[i]); pass++;
+        }
+        free(out); free(want);
+    }
+
+    printf("=== compile-fail (expected errors) ===\n");
+    int nfails = tr_list_dir("tests/compile_fail", ".mvs", names, TR_MAX_FILES);
+    for (int i = 0; i < nfails; i++) {
+        snprintf(path, sizeof(path), "tests/compile_fail/%s.mvs", names[i]);
+        FILE *sf = fopen(path, "rb");
+        if (!sf) { printf("  FAIL  %s (unreadable)\n", names[i]); fail++; continue; }
+        char first[512] = "";
+        if (!fgets(first, sizeof(first), sf)) first[0] = '\0';
+        fclose(sf);
+        char *want = strstr(first, "//~ ERROR:");
+        if (!want) { printf("  FAIL  %s (no //~ ERROR header)\n", names[i]); fail++; continue; }
+        want += 10;
+        while (*want == ' ') want++;
+        char *end = want + strlen(want);
+        while (end > want && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ')) *--end = '\0';
+
+        char *out = NULL;
+        snprintf(cmd, sizeof(cmd), "\"%s\" %s", argv0, path);
+        int crc = tr_capture(cmd, &out);
+        if (crc == 0) {
+            printf("  FAIL  %s (compiled, expected an error)\n", names[i]); fail++;
+        } else if (!strstr(out, want)) {
+            printf("  FAIL  %s (missing '%s')\n%s\n", names[i], want, out); fail++;
+        } else {
+            printf("  ok    %s\n", names[i]); pass++;
+        }
+        free(out);
+        /* remove anything a partially-successful compile left behind */
+        char base[PATHBUF];
+        snprintf(base, sizeof(base), "tests/compile_fail/%s", names[i]);
+        const char *exts[] = { ".asm", ".obj", ".exe", ".o", ".s" };
+        for (size_t e = 0; e < sizeof(exts) / sizeof(exts[0]); e++) {
+            char junk[PATHBUF + 8];
+            snprintf(junk, sizeof(junk), "%s%s", base, exts[e]);
+            remove(junk);
+        }
+    }
+
+    printf("\n");
+    if (fail > 0) { printf("FAILED: %d failure(s), %d passed\n", fail, pass); return 1; }
+    printf("ALL PASS: %d test(s)\n", pass);
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc >= 2 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0)) {
+        printf("mvs %s\n", MVS_VERSION);
+        return 0;
+    }
+    if (argc >= 2 && strcmp(argv[1], "test") == 0)
+        return run_test_suite(argv[0]);   /* built-in test runner (run from the repo root) */
     if (argc < 2) {
         fprintf(stderr,
-            "MVS compiler\n"
+            "MVS compiler %s\n"
             "usage: %s <input.mvs> [options]\n"
+            "       %s test            run the golden test suite (from the repo root)\n"
             "  -o <file>     set the output file name\n"
             "  -S            emit assembly (.asm) only, then stop\n"
             "  -c            emit an object file (.obj) only (for linking with C)\n"
+            "  -O            peephole-optimize the generated assembly (x86 targets)\n"
             "  --nostd       freestanding mode: no std/C runtime/OS (emits .obj) - for OS dev\n"
             "  --target <t>  target: win64 (default), elf64 (x86-64 Linux), arm64 (AArch64 Linux)\n"
-            "  --keep        keep intermediate files (.asm, .obj)\n", argv[0]);
+            "  --keep        keep intermediate files (.asm, .obj)\n"
+            "  --version     print the compiler version\n", MVS_VERSION, argv[0], argv[0]);
         return 1;
     }
 
@@ -90,10 +396,12 @@ int main(int argc, char **argv) {
     int emit_obj = 0;  /* -c / --emit-obj : stop at the .obj file */
     int nostd = 0;     /* --nostd : freestanding (no std/CRT dependency) */
     int keep = 0;      /* --keep */
+    int optimize = 0;  /* -O : peephole pass over the generated assembly */
     TargetArch arch = ARCH_X86_64_WIN;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-S") == 0) only_asm = 1;
         else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--emit-obj") == 0) emit_obj = 1;
+        else if (strcmp(argv[i], "-O") == 0) optimize = 1;
         else if (strcmp(argv[i], "--nostd") == 0) { nostd = 1; emit_obj = 1; } /* freestanding -> produce .obj */
         else if (strcmp(argv[i], "--keep") == 0) keep = 1;
         else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
@@ -166,6 +474,12 @@ int main(int argc, char **argv) {
         return 1;
     }
     printf("[mvs] generated %s\n", asm_path);
+    if (optimize) {
+        if (arch == ARCH_ARM64_LINUX)
+            printf("[mvs] note: -O currently covers the x86 targets only; arm64 output is unchanged\n");
+        else
+            peephole_x86(asm_path);
+    }
     if (only_asm) return 0; /* -S: stop at the assembly file */
 
     /* 4. assemble into an object file (nasm for x86-64; a GNU-as-compatible driver for arm64) */

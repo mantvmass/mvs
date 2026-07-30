@@ -33,6 +33,9 @@ jobs:
       - name: Run test suite
         run: powershell -ExecutionPolicy Bypass -File scripts/test.ps1
 
+      - name: Run the built-in runner (mvs test)
+        run: .\mvs.exe test
+
       - name: Upload Windows binary
         uses: actions/upload-artifact@v4
         with:
@@ -58,6 +61,9 @@ jobs:
 
       - name: Run ELF64 test suite (compile, link, run, diff goldens; incl. freestanding)
         run: sh scripts/test_elf_ci.sh
+
+      - name: Run the built-in runner (mvs test)
+        run: ./mvs test
 
       - name: Upload Linux binary
         uses: actions/upload-artifact@v4

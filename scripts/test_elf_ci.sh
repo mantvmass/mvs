@@ -40,6 +40,9 @@ examples/08_stdlib/floats
 examples/08_stdlib/lib_out
 examples/08_stdlib/lib_math
 examples/08_stdlib/lib_mem
+examples/08_stdlib/lib_rand
+examples/08_stdlib/lib_sys
+examples/08_stdlib/out_width
 examples/08_stdlib/net_loop"
 
 for t in $tests; do

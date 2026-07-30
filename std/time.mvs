@@ -1,0 +1,54 @@
+/*
+ * std/time.mvs - wall-clock time and sleeping
+ *
+ * Cross-platform: epoch seconds go through the C runtime's time(); the
+ * millisecond clock and sleep differ per OS and are selected with @compile
+ * (GetTickCount64/Sleep on Windows, gettimeofday/usleep on Linux).
+ *
+ * Example:
+ *     import { io, time } from "std";
+ *     let t: i64 = time.millis();
+ *     time.sleep_ms(100);
+ *     io.out("elapsed = {} ms", time.millis() - t);
+ */
+
+// seconds since the Unix epoch (portable C runtime)
+extern func time(t: *u8) -> i64;
+
+@compile(target_os = "windows")
+extern func GetTickCount64() -> u64;
+@compile(target_os = "windows")
+extern func Sleep(ms: u32) -> void;
+
+@compile(target_os = "linux")
+extern func gettimeofday(tv: *u8, tz: *u8) -> i32;
+@compile(target_os = "linux")
+extern func usleep(us: u32) -> i32;
+
+// seconds since 1970-01-01 (UTC)
+func now() -> i64 {
+    return time(0);
+}
+
+// a monotonic-ish millisecond counter (for measuring durations, not for dates:
+// Windows counts from boot, Linux from the epoch; only differences are meaningful)
+@compile(target_os = "windows")
+func millis() -> i64 {
+    return GetTickCount64() as i64;
+}
+@compile(target_os = "linux")
+func millis() -> i64 {
+    let tv: [i64; 2] = [0, 0];        // struct timeval { tv_sec: i64; tv_usec: i64; } on 64-bit Linux
+    gettimeofday(tv, 0);
+    return tv[0] * 1000 + tv[1] / 1000;
+}
+
+// block the current thread for (at least) ms milliseconds
+@compile(target_os = "windows")
+func sleep_ms(ms: i64) -> void {
+    Sleep(ms as u32);
+}
+@compile(target_os = "linux")
+func sleep_ms(ms: i64) -> void {
+    usleep((ms * 1000) as u32);
+}

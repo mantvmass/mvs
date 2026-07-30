@@ -1,0 +1,17 @@
+// std/rand: pure-MVS xorshift64, the same sequence on EVERY platform
+import { io, rand } from "std";
+
+func main() -> i8 {
+    rand.seed(42);
+    io.out("a = {}", rand.next());
+    io.out("b = {}", rand.next());
+    io.out("dice = {} {} {}", rand.range(1, 6), rand.range(1, 6), rand.range(1, 6));
+    io.out("unit ok = {}", rand.unit() >= 0.0 && rand.unit() < 1.0);
+
+    rand.seed(42);                    // reseeding replays the sequence exactly
+    io.out("replay = {}", rand.next());
+
+    rand.seed(0);                     // seed 0 is remapped (state must be nonzero)
+    io.out("zero seed = {}", rand.next() != 0);
+    return 0;
+}

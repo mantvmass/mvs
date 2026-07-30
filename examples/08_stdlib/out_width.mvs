@@ -1,0 +1,15 @@
+// io.out width/precision specs, Rust style: {:8} {:8.2} {:.3} {:08} {:04x}
+// The width/precision part is passed to printf verbatim, so semantics match C.
+import { io } from "std";
+
+func main() -> i8 {
+    io.out("[{:8.2}]", 3.14159);            // [    3.14]
+    io.out("[{:8}]", 42);                   // [      42]
+    io.out("[{:08}]", 42);                  // [00000042]
+    io.out("[{:.3}]", 2.718281828);         // [2.718]
+    io.out("[{:6}]", "hi");                 // [    hi]
+    io.out("[{:04x}]", 255);                // [00ff]
+    io.out("[{:12}] [{}]", 7, "plain {} still works");
+    io.out("[{:36}]", (1 as i128) << 100);  // width applies to the i128 text too
+    return 0;
+}
