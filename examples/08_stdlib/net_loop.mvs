@@ -5,8 +5,8 @@
 import { io, net } from "std";
 
 func main() -> i8 {
-    let server: TcpServer = net.TcpServer("127.0.0.1", 47653);
-    let client: TcpSocket = net.TcpClient("127.0.0.1", 47653);
+    let server: TcpServer = TcpServer::bind("127.0.0.1", 47653);
+    let client: TcpSocket = TcpSocket::connect("127.0.0.1", 47653);
     let conn: TcpSocket = server.accept();
 
     client.send("ping");

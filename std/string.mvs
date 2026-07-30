@@ -30,6 +30,13 @@ struct String {
 }
 
 impl String {
+    // associated function: an empty String (like Rust's String::new())
+    func new() -> String {
+        let buf: *u8 = malloc(1);
+        *buf = 0;
+        return String { data: buf, len: 0, cap: 1 };
+    }
+
     // associated function: create a String by copying the text from a str onto the heap
     func from(s: str) -> String {
         let n: usize = strlen(s);

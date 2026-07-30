@@ -6,7 +6,7 @@
 import { io, net } from "std";
 
 func main() -> i8 {
-    let conn: TcpSocket = net.TcpClient("93.184.216.34", 80);  // example.com
+    let conn: TcpSocket = TcpSocket::connect("93.184.216.34", 80);  // example.com
     conn.send("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n");
     let reply: str = conn.recv();
     io.out("server replied:\n{}", reply);

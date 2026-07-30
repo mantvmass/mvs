@@ -9,14 +9,14 @@
  *
  * Example (client):
  *     import { net } from "std";
- *     let conn = net.TcpClient("93.184.216.34", 80);
+ *     let conn: TcpSocket = TcpSocket::connect("93.184.216.34", 80);
  *     conn.send("GET / HTTP/1.0\r\n\r\n");
- *     let reply = conn.recv();
+ *     let reply: str = conn.recv();
  *     conn.close();
  *
  * Example (server):
- *     let server = net.TcpServer("0.0.0.0", 8080);
- *     let conn = server.accept();
+ *     let server: TcpServer = TcpServer::bind("0.0.0.0", 8080);
+ *     let conn: TcpSocket = server.accept();
  *     conn.send("hello");
  *     conn.close();
  *     server.close();
@@ -126,34 +126,43 @@ impl TcpServer {
     }
 }
 
-// --- constructors ---
+// --- constructors (associated functions, Rust style) ---
 
-// open a TCP connection to ip:port; returns a TcpSocket
-func TcpClient(ip: str, port: u16) -> TcpSocket {
-    startup();
-    let fd: usize = socket(2, 1, 6);  // AF_INET=2, SOCK_STREAM=1, IPPROTO_TCP=6
-    let sa: sockaddr_in;
-    sa.family = 2;
-    sa.port = htons(port);
-    sa.addr = inet_addr(ip);
-    sa.zero = 0;
-    connect(fd, &sa, 16);
-    return TcpSocket { fd: fd };
+// Thin shims: a method named `connect` calling `connect(...)` would resolve to
+// itself (the struct namespace wins), so the C functions get module-level names.
+func sys_connect(s: usize, addr: *u8, addrlen: i32) -> i32 { return connect(s, addr, addrlen); }
+func sys_bind(s: usize, addr: *u8, addrlen: i32) -> i32 { return bind(s, addr, addrlen); }
+
+impl TcpSocket {
+    // open a TCP connection to ip:port
+    func connect(ip: str, port: u16) -> TcpSocket {
+        startup();
+        let fd: usize = socket(2, 1, 6);  // AF_INET=2, SOCK_STREAM=1, IPPROTO_TCP=6
+        let sa: sockaddr_in;
+        sa.family = 2;
+        sa.port = htons(port);
+        sa.addr = inet_addr(ip);
+        sa.zero = 0;
+        sys_connect(fd, &sa, 16);
+        return TcpSocket { fd: fd };
+    }
 }
 
-// create a server that binds + listens at ip:port; returns a TcpServer
-func TcpServer(ip: str, port: u16) -> TcpServer {
-    startup();
-    let fd: usize = socket(2, 1, 6);
-    // allow quick rebinding of the port (avoids EADDRINUSE from TIME_WAIT sockets)
-    let one: i32 = 1;
-    setsockopt(fd, sol_socket(), so_reuseaddr(), &one, 4);
-    let sa: sockaddr_in;
-    sa.family = 2;
-    sa.port = htons(port);
-    sa.addr = inet_addr(ip);
-    sa.zero = 0;
-    bind(fd, &sa, 16);
-    listen(fd, 16);
-    return TcpServer { fd: fd };
+impl TcpServer {
+    // bind + listen at ip:port
+    func bind(ip: str, port: u16) -> TcpServer {
+        startup();
+        let fd: usize = socket(2, 1, 6);
+        // allow quick rebinding of the port (avoids EADDRINUSE from TIME_WAIT sockets)
+        let one: i32 = 1;
+        setsockopt(fd, sol_socket(), so_reuseaddr(), &one, 4);
+        let sa: sockaddr_in;
+        sa.family = 2;
+        sa.port = htons(port);
+        sa.addr = inet_addr(ip);
+        sa.zero = 0;
+        sys_bind(fd, &sa, 16);
+        listen(fd, 16);
+        return TcpServer { fd: fd };
+    }
 }

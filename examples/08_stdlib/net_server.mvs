@@ -7,7 +7,7 @@
 import { io, net } from "std";
 
 func main() -> i8 {
-    let server: TcpServer = net.TcpServer("0.0.0.0", 8080);  // wait on port 8080
+    let server: TcpServer = TcpServer::bind("0.0.0.0", 8080);  // wait on port 8080
     io.out("listening on port 8080 ...");
 
     let conn: TcpSocket = server.accept();   // accept one connection

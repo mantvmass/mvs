@@ -96,7 +96,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `io_demo.mvs` | io.out in every form (`{}`, `{:x}`, struct, many args) + io.print |
 | `floats.mvs` | floating point + C math (`sqrt`) |
 | `files.mvs` | `fs.write`/`fs.read` + `io.in` |
-| `net_client.mvs` / `net_server.mvs` | TCP client/server skeletons (`net.TcpClient`/`TcpServer`) |
+| `net_client.mvs` / `net_server.mvs` | TCP client/server skeletons (`TcpSocket::connect` / `TcpServer::bind`) |
 | `net_loop.mvs` | TCP loopback round trip in one process; cross-platform sockets via `@compile` |
 | `lib_out.mvs` | `fmt.outf`: io.out as a pure-MVS library (variadic `...dyn Display`, impl-on-primitive) |
 | `lib_math.mvs` | `std/math`: libm wrappers + overloaded `abs`/`min`/`max`/`clamp`, `gcd`/`lcm`/`ipow` |

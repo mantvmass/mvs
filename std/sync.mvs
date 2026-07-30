@@ -34,6 +34,14 @@ struct Mutex {
     e: u64; f: u64; g: u64; h: u64;
 }
 
+// a fresh unlocked Mutex (a zeroed one; handy for locals)
+impl Mutex {
+    func new() -> Mutex {
+        let m: Mutex = Mutex { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0 };
+        return m;
+    }
+}
+
 @compile(target_os = "windows")
 impl Mutex {
     func lock(self: *Mutex) -> void { AcquireSRWLockExclusive(&self.a); }
@@ -44,10 +52,4 @@ impl Mutex {
 impl Mutex {
     func lock(self: *Mutex) -> void { pthread_mutex_lock(&self.a); }
     func unlock(self: *Mutex) -> void { pthread_mutex_unlock(&self.a); }
-}
-
-// a fresh unlocked Mutex (a zeroed one; handy for locals)
-func mutex_new() -> Mutex {
-    let m: Mutex = Mutex { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0 };
-    return m;
 }

@@ -476,7 +476,7 @@ value through its `Display` impl (every primitive ships one; user structs join b
 
 ```txt
 // A) submodule namespace: path is a bare package -> names in {} are submodules -> call as io.xxx
-import { io, fs, net } from "std";        // io.out(...), net.TcpServer(...)
+import { io, fs, net } from "std";        // io.out(...), TcpServer::bind(...)
 
 // B) symbol import: path is a specific module -> names in {} are symbols -> pulled in directly
 import { String } from "std/string";      // String::from(...)
@@ -519,7 +519,7 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 |--------|----------------|
 | `io` | `io.out(fmt, ...)`, `io.print(s)`, `io.in(prompt) -> str` |
 | `fs` | `fs.write(path, content)`, `fs.read(path) -> str` |
-| `net` | `net.TcpClient(ip, port)`, `net.TcpServer(ip, port)` + `accept`/`send`/`recv`/`close`; cross-platform (Winsock on Windows, POSIX sockets on Linux, selected with `@compile`) |
+| `net` | `TcpSocket::connect(ip, port)`, `TcpServer::bind(ip, port)` + `accept`/`send`/`recv`/`close`; cross-platform (Winsock on Windows, POSIX sockets on Linux, selected with `@compile`) |
 | `string` | `String` (heap string): `String::from(s)`, `from_int`/`from_uint`/`from_float`/`from_char`, `.push_str(s)` (chain), `.as_str() -> str`, `.len()`, `.drop()` |
 | `fmt` | trait `Display { fmt(self) -> String }` (impl'd for every primitive) + `fmt.println(x)` / `fmt.print(x)` (static dispatch) + `fmt.outf(f, args...)`, a pure-MVS io.out with run-time `{}` handling |
 | `math` | `sqrt`/`pow`/`floor`/`ceil`/`round`/`fmod` (libm), `pi()`/`e()`, and overloaded `abs`/`min`/`max`/`clamp` (i64 + f64) plus `sign`/`gcd`/`lcm`/`ipow` |
@@ -533,7 +533,7 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `result` | `Result<T, E>` + `Ok<T, E>(v)` / `Err<T, E>(e)` + `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` |
 | `vec` | `Vec<T>` growable array: `Vec<i64>::new()` + `push`/`get`/`set`/`pop`/`len`/`is_empty`/`clear`/`drop`; bounds-checked, any element type incl. structs |
 | `thread` | OS threads: `spawn(f, arg)` / `join(h)` with `func(*u8) -> *u8` workers (CreateThread vs pthreads via `@compile`); see section 4.16 |
-| `sync` | `Mutex` (`lock`/`unlock`; a zeroed Mutex is valid and unlocked; SRWLOCK vs pthread_mutex) |
+| `sync` | `Mutex` (`Mutex::new()` or a zeroed one, `lock`/`unlock`; SRWLOCK vs pthread_mutex) |
 
 There is also a second package, **`core`**: pure MVS with no CRT/OS dependency, so
 it stays importable under `--nostd` (freestanding):
@@ -1076,7 +1076,7 @@ let name: str = io.in("your name: ");   // reads one word
 
 ```txt
 import { io, net } from "std";
-let server: TcpServer = net.TcpServer("0.0.0.0", 8080);
+let server: TcpServer = TcpServer::bind("0.0.0.0", 8080);
 let conn: TcpSocket = server.accept();
 let req: str = conn.recv();
 conn.send("HTTP/1.0 200 OK\r\n\r\nhi");
