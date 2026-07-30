@@ -1,5 +1,5 @@
 // ============================================================
-//  net_server: Rust-style TCP echo server (struct + method, via Winsock)
+//  net_server: Rust-style TCP echo server (struct + method, cross-platform sockets)
 //  build:  mvs.exe examples/08_stdlib/net_server.mvs
 //  run:    examples\08_stdlib\net_server.exe
 //  test:   open another terminal -> curl http://127.0.0.1:8080/

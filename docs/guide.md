@@ -1039,10 +1039,14 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 
 ### Target / output format
 
-- Only **x86-64 + win64** + **COFF/PE** (`nasm -f win64`).
-- `--target elf64` (SysV ABI) covers Linux and GNU ld/GRUB OS dev; linking happens on the Linux
-  side (`gcc file.o -o file`, add `-lm` for C math, `-no-pie` for the absolute vtable relocs).
+- Three targets: **win64** (default, COFF/PE via `nasm -f win64`, linked with clang),
+  **elf64** (`--target elf64`, SysV ABI, `nasm -f elf64`), and **arm64**
+  (`--target arm64`, AAPCS64, GNU as syntax, assembled with the AArch64 cross gcc/clang).
+- For elf64/arm64 the compiler stops at the `.o`; linking happens on the Linux side
+  (`gcc file.o -o file`, add `-lm` for C math, `-no-pie` for the absolute vtable relocs;
+  arm64 links with `aarch64-linux-gnu-gcc` and runs under `qemu-aarch64`).
 - On Windows: needs `nasm` + `clang` (linked via `-llegacy_stdio_definitions -lws2_32`).
+- macOS (Mach-O) is not supported yet; see [../ROADMAP.md](../ROADMAP.md).
 
 ### Compiler
 
@@ -1053,8 +1057,9 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 
 ## 9. Status and roadmap
 
-Current state: the basic subset works end to end. The compiler turns `.mvs` into a real `.exe` on Windows
-x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
+Current state: the language works end to end on three targets (x86-64 Windows, x86-64
+Linux/ELF, AArch64 Linux), all CI-tested against the same golden outputs. The forward
+plan lives in [../ROADMAP.md](../ROADMAP.md).
 
 ### Done
 
@@ -1074,8 +1079,9 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
   analysis pass).
 - Module system: three import forms + checks (symbol exists, duplicates, namespace binding, circular import).
 - `io.out` Rust-style (`{}`, `{:x}`, structs, unlimited args); tree-shaking.
-- stdlib in MVS: `io` (out/print/in), `fs` (write/read), `net` (TcpServer/TcpClient, tested with curl),
-  `string` (`String` on the heap), `fmt` (`Display` + `println`/`print`).
+- stdlib in MVS: `io` (out/print/in), `fs` (write/read), `net` (TcpServer/TcpClient,
+  cross-platform via `@compile`), `string` (`String` on the heap), `fmt` (`Display` +
+  `println`/`print` + `outf`), `math` (libm + overloaded helpers), `mem` (alloc + mem ops).
 - C interop (`extern`/`export` + `-c`); `--nostd` freestanding (proven self-contained via `llvm-nm`).
 - `const` enforcement (initializer required, writes are compile errors); default parameter values
   (functions + methods, compile-time filled); compound assignment evaluates its lvalue exactly once;
@@ -1106,17 +1112,28 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
   (conservative control-flow analysis incl. `while (true)` without `break`); warnings for
   unused variables/parameters (prefix `_` to silence) and unreachable code, emitted for the
   entry file only so imported modules stay quiet.
+- ARM64 backend (`--target arm64`): `src/arch/arm64/linux.c`, AAPCS64 (x0-x7 + d0-d7,
+  sret in x8), GNU as syntax, assembled with the AArch64 cross gcc; the full example
+  suite runs under qemu-aarch64 in CI against the same goldens as both x86 targets.
+- Conditional compilation: `@compile(target_os = ...)` / `@compile(target_arch = ...)`
+  on any top-level item, filtered in the module loader (section 4.13); `std/net` uses it
+  to select Winsock vs POSIX sockets in one file.
+- Hex/binary literals (`0xFF`, `0b1010`) with a hard error on literals past 64 bits.
+- Namespace-consistent resolution everywhere: typecheck/defaults/monomorphize use the
+  same module-first lookup as codegen, `ns.func(...)` reaches module externs, overload
+  sets are per-namespace, and namespaced calls get full argument checking.
 
-Verified by running, not just compiling: the net server echoes real HTTP from curl; C calls
-`mvs_square`/`mvs_sum_to` through a `.obj`; the freestanding `.obj` has no undefined symbols.
+Verified by running, not just compiling: the net loopback example round-trips real TCP on
+all three targets; C calls `mvs_square`/`mvs_sum_to` through a `.obj`; the freestanding
+`.obj` has no undefined symbols.
 
 ### Remaining
 
-The forward-looking plan lives in [../ROADMAP.md](../ROADMAP.md). Next up:
+See [../ROADMAP.md](../ROADMAP.md) for the full plan. Next up:
 
-- **ARM64 backend** (`src/arch/arm64/<os>.c` + `ARCH_ARM64`); selectable object format / entry point for flat
-  binaries / multiboot kernel images. Verified through CI (cross toolchain + qemu-user).
-- Conditional compilation (`@compile(target_os/arch = ...)`) and the `core` library (see the roadmap).
+- **Generic structs** (`struct Vec<T>`): the prerequisite for `Option`/`Result`, real
+  collections, and the freestanding `core` library.
+- macOS target (Mach-O + its SysV quirks).
 
 Note on io.out: the library path is COMPLETE. `fmt.outf(f, args...)` is a pure-MVS formatted
 print built on impl-on-primitive Display impls, variadic `...dyn Display` slices, and run-time

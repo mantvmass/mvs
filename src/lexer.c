@@ -42,6 +42,11 @@ void lexer_init(Lexer *lx, const char *src, const char *filename) {
     lx->col = 1;
     lx->filename = filename;
     lx->had_error = 0;
+    /* Skip a UTF-8 byte order mark (EF BB BF): many Windows editors prepend one,
+     * and it would otherwise surface as "unexpected character" on line 1 */
+    if ((unsigned char)src[0] == 0xEF && (unsigned char)src[1] == 0xBB &&
+        (unsigned char)src[2] == 0xBF)
+        lx->pos = 3;
 }
 
 /* Look at the current character without moving the position */

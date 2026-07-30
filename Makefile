@@ -33,23 +33,23 @@ HDR = src/token.h src/lexer.h src/ast.h src/parser.h src/module.h src/generic.h 
       src/codegen.h src/arch/common.h src/arch/x86_64/win.h src/arch/x86_64/sysv.h \
       src/arch/arm64/linux.h
 
-# examples that compile to .exe (organized into groups 01_language .. 08_stdlib)
+# examples that compile to .exe (organized into groups 01_language .. 09_no_std)
 EXAMPLES = examples/demo \
            examples/01_language/hello examples/01_language/types examples/01_language/operators \
            examples/01_language/casts examples/01_language/control examples/01_language/bitwise \
            examples/01_language/args examples/01_language/arrays examples/01_language/int128 \
-           examples/01_language/shadow \
+           examples/01_language/shadow examples/01_language/compile_attr examples/01_language/hexbin \
            examples/02_functions/generics examples/02_functions/overload examples/02_functions/recursion \
            examples/02_functions/funcptr examples/02_functions/defaults \
            examples/03_structs/structs examples/03_structs/methods examples/03_structs/pointers \
-           examples/03_structs/compound \
+           examples/03_structs/compound examples/03_structs/blob_fields \
            examples/04_traits/traits examples/04_traits/display examples/04_traits/dynamic \
            examples/05_strings/strings \
-           examples/06_modules/use_import \
+           examples/06_modules/use_import examples/06_modules/shadow_std \
            examples/07_c_interop/extern_c \
            examples/08_stdlib/io_demo examples/08_stdlib/floats examples/08_stdlib/files \
-           examples/08_stdlib/lib_out \
-           examples/08_stdlib/net_client examples/08_stdlib/net_server
+           examples/08_stdlib/lib_out examples/08_stdlib/lib_math examples/08_stdlib/lib_mem \
+           examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop
 
 # default target: build the compiler
 $(TARGET): $(SRC) $(HDR)
@@ -63,6 +63,8 @@ examples: $(TARGET)
 	./$(TARGET) examples/07_c_interop/export_lib.mvs -c
 	./$(TARGET) examples/07_c_interop/use_c.mvs -c
 	./$(TARGET) examples/07_c_interop/freestanding.mvs --nostd
+	./$(TARGET) examples/09_no_std/kernel.mvs --nostd
+	./$(TARGET) examples/09_no_std/bump_alloc.mvs --nostd
 	@echo "All examples compiled"
 
 # run the test suite: golden output tests + compile-only + compile-fail (expected errors)
@@ -71,9 +73,9 @@ test: $(TARGET)
 
 # remove all generated files (including subfolders of examples)
 clean:
-	rm -f $(TARGET) *.asm *.obj *.exe
-	rm -f examples/*.asm examples/*.obj examples/*.exe
-	rm -f examples/*/*.asm examples/*/*.obj examples/*/*.exe
+	rm -f $(TARGET) *.asm *.obj *.exe *.o *.s
+	rm -f examples/*.asm examples/*.obj examples/*.exe examples/*.o examples/*.s
+	rm -f examples/*/*.asm examples/*/*.obj examples/*/*.exe examples/*/*.o examples/*/*.s
 	@echo "Cleaned"
 
 .PHONY: examples test clean

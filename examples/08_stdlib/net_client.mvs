@@ -1,5 +1,5 @@
 // ============================================================
-//  net_client: Rust-style TCP client (struct + method chaining, via Winsock)
+//  net_client: Rust-style TCP client (struct + method chaining, cross-platform sockets)
 //  build:  mvs.exe examples/08_stdlib/net_client.mvs
 //  run:    examples\08_stdlib\net_client.exe   (requires a reachable server)
 // ============================================================

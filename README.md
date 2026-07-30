@@ -1,5 +1,7 @@
 # MVS
 
+[![CI](https://github.com/mantvmass/mvs/actions/workflows/ci.yml/badge.svg)](https://github.com/mantvmass/mvs/actions/workflows/ci.yml)
+
 A compiler for **MVS**, a small low-level language at roughly C's level with a
 friendlier, Rust-flavored syntax. Written in plain C, **no LLVM, no flex, no
 bison**: the lexer, parser, type checker, and code generator are all hand-written,
@@ -46,6 +48,9 @@ On Linux, or targeting Linux from Windows:
 ```sh
 ./mvs examples/demo.mvs --target elf64   # SysV ABI, ELF64 object
 gcc examples/demo.o -o demo -no-pie -lm && ./demo
+
+./mvs examples/demo.mvs --target arm64   # AArch64, GNU as syntax
+aarch64-linux-gnu-gcc examples/demo.o -o demo -static && qemu-aarch64 ./demo
 ```
 
 ## Highlights

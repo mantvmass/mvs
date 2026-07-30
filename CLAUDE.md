@@ -24,9 +24,10 @@ hand-written.
 ```powershell
 # build the compiler
 make
-#   equivalent to: clang -Wall -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc `
+#   equivalent to: clang -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc `
 #                  src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c `
-#                  src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
+#                  src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c `
+#                  src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs.exe
 
 # run the test suite (golden output + compile-only + compile-fail)
 make test
@@ -42,9 +43,10 @@ make test
 ## Code architecture (pipeline)
 
 ```
-.mvs → [lexer] → tokens → [parser] → AST → [codegen driver] → [arch backend] → .asm
-                                                                          ↓
-                                        nasm -f win64 → .obj → clang → .exe
+.mvs → [lexer] → tokens → [parser] → AST → [codegen driver] → [arch backend] → .asm/.s
+    win64 (default): nasm -f win64 → .obj → clang → .exe
+    elf64:           nasm -f elf64 → .o   (link on Linux: gcc file.o -no-pie -lm)
+    arm64:           aarch64-linux-gnu-gcc -c → .o (link with the cross gcc, run under qemu)
 ```
 
 | File | Role |
@@ -61,7 +63,7 @@ make test
 | `src/arch/x86_64/sysv.c` | x86-64 Linux/ELF backend (SysV ABI, `--target elf64`) |
 | `src/arch/arm64/linux.c` | AArch64 Linux backend (AAPCS64, `--target arm64`, GNU as syntax) |
 | `src/main.c` | CLI driving the whole pipeline |
-| `std/*.mvs` | standard library written in MVS (`io`/`string`/`fmt`/`fs`/`net`) |
+| `std/*.mvs` | standard library written in MVS (`io`/`string`/`fmt`/`fs`/`net`/`math`/`mem`) |
 
 ## Where to edit when adding a feature
 

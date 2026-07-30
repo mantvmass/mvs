@@ -2,7 +2,7 @@
 # Linux CI driver: build each example with --target elf64 using a NATIVE Linux build
 # of the compiler, link with gcc, run, and diff stdout against the shared goldens
 # in tests/expected/ (the same files the win64 suite uses).
-# Usage: sh tests/run_elf_ci.sh   (from the repo root; expects ./mvs built natively)
+# Usage: sh scripts/test_elf_ci.sh   (from the repo root; expects ./mvs built natively)
 set -u
 MVS=${MVS:-./mvs}
 fail=0

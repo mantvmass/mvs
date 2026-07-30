@@ -3,9 +3,11 @@ mvs
 mvs.exe
 
 # intermediate/output files from compilation (every folder)
+# (*.s covers the arm64 backend's GNU-as output; no assembly sources are checked in)
 *.asm
 *.obj
 *.o
+*.s
 *.exe
 *.ilk
 *.pdb
