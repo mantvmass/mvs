@@ -12,6 +12,11 @@
 
 /* Replace generic calls with type-specific instances and append those instances to the program.
  * Returns the number of trait bound violations (`<T: Trait>` whose concrete type lacks the impl); 0 = pass */
+/* Desugar Rust-style enums and match statements into tagged structs +
+ * associated constructors + if-chains (runs FIRST, right after module load;
+ * later passes never see ND_ENUM_DECL/ND_MATCH). Returns the error count. */
+int desugar_enums(Node *program);
+
 int monomorphize(Node *program);
 
 /* Resolve overloaded functions (same name, different parameter types): rename each definition by its

@@ -59,7 +59,9 @@ a story for the name clash with std/option), `cell`, `sync::atomic` and
 
 ## Language
 
-- Pattern matching (`match`) over `Option`/`Result` (both exist now).
+- Pattern matching phase 2: `match` as an EXPRESSION, nested patterns, and
+  generic enums (which would let Option/Result become true enums). Phase 1 is
+  done: `enum` with payload variants + exhaustive `match` statements.
 - Concurrency, phase 2: channels (Mutex + condvar), atomics (compiler
   intrinsics), and a `scoped`-style join helper. Phase 1 (threads + Mutex,
   std/thread + std/sync) is done; Send/Sync-style compile-time race checking

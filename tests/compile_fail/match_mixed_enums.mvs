@@ -1,0 +1,13 @@
+//~ ERROR: match arms mix enums 'Signal' and 'Other'
+enum Signal { Red, Green }
+enum Other { A }
+
+func main() -> i8 {
+    let s: Signal = Signal::Red();
+    match (s) {
+        Signal::Red => { }
+        Other::A => { }
+        _ => { }
+    }
+    return 0;
+}

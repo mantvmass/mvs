@@ -420,6 +420,287 @@ static void substitute(Node *n, Bind *gmap, int ngmap) {
     for (int i = 0; i < n->nitems; i++) substitute(n->items[i], gmap, ngmap);
 }
 
+/* ---------- enums + match (Rust-style, desugared before every other pass) ----------
+ *
+ * enum Shape { Circle(f64), Rect(f64, f64), Nothing }
+ * becomes a tagged struct + associated constructors:
+ *     struct Shape { tag: i64; v0_0: f64; v1_0: f64; v1_1: f64; }
+ *     impl-style: Shape::Circle(p0) -> Shape { tag: 0, v0_0: p0 } ...
+ * and every `match (e) { Shape::Circle(r) => {..} ... }` becomes
+ *     { let __matchN: Shape = e;  if (__matchN.tag == 0) { let r = __matchN.v0_0; .. } elseif ... }
+ * Exhaustiveness is checked here: without a `_` arm, every variant must appear.
+ * Later passes and all three backends only ever see plain structs and ifs. */
+
+#define MAX_ENUMS 64
+typedef struct {
+    char *name;
+    Node *decl;               /* the ND_ENUM_DECL (variants = decl->items) */
+} EnumInfo;
+static EnumInfo g_enum_tab[MAX_ENUMS];
+static int g_num_enums = 0;
+static int de_err = 0;
+static int de_tmp = 0;        /* unique scrutinee temp counter */
+
+static EnumInfo *de_find(const char *name) {
+    for (int i = 0; i < g_num_enums; i++)
+        if (strcmp(g_enum_tab[i].name, name) == 0) return &g_enum_tab[i];
+    return NULL;
+}
+
+static Node *de_ident(const char *name, int line) {
+    Node *n = node_new(ND_IDENT, line);
+    n->name = strdup(name);
+    n->type = TYPE_UNKNOWN;
+    return n;
+}
+
+static Node *de_member(const char *base, const char *field, int line) {
+    Node *m = node_new(ND_MEMBER, line);
+    m->operand = de_ident(base, line);
+    m->name = strdup(field);
+    return m;
+}
+
+/* build the replacement block for one ND_MATCH (children already desugared) */
+static Node *de_match(Node *n) {
+    EnumInfo *ei = NULL;
+    Node *def_arm = NULL;
+    int seen[64] = {0};
+
+    for (int i = 0; i < n->nitems; i++) {
+        Node *arm = n->items[i];
+        if (!arm->name) {                       /* the '_' arm */
+            if (def_arm) {
+                diag_print(arm->file, arm->line, arm->col, "error", "duplicate '_' arm in match");
+                de_err++;
+            }
+            def_arm = arm;
+            continue;
+        }
+        EnumInfo *e2 = de_find(arm->type_name);
+        if (!e2) {
+            diag_print(arm->file, arm->line, arm->col, "error",
+                       "unknown enum '%s' in match pattern", arm->type_name);
+            de_err++;
+            continue;
+        }
+        if (!ei) ei = e2;
+        else if (ei != e2) {
+            diag_print(arm->file, arm->line, arm->col, "error",
+                       "match arms mix enums '%s' and '%s'", ei->name, e2->name);
+            de_err++;
+            continue;
+        }
+        int vi = -1;
+        for (int v = 0; v < ei->decl->nitems; v++)
+            if (strcmp(ei->decl->items[v]->name, arm->name) == 0) { vi = v; break; }
+        if (vi < 0) {
+            diag_print(arm->file, arm->line, arm->col, "error",
+                       "enum '%s' has no variant '%s'", ei->name, arm->name);
+            de_err++;
+            continue;
+        }
+        if (seen[vi]) {
+            diag_print(arm->file, arm->line, arm->col, "error",
+                       "duplicate arm for variant '%s'", arm->name);
+            de_err++;
+        }
+        seen[vi] = 1;
+        int arity = ei->decl->items[vi]->nitems;
+        if (arm->nitems != arity) {
+            diag_print(arm->file, arm->line, arm->col, "error",
+                       "variant '%s' carries %d value(s) but the pattern binds %d",
+                       arm->name, arity, arm->nitems);
+            de_err++;
+        }
+    }
+    if (!ei) {
+        diag_print(n->file, n->line, n->col, "error",
+                   "a match needs at least one Enum::Variant arm");
+        de_err++;
+        return n;
+    }
+    if (!def_arm) {                              /* Rust-style exhaustiveness */
+        for (int v = 0; v < ei->decl->nitems; v++) {
+            if (!seen[v]) {
+                diag_print(n->file, n->line, n->col, "error",
+                           "match on enum '%s' is not exhaustive: variant '%s' is not covered",
+                           ei->name, ei->decl->items[v]->name);
+                diag_help("add an arm for it, or a final catch-all `_ => { ... }`");
+                de_err++;
+            }
+        }
+    }
+
+    char tmp[32];
+    snprintf(tmp, sizeof(tmp), "__match%d", de_tmp++);
+    Node *blk = node_new(ND_BLOCK, n->line);
+    Node *decl = node_new(ND_VAR_DECL, n->line);
+    decl->name = strdup(tmp);
+    decl->type = TYPE_STRUCT;
+    decl->type_name = strdup(ei->name);
+    decl->operand = n->cond;                     /* the scrutinee, evaluated exactly once */
+    node_add_item(blk, decl);
+
+    Node *first_if = NULL, *cur = NULL;
+    for (int i = 0; i < n->nitems; i++) {
+        Node *arm = n->items[i];
+        if (!arm->name) continue;
+        int vi = -1;
+        for (int v = 0; v < ei->decl->nitems; v++)
+            if (strcmp(ei->decl->items[v]->name, arm->name) == 0) { vi = v; break; }
+        if (vi < 0) continue;                    /* already reported */
+        Node *iff = node_new(ND_IF, arm->line);
+        Node *cmp = node_new(ND_BINARY, arm->line);
+        cmp->op = TK_EQ;
+        cmp->lhs = de_member(tmp, "tag", arm->line);
+        cmp->rhs = node_new(ND_INT, arm->line);
+        cmp->rhs->int_val = vi;
+        cmp->rhs->type = TYPE_I64;
+        iff->cond = cmp;
+        Node *tb = node_new(ND_BLOCK, arm->line);
+        Node *variant = ei->decl->items[vi];
+        for (int j = 0; j < arm->nitems && j < variant->nitems; j++) {
+            Node *pt = variant->items[j];
+            Node *bd = node_new(ND_VAR_DECL, arm->line);
+            bd->name = strdup(arm->items[j]->name);
+            bd->type = pt->type;
+            bd->ptr = pt->ptr;
+            bd->type_name = pt->type_name ? strdup(pt->type_name) : NULL;
+            bd->sig = pt->sig ? node_clone(pt->sig) : NULL;
+            char f[32];
+            snprintf(f, sizeof(f), "v%d_%d", vi, j);
+            bd->operand = de_member(tmp, f, arm->line);
+            node_add_item(tb, bd);
+        }
+        node_add_item(tb, arm->body);            /* the arm's block runs after the bindings */
+        iff->then_branch = tb;
+        if (!first_if) first_if = iff;
+        else cur->else_branch = iff;
+        cur = iff;
+    }
+    if (def_arm && cur) cur->else_branch = def_arm->body;
+    if (first_if) node_add_item(blk, first_if);
+    else if (def_arm) node_add_item(blk, def_arm->body);
+    return blk;
+}
+
+/* walk a subtree bottom-up, replacing every ND_MATCH with its desugared block */
+static Node *de_walk(Node *n) {
+    if (!n) return NULL;
+    n->lhs = de_walk(n->lhs);   n->rhs = de_walk(n->rhs);
+    n->operand = de_walk(n->operand); n->cond = de_walk(n->cond);
+    n->then_branch = de_walk(n->then_branch); n->else_branch = de_walk(n->else_branch);
+    n->init = de_walk(n->init); n->step = de_walk(n->step);
+    n->body = de_walk(n->body);
+    for (int i = 0; i < n->nitems; i++) n->items[i] = de_walk(n->items[i]);
+    if (n->kind == ND_MATCH) return de_match(n);
+    return n;
+}
+
+int desugar_enums(Node *prog) {
+    de_err = 0;
+    g_num_enums = 0;
+    /* 1) register every enum declaration */
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *e = prog->items[i];
+        if (e->kind != ND_ENUM_DECL || !e->name) continue;
+        if (de_find(e->name)) {
+            diag_print(e->file, e->line, e->col, "error", "duplicate enum '%s'", e->name);
+            de_err++;
+            continue;
+        }
+        if (g_num_enums >= MAX_ENUMS) {
+            diag_print(e->file, e->line, e->col, "error", "too many enums (max %d)", MAX_ENUMS);
+            de_err++;
+            break;
+        }
+        if (e->nitems > 64) {
+            diag_print(e->file, e->line, e->col, "error", "enum '%s' has too many variants (max 64)", e->name);
+            de_err++;
+        }
+        g_enum_tab[g_num_enums].name = e->name;
+        g_enum_tab[g_num_enums].decl = e;
+        g_num_enums++;
+    }
+    /* 2) desugar match statements everywhere (incl. generic templates and methods) */
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *f = prog->items[i];
+        if (f->kind == ND_FUNC && f->body) f->body = de_walk(f->body);
+        else if (f->kind == ND_VAR_DECL && f->operand) f->operand = de_walk(f->operand);
+    }
+    /* 3) turn each enum declaration into a tagged struct + constructors */
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *e = prog->items[i];
+        if (e->kind != ND_ENUM_DECL || !e->name) continue;
+        Node *st = node_new(ND_STRUCT_DECL, e->line);
+        st->name = strdup(e->name);
+        Node *tagf = node_new(ND_PARAM, e->line);
+        tagf->name = strdup("tag");
+        tagf->type = TYPE_I64;
+        node_add_item(st, tagf);
+        for (int v = 0; v < e->nitems; v++) {
+            Node *variant = e->items[v];
+            for (int j = 0; j < variant->nitems; j++) {
+                Node *pt = variant->items[j];
+                Node *fld = node_new(ND_PARAM, variant->line);
+                char f[32];
+                snprintf(f, sizeof(f), "v%d_%d", v, j);
+                fld->name = strdup(f);
+                fld->type = pt->type;
+                fld->ptr = pt->ptr;
+                fld->type_name = pt->type_name ? strdup(pt->type_name) : NULL;
+                fld->sig = pt->sig ? node_clone(pt->sig) : NULL;
+                node_add_item(st, fld);
+            }
+        }
+        prog->items[i] = st;                     /* the struct replaces the enum in place */
+        /* one associated constructor per variant: Shape::Circle(p0) -> Shape */
+        for (int v = 0; v < e->nitems; v++) {
+            Node *variant = e->items[v];
+            Node *fn = node_new(ND_FUNC, variant->line);
+            fn->name = strdup(variant->name);
+            fn->is_method = 1;
+            fn->ns = strdup(e->name);
+            fn->type = TYPE_STRUCT;
+            fn->type_name = strdup(e->name);
+            Node *lit = node_new(ND_STRUCT_LIT, variant->line);
+            lit->name = strdup(e->name);
+            Node *tset = node_new(ND_ASSIGN, variant->line);
+            tset->lhs = de_ident("tag", variant->line);
+            tset->rhs = node_new(ND_INT, variant->line);
+            tset->rhs->int_val = v;
+            tset->rhs->type = TYPE_I64;
+            node_add_item(lit, tset);
+            for (int j = 0; j < variant->nitems; j++) {
+                Node *pt = variant->items[j];
+                Node *par = node_new(ND_PARAM, variant->line);
+                char pn[16];
+                snprintf(pn, sizeof(pn), "p%d", j);
+                par->name = strdup(pn);
+                par->type = pt->type;
+                par->ptr = pt->ptr;
+                par->type_name = pt->type_name ? strdup(pt->type_name) : NULL;
+                par->sig = pt->sig ? node_clone(pt->sig) : NULL;
+                node_add_item(fn, par);
+                Node *fset = node_new(ND_ASSIGN, variant->line);
+                char f[32];
+                snprintf(f, sizeof(f), "v%d_%d", v, j);
+                fset->lhs = de_ident(f, variant->line);
+                fset->rhs = de_ident(pn, variant->line);
+                node_add_item(lit, fset);
+            }
+            Node *ret = node_new(ND_RETURN, variant->line);
+            ret->operand = lit;
+            Node *body = node_new(ND_BLOCK, variant->line);
+            node_add_item(body, ret);
+            fn->body = body;
+            node_add_item(prog, fn);
+        }
+    }
+    return de_err;
+}
+
 /* ---------- generic structs (struct Vec<T>) ----------
  *
  * Struct templates (ND_STRUCT_DECL with ngen > 0) never reach codegen. Every

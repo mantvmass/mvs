@@ -1,0 +1,7 @@
+circle area = 12.566371
+rect area = 12.000000
+nothing = 0.000000
+a circle with radius 2.000000
+not a circle
+caution (3.000000 x 4.000000)
+sum = 24.566371

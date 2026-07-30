@@ -133,7 +133,11 @@ arithmetic) · the `core` package (pure MVS, importable under `--nostd`, package
 next to std in releases; env override MVS_CORE): `mem`/`cmp`/`ptr`/`cstr`/
 `slice` (`Slice<T>`)/`bits` · threads + Mutex (`std/thread` spawn/join with
 `func(*u8) -> *u8` workers, `std/sync` Mutex; CreateThread+SRWLOCK vs
-pthreads via @compile; Linux links -lpthread; NO Send/Sync checking, documented).
+pthreads via @compile; Linux links -lpthread; NO Send/Sync checking, documented) ·
+ENUMS + MATCH (Rust-style: payload variants, unit variants, `_`, exhaustiveness
+checking; desugared in `desugar_enums` right after module load into a tagged
+struct + associated constructors + if-chains, so no backend work; `::` documented
+as the Rust-style path separator).
 
 **Remaining:** see [ROADMAP.md](ROADMAP.md) (`match`, a hash map, more `core`
 modules, macOS target).

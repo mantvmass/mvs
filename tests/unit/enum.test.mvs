@@ -1,0 +1,68 @@
+// unit tests for Rust-style enums + match
+import { test } from "std";
+
+enum Op {
+    Add(i64, i64),
+    Neg(i64),
+    Zero,
+}
+
+func calc(op: Op) -> i64 {
+    let r: i64 = 0;
+    match (op) {
+        Op::Add(a, b) => { r = a + b; }
+        Op::Neg(x) => { r = 0 - x; }
+        Op::Zero => { r = 0; }
+    }
+    return r;
+}
+
+@test
+func payload_variants() -> void {
+    test.eq(calc(Op::Add(2, 3)), 5);
+    test.eq(calc(Op::Neg(7)), 0 - 7);
+    test.eq(calc(Op::Zero()), 0);
+}
+
+@test
+func catch_all_arm() -> void {
+    let op: Op = Op::Add(1, 1);
+    let hit: i64 = 0;
+    match (op) {
+        Op::Zero => { hit = 1; }
+        _ => { hit = 2; }
+    }
+    test.eq(hit, 2);
+}
+
+@test
+func match_evaluates_scrutinee_once() -> void {
+    // the scrutinee is copied into a temp before the arms run
+    let op: Op = Op::Neg(4);
+    let total: i64 = 0;
+    match (op) {
+        Op::Add(a, b) => { total = a + b; }
+        Op::Neg(x) => { total = x * 10; }
+        Op::Zero => { total = 0 - 1; }
+    }
+    test.eq(total, 40);
+}
+
+enum Mixed {
+    Text(str),
+    Num(f64),
+}
+
+@test
+func str_and_float_payloads() -> void {
+    let t: Mixed = Mixed::Text("hi");
+    let n: Mixed = Mixed::Num(2.5);
+    match (t) {
+        Mixed::Text(s) => { test.eq(s, "hi"); }
+        Mixed::Num(v) => { test.fail("expected Text"); test.near(v, 0.0, 1.0); }
+    }
+    match (n) {
+        Mixed::Text(s) => { test.fail(s); }
+        Mixed::Num(v) => { test.near(v, 2.5, 0.000001); }
+    }
+}

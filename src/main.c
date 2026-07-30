@@ -723,6 +723,12 @@ int main(int argc, char **argv) {
     Node *program = module_load(input, stddir, coredir, nostd, target_os, target_arch, &had_error);
     if (had_error) { fprintf(stderr, "compilation failed (parse/import errors)\n"); return 1; }
 
+    /* enums + match desugar into structs and ifs before anything else runs */
+    if (desugar_enums(program) > 0) {
+        fprintf(stderr, "compilation failed (enum/match errors)\n");
+        return 1;
+    }
+
     /* --test-main: a test file has test_* functions instead of a main; generate one */
     if (test_main && synthesize_test_main(program) < 0) {
         fprintf(stderr, "error: no test functions found (define `func test_xxx() -> void`, or write a main)\n");

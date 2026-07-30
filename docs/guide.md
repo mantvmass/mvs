@@ -724,6 +724,38 @@ The honest difference from Rust: MVS has no ownership system, so there is NO
 compile-time Send/Sync data-race checking. Shared mutable data compiles fine
 whether or not you lock; the discipline is yours, exactly like C.
 
+### 4.17 Enums + match (Rust-style)
+
+```txt
+enum Shape {
+    Circle(f64),
+    Rect(f64, f64),
+    Nothing,
+}
+
+let c: Shape = Shape::Circle(2.0);
+let n: Shape = Shape::Nothing();       // unit variants are constructor CALLS
+
+match (s) {
+    Shape::Circle(r) => { io.out("circle {}", r); }
+    Shape::Rect(w, h) => { io.out("rect {} x {}", w, h); }
+    _ => { io.out("something else"); } // catch-all
+}
+```
+
+- Variants may carry payload values; the pattern binds them by position.
+- `match` is EXHAUSTIVE like Rust: without a `_` arm, every variant must be
+  covered or it is a compile error. Mixed-enum arms, unknown variants,
+  duplicate arms, and wrong binding counts are compile errors too.
+- The scrutinee is evaluated exactly once (copied into a hidden temp).
+- Under the hood an enum desugars into a tagged struct plus one associated
+  constructor per variant, and match into an if-chain on the tag; the whole
+  feature lives in the front end, so all three backends run it unchanged.
+- Limits (v1): `match` is a statement (not an expression), patterns are one
+  level deep (bind then match again for nesting), enums are not generic yet,
+  and each variant's payload fields exist side by side in the struct (a sum
+  of sizes, not a union).
+
 ---
 
 ## 5. Memory model

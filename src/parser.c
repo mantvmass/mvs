@@ -64,10 +64,10 @@ static void synchronize(Parser *p) {
                 return;
             case TK_SEMICOLON:
                 advance(p); return;
-            case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT:
+            case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT: case TK_ENUM:
             case TK_IMPORT: case TK_EXTERN: case TK_EXPORT:
             case TK_LET: case TK_CONST: case TK_IF: case TK_WHILE: case TK_FOR:
-            case TK_DO: case TK_SWITCH: case TK_RETURN: case TK_BREAK: case TK_CONTINUE:
+            case TK_DO: case TK_SWITCH: case TK_MATCH: case TK_RETURN: case TK_BREAK: case TK_CONTINUE:
                 return;
             default:
                 advance(p);
@@ -81,7 +81,7 @@ static void synchronize_top(Parser *p) {
     for (;;) {
         switch (p->cur.type) {
             case TK_EOF:
-            case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT:
+            case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT: case TK_ENUM:
             case TK_IMPORT: case TK_EXTERN: case TK_EXPORT:
             case TK_LET: case TK_CONST: case TK_AT:
                 return;
@@ -120,6 +120,7 @@ static Node *parse_block(Parser *p);
 static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out, int *arr_out);
 static int parse_generic_cname(Parser *p, const char *base, char *out, size_t on,
                                char *out_args[4], int *out_nargs);
+static Node *parse_match(Parser *p);
 
 /* Consume one closing '>' of a generic argument list. A '>>' (lexed as TK_SHR when
  * generics nest, e.g. Vec<Vec<i64>>) counts as two: the first consumer takes the
@@ -837,6 +838,7 @@ static Node *parse_stmt(Parser *p) {
     if (check(p, TK_FOR))    return parse_for(p);
     if (check(p, TK_DO))     return parse_do(p);
     if (check(p, TK_SWITCH)) return parse_switch(p);
+    if (check(p, TK_MATCH))  return parse_match(p);
     if (check(p, TK_BREAK)) {
         Node *n = node_new(ND_BREAK, p->cur.line);
         advance(p);
@@ -1067,6 +1069,82 @@ static Node *parse_import(Parser *p) {
     return n;
 }
 
+/* enum_decl := 'enum' IDENT '{' variant (',' variant)* ','? '}'
+ * variant   := IDENT [ '(' type (',' type)* ')' ]
+ * Stored as ND_ENUM_DECL; desugared into a tagged struct + associated
+ * constructors right after module load (see desugar_enums) */
+static Node *parse_enum(Parser *p) {
+    Node *n = node_new(ND_ENUM_DECL, p->cur.line);
+    advance(p); /* consume enum */
+    if (!check(p, TK_IDENT)) error(p, "expected enum name");
+    else { n->name = strdup(p->cur.lexeme); advance(p); }
+    expect(p, TK_LBRACE, "expected '{' after enum name");
+    while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
+        Node *v = node_new(ND_PARAM, p->cur.line);
+        if (!check(p, TK_IDENT)) { error(p, "expected a variant name"); break; }
+        v->name = strdup(p->cur.lexeme);
+        advance(p);
+        if (match(p, TK_LPAREN)) {          /* payload types: Circle(f64), Rect(f64, f64) */
+            do {
+                Node *pt = node_new(ND_PARAM, p->cur.line);
+                pt->type = parse_type(p, &pt->ptr, &pt->type_name, &pt->sig, NULL);
+                node_add_item(v, pt);
+            } while (match(p, TK_COMMA));
+            expect(p, TK_RPAREN, "expected ')' after the variant's payload types");
+        }
+        node_add_item(n, v);
+        if (!match(p, TK_COMMA)) break;      /* trailing comma optional */
+    }
+    expect(p, TK_RBRACE, "expected '}' to close enum");
+    return n;
+}
+
+/* match_stmt := 'match' '(' expr ')' '{' arm* '}'
+ * arm        := ENUM '::' VARIANT [ '(' IDENT (',' IDENT)* ')' ] '=>' block [',']
+ *             | '_' '=>' block [',']  */
+static Node *parse_match(Parser *p) {
+    Node *n = node_new(ND_MATCH, p->cur.line);
+    advance(p); /* consume match */
+    expect(p, TK_LPAREN, "expected '(' after match");
+    n->cond = parse_expr(p);
+    expect(p, TK_RPAREN, "expected ')' after the match value");
+    expect(p, TK_LBRACE, "expected '{' to open the match arms");
+    while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
+        Node *arm = node_new(ND_MARM, p->cur.line);
+        if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "_") == 0) {
+            advance(p);                      /* the catch-all arm: '_' */
+        } else if (check(p, TK_IDENT)) {
+            arm->type_name = strdup(p->cur.lexeme);   /* enum name */
+            advance(p);
+            expect(p, TK_COLONCOLON, "expected '::' in the match pattern (Enum::Variant)");
+            if (!check(p, TK_IDENT)) { error(p, "expected a variant name after '::'"); break; }
+            arm->name = strdup(p->cur.lexeme);
+            advance(p);
+            if (match(p, TK_LPAREN)) {       /* payload bindings: Circle(r), Rect(w, h) */
+                do {
+                    if (!check(p, TK_IDENT)) { error(p, "expected a binding name in the pattern"); break; }
+                    Node *b = node_new(ND_IDENT, p->cur.line);
+                    b->name = strdup(p->cur.lexeme);
+                    node_add_item(arm, b);
+                    advance(p);
+                } while (match(p, TK_COMMA));
+                expect(p, TK_RPAREN, "expected ')' after the pattern bindings");
+            }
+        } else {
+            error(p, "expected a match pattern (Enum::Variant(...) or _)");
+            break;
+        }
+        expect(p, TK_FATARROW, "expected '=>' after the match pattern");
+        if (!check(p, TK_LBRACE)) { error(p, "expected a '{ ... }' block as the arm's body"); break; }
+        arm->body = parse_block(p);
+        match(p, TK_COMMA);                  /* trailing comma optional */
+        node_add_item(n, arm);
+        if (p->panic) synchronize(p);
+    }
+    expect(p, TK_RBRACE, "expected '}' to close the match");
+    return n;
+}
+
 /* struct_decl := 'struct' IDENT '{' (IDENT ':' type (';'|',')?)* '}'
  * Each field is stored as an ND_PARAM node (with name, type, ptr, type_name) */
 static Node *parse_struct(Parser *p) {
@@ -1206,6 +1284,9 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
             node_add_item(prog, parse_func_decl(&p, 1));
         } else if (check(&p, TK_STRUCT)) {
             node_add_item(prog, parse_struct(&p));
+            match(&p, TK_SEMICOLON); /* trailing ';' is optional */
+        } else if (check(&p, TK_ENUM)) {
+            node_add_item(prog, parse_enum(&p));
             match(&p, TK_SEMICOLON); /* trailing ';' is optional */
         } else if (check(&p, TK_LET) || check(&p, TK_CONST)) {
             Node *n = parse_var_decl(&p);

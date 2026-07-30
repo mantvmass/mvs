@@ -1,0 +1,11 @@
+//~ ERROR: variant 'Add' carries 2 value(s) but the pattern binds 1
+enum Op { Add(i64, i64), Zero }
+
+func main() -> i8 {
+    let o: Op = Op::Zero();
+    match (o) {
+        Op::Add(a) => { }
+        Op::Zero => { }
+    }
+    return 0;
+}

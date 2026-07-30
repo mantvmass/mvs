@@ -19,6 +19,7 @@ examples/01_language/int128
 examples/01_language/shadow
 examples/01_language/compile_attr
 examples/01_language/hexbin
+examples/01_language/enums
 examples/02_functions/generics
 examples/02_functions/overload
 examples/02_functions/recursion

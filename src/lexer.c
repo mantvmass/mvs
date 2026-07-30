@@ -22,7 +22,7 @@ static const Keyword KEYWORDS[] = {
     {"case", TK_CASE}, {"default", TK_DEFAULT}, {"break", TK_BREAK},
     {"continue", TK_CONTINUE}, {"import", TK_IMPORT}, {"from", TK_FROM},
     {"extern", TK_EXTERN}, {"export", TK_EXPORT}, {"impl", TK_IMPL}, {"trait", TK_TRAIT},
-    {"dyn", TK_DYN}, {"where", TK_WHERE},
+    {"dyn", TK_DYN}, {"where", TK_WHERE}, {"enum", TK_ENUM}, {"match", TK_MATCH},
     {"true", TK_TRUE}, {"false", TK_FALSE}, {"as", TK_AS},
     /* Data types */
     {"i8", TK_TYPE_I8}, {"i16", TK_TYPE_I16}, {"i32", TK_TYPE_I32}, {"i64", TK_TYPE_I64},
@@ -301,6 +301,7 @@ Token lexer_next(Lexer *lx) {
         case '^': advance(lx); return simple_token(TK_CARET, "^", line, col);
         case '=':
             if (n == '=') { advance(lx); advance(lx); return simple_token(TK_EQ, "==", line, col); }
+            if (n == '>') { advance(lx); advance(lx); return simple_token(TK_FATARROW, "=>", line, col); }
             advance(lx); return simple_token(TK_ASSIGN, "=", line, col);
         case '!':
             if (n == '=') { advance(lx); advance(lx); return simple_token(TK_NEQ, "!=", line, col); }

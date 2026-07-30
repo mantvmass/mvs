@@ -36,6 +36,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `shadow.mvs` | scope shadowing: blocks, type-changing shadows, loop variables |
 | `compile_attr.mvs` | conditional compilation: `@compile(target_os/target_arch)` on funcs and globals |
 | `hexbin.mvs` | hex (`0x`) and binary (`0b`) integer literals + `{:x}` output |
+| `enums.mvs` | Rust-style enums + match: payload variants, unit variants, `_`, nested match, exhaustiveness |
 
 ## 02_functions: functions / generics / overloading
 

@@ -122,7 +122,8 @@ static char *collect_defs(Node *prog) {
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
         const char *nm = NULL;
-        if ((d->kind == ND_FUNC && !d->is_method) || d->kind == ND_STRUCT_DECL || d->kind == ND_TRAIT)
+        if ((d->kind == ND_FUNC && !d->is_method) || d->kind == ND_STRUCT_DECL ||
+            d->kind == ND_TRAIT || d->kind == ND_ENUM_DECL)
             nm = d->name;
         if (!nm) continue;
         size_t need = len + strlen(nm) + 2;

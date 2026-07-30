@@ -1,0 +1,11 @@
+//~ ERROR: match on enum 'Signal' is not exhaustive: variant 'Green' is not covered
+enum Signal { Red, Yellow, Green }
+
+func main() -> i8 {
+    let s: Signal = Signal::Red();
+    match (s) {
+        Signal::Red => { }
+        Signal::Yellow => { }
+    }
+    return 0;
+}

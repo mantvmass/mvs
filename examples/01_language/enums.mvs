@@ -1,0 +1,55 @@
+import { io } from "std";
+
+enum Shape {
+    Circle(f64),
+    Rect(f64, f64),
+    Nothing,
+}
+
+func area(s: Shape) -> f64 {
+    let a: f64 = 0.0;
+    match (s) {
+        Shape::Circle(r) => { a = 3.14159265 * r * r; }
+        Shape::Rect(w, h) => { a = w * h; }
+        Shape::Nothing => { a = 0.0; }
+    }
+    return a;
+}
+
+func describe(s: Shape) -> void {
+    match (s) {
+        Shape::Circle(r) => { io.out("a circle with radius {}", r); }
+        _ => { io.out("not a circle"); }
+    }
+}
+
+enum Signal { Red, Yellow, Green }
+
+func main() -> i8 {
+    let c: Shape = Shape::Circle(2.0);
+    let r: Shape = Shape::Rect(3.0, 4.0);
+    let n: Shape = Shape::Nothing();
+    io.out("circle area = {}", area(c));
+    io.out("rect area = {}", area(r));
+    io.out("nothing = {}", area(n));
+    describe(c);
+    describe(r);
+
+    // unit-variant enum in a nested match
+    let sig: Signal = Signal::Yellow();
+    match (sig) {
+        Signal::Red => { io.out("stop"); }
+        Signal::Yellow => {
+            match (r) {
+                Shape::Rect(w, h) => { io.out("caution ({} x {})", w, h); }
+                _ => { io.out("caution"); }
+            }
+        }
+        Signal::Green => { io.out("go"); }
+    }
+
+    // enums are values: pass, return, store
+    let shapes: [f64; 2] = [area(c), area(r)];
+    io.out("sum = {}", shapes[0] + shapes[1]);
+    return 0;
+}

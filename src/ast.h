@@ -58,6 +58,13 @@ typedef enum {
     ND_STRUCT_DECL,/* struct declaration: uses name, items (fields as ND_PARAM) */
     ND_STRUCT_LIT, /* struct literal: uses name (struct name), items (field inits as ND_ASSIGN) */
 
+    /* --- enums (desugared right after module load; never reach later passes) --- */
+    ND_ENUM_DECL,  /* enum declaration: name = enum name; items = variants, each an ND_PARAM
+                    *  whose name is the variant and whose items are payload types (ND_PARAM) */
+    ND_MATCH,      /* match statement: cond = scrutinee; items = arms (ND_MARM) */
+    ND_MARM,       /* one match arm: type_name = enum name, name = variant (both NULL for '_');
+                    *  items = payload binding names (ND_IDENT); body = the arm's block */
+
     /* --- top level --- */
     ND_PARAM,      /* function parameter/struct field: uses name, type, ptr, type_name;
                     *  operand = default value expression (parameters only, NULL = no default) */

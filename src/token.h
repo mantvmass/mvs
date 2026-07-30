@@ -44,6 +44,8 @@ typedef enum {
     TK_EXPORT,       /* export  - export a function so C can call it (uses the raw symbol name) */
     TK_IMPL,         /* impl    - block defining methods of a struct (Rust-style) */
     TK_TRAIT,        /* trait   - define a contract (set of method signatures), Rust-style */
+    TK_ENUM,         /* enum    - a tagged sum type with payload variants (Rust-style) */
+    TK_MATCH,        /* match   - branch on an enum's variant, binding its payload */
     TK_DYN,          /* dyn     - trait object type (dyn Trait = fat pointer {data, vtable}) */
     TK_WHERE,        /* where   - trait bound clause after the signature (where T: A + B) */
     TK_ELLIPSIS,     /* ...     - variadic parameter marker (args: ...dyn Display) */
@@ -98,6 +100,7 @@ typedef enum {
 
     /* --- Punctuation / structure --- */
     TK_ARROW,        /* -> (specifies a function's return type) */
+    TK_FATARROW,     /* => (separates a match arm's pattern from its body) */
     TK_LPAREN,       /* (  */
     TK_RPAREN,       /* )  */
     TK_LBRACE,       /* {  */
