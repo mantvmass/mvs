@@ -15,3 +15,17 @@ export func mvs_sum_to(n: i64) -> i64 {
     for (let i: i64 = 1; i <= n; i++) { total += i; }
     return total;
 }
+
+// f32 across the boundary: an export takes/returns C single precision
+export func mvs_scale(x: f32, k: f32) -> f32 { return x * k; }
+
+// f32 in stack positions 5-6 (e, f): the C caller writes single-precision slots
+export func mvs_sumf(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> f32 {
+    return a + b + c + d + e + f;
+}
+
+// MVS calling its own export: the call site must use the same C convention
+// (narrow f32 arguments, widen the f32 return) as an external caller would
+export func mvs_scale_twice(x: f32) -> f32 {
+    return mvs_scale(mvs_scale(x, 2.0), 2.0);
+}

@@ -25,27 +25,9 @@ jobs:
       - name: Build compiler
         run: clang -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
 
-      # run the full test suite: golden output diffs, compile-only, and compile-fail
-      # (expected-error) tests; see tests/run.ps1
+      # run the full test suite: golden output diffs, compile-only, C interop (both
+      # directions, linked with clang and diffed), and compile-fail (expected-error)
+      # tests; see tests/run.ps1
       - name: Run test suite
         run: powershell -ExecutionPolicy Bypass -File tests/run.ps1
-
-      # C interop direction 1: C calls functions exported from MVS
-      - name: C interop (C calls MVS)
-        run: |
-          .\mvs.exe examples/07_c_interop/export_lib.mvs -c
-          '#include <stdio.h>
-          int mvs_square(int); long long mvs_sum_to(long long);
-          int main(void){ printf("%d %lld\n", mvs_square(9), mvs_sum_to(100)); return 0; }' | Out-File -Encoding ascii uselib.c
-          clang uselib.c examples/07_c_interop/export_lib.obj -o uselib.exe -llegacy_stdio_definitions
-          .\uselib.exe
-          if ($LASTEXITCODE -ne 0) { throw "C interop (C calls MVS) failed" }
-
-      # C interop direction 2: MVS calls functions from a .c file
-      - name: C interop (MVS calls C)
-        run: |
-          .\mvs.exe examples/07_c_interop/use_c.mvs -c
-          clang examples/07_c_interop/use_c.obj examples/07_c_interop/mathops.c -o use_c.exe -llegacy_stdio_definitions
-          .\use_c.exe
-          if ($LASTEXITCODE -ne 0) { throw "C interop (MVS calls C) failed" }
 

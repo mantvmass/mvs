@@ -1,0 +1,5 @@
+mvs_square(6)  = 36
+mvs_sum_to(100) = 5050
+mvs_scale(1.5, 4) = 6.00
+mvs_sumf = 23.00
+mvs_scale_twice(1.25) = 5.00

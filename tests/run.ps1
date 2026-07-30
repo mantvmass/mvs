@@ -145,6 +145,61 @@ foreach ($t in $compileOnly) {
     }
 }
 
+# C interop: produce the .obj, link the C side with clang, run, and diff golden output.
+# This exercises the f32 single<->double conversions across the C boundary in both directions.
+$interopTests = @(
+    @{ name = "interop_use_c";
+       mvs = "examples\07_c_interop\use_c.mvs";
+       link = "examples\07_c_interop\use_c.obj examples\07_c_interop\mathops.c" },
+    @{ name = "interop_export_lib";
+       mvs = "examples\07_c_interop\export_lib.mvs";
+       link = "examples\07_c_interop\caller.c examples\07_c_interop\export_lib.obj" }
+)
+
+Write-Host "=== c-interop (link with clang, golden output) ===" -ForegroundColor Cyan
+foreach ($t in $interopTests) {
+    $exe = "$($t.name).exe"
+    cmd /c "`"$mvs`" `"$($t.mvs)`" -c >nul 2>&1"
+    if ($LASTEXITCODE -ne 0) {
+        $fail++; $failures += "$($t.name): mvs -c failed (exit $LASTEXITCODE)"
+        Write-Host "  FAIL  $($t.name) (mvs -c)" -ForegroundColor Red
+        continue
+    }
+    cmd /c "clang $($t.link) -o $exe -llegacy_stdio_definitions >nul 2>&1"
+    if ($LASTEXITCODE -ne 0) {
+        $fail++; $failures += "$($t.name): clang link failed (exit $LASTEXITCODE)"
+        Write-Host "  FAIL  $($t.name) (link)" -ForegroundColor Red
+        continue
+    }
+    $out = cmd /c ".\$exe 2>&1" | Out-String
+    $code = $LASTEXITCODE
+    Remove-Item $exe -Force -ErrorAction SilentlyContinue
+
+    $goldFile = Join-Path $expectedDir "$($t.name).txt"
+    if ($Update) {
+        [IO.File]::WriteAllText($goldFile, (Normalize $out) + "`n")
+        $updated++
+        Write-Host "  GOLD  $($t.name) (exit $code)" -ForegroundColor Yellow
+        continue
+    }
+    if (-not (Test-Path $goldFile)) {
+        $fail++; $failures += "missing golden file for $($t.name) (run with -Update)"
+        Write-Host "  FAIL  $($t.name) (no golden file)" -ForegroundColor Red
+        continue
+    }
+    $want = Normalize ([IO.File]::ReadAllText($goldFile))
+    $got = Normalize $out
+    if ($got -ne $want -or $code -ne 0) {
+        $fail++; $failures += "output mismatch in $($t.name) (exit $code)"
+        Write-Host "  FAIL  $($t.name)" -ForegroundColor Red
+        Write-Host "    --- expected ---"; Write-Host $want
+        Write-Host "    --- got (exit $code) ---"; Write-Host $got
+    } else {
+        $pass++
+        Write-Host "  ok    $($t.name)"
+    }
+}
+
 Write-Host "=== compile-fail (expected errors) ===" -ForegroundColor Cyan
 $failDir = Join-Path $PSScriptRoot "compile_fail"
 if (Test-Path $failDir) {

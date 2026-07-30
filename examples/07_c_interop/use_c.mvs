@@ -12,10 +12,13 @@ import { io } from "std";
 extern func c_add(a: i32, b: i32) -> i32;
 extern func c_gcd(a: i32, b: i32) -> i32;
 extern func c_hypot(x: f64, y: f64) -> f64;
+extern func c_mixf(a: i32, b: f32, c: f64, d: i32, e: f32, f: f32) -> f32;
 
 func main() -> i8 {
     io.out("c_add(20, 22) = {}", c_add(20, 22));        // 42
     io.out("c_gcd(48, 36) = {}", c_gcd(48, 36));        // 12
     io.out("c_hypot(3.0, 4.0) = {}", c_hypot(3.0, 4.0)); // 5.0
+    // f32 in registers AND in stack positions 5-6 (e, f) across the C boundary
+    io.out("c_mixf = {}", c_mixf(1, 2.5, 3.5, 4, 5.25, 6.25)); // 22.5
     return 0;
 }

@@ -918,9 +918,9 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 
 ### C interop / float
 
-- Floats pass/return through **xmm** per the ABI; C math works for both `f64` (`sqrt`/`pow`) and `f32` (`sqrtf`).
-  Caveat: an `export`ed MVS function with an `f32` parameter, called from C, reads the bits wrong (use `f64` for
-  exports).
+- Floats pass/return through **xmm** per the ABI; C math works for both `f64` (`sqrt`/`pow`) and `f32` (`sqrtf`),
+  in every ABI position (registers and stack slots 5+). Export functions use the C single-precision convention
+  for `f32` consistently, whether the caller is C or MVS code.
 - **extern/export names must not collide with NASM reserved words** (`abs`, `rel`, `seg`, `wrt`), or they won't assemble.
 
 ### Target / output format
@@ -965,6 +965,8 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
 - `const` enforcement (initializer required, writes are compile errors); default parameter values
   (functions + methods, compile-time filled); compound assignment evaluates its lvalue exactly once;
   `**` binds tighter than unary minus; import-form mixing is reported instead of silently deduped.
+- `f32` complete across the C boundary: narrowed/widened in every ABI position including stack
+  slots 5+, for extern C calls, C callers of exports, and MVS callers of its own exports.
 - Golden test suite (`make test`): run-pass output diffs, compile-only, and compile-fail
   (expected-error) tests in `tests/`, run by CI.
 
@@ -995,7 +997,6 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 
 ### Known minor limits (low risk, not yet fixed)
 
-- An extern C function taking `f32` in stack position ≥4 isn't narrowed double→single yet (registers 0-3 are done).
 - `[`/`]` are lexed but there's no array type; generic params beyond 4 are clamped.
 - Function pointers (v1): the type doesn't take varargs in its signature; can't overload by function-pointer type
   (all mangle to `func`); assignment to a func-ptr variable is type-checked leniently; pointing a func-ptr at a C

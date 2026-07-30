@@ -942,23 +942,34 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
     /* 2) reserve the call area, then move values from temps to their destinations (registers/stack) */
     int arg_start = (has_sret ? 1 : 0) + nself;  /* index of the first value that is an actual argument */
     fprintf(g->out, "    sub rsp, %d\n", callspace);
+    /* export functions use the C convention for f32 (single precision) even when the caller is
+     * MVS code, so the same symbol behaves identically for C and MVS callers */
+    int c_abi = sig->is_extern || sig->is_export;
     for (int i = 0; i < total; i++) {
         int srcoff = callspace + (total + extra - 1 - i) * 16; /* +extra: the function-address temp on top */
+        int pidx = i - arg_start;                           /* argument index (excluding sret/self) */
+        int pi = pidx + poff;                               /* parameter index in sig (including self) */
+        int p_is_f32 = i >= arg_start && pi < sig->nitems &&
+                       sig->items[pi]->type == TYPE_F32 && sig->items[pi]->ptr == 0;
         fprintf(g->out, "    mov rax, [rsp + %d]\n", srcoff);
-        if (i < 4) fprintf(g->out, "    mov %s, rax\n", regs[i]);
-        else       fprintf(g->out, "    mov [rsp + %d], rax\n", 32 + (i - 4) * 8);
+        if (i < 4) {
+            fprintf(g->out, "    mov %s, rax\n", regs[i]);
+        } else {
+            /* stack argument: a C-side f32 slot holds single-precision bits, so narrow first
+             * (register positions get the same narrowing below via cvtsd2ss on the xmm) */
+            if (c_abi && p_is_f32)
+                fprintf(g->out, "    movq xmm4, rax\n    cvtsd2ss xmm4, xmm4\n    movd eax, xmm4\n");
+            fprintf(g->out, "    mov [rsp + %d], rax\n", 32 + (i - 4) * 8);
+        }
         /* float arguments must also be in xmm registers; decided by the parameter type (after coercion)
          * varargs (beyond the declared params, e.g. printf) use the argument's type instead */
         if (i >= arg_start && i < 4) {
-            int pidx = i - arg_start;
-            int pi = pidx + poff;                           /* actual parameter index (including self) */
             int is_f;
             if (pi < sig->nitems) is_f = is_float_type(sig->items[pi]->type) && sig->items[pi]->ptr == 0;
             else { ExprType at = type_of(g, n->items[pidx]); is_f = is_float_type(at.base) && at.ptr == 0; }
             if (is_f) {
                 fprintf(g->out, "    movq xmm%d, rax\n", i);
-                if (sig->is_extern && pi < sig->nitems &&
-                    sig->items[pi]->type == TYPE_F32 && sig->items[pi]->ptr == 0)
+                if (c_abi && p_is_f32)
                     fprintf(g->out, "    cvtsd2ss xmm%d, xmm%d\n", i, i);
             }
         }
@@ -976,8 +987,8 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
     fprintf(g->out, "    add rsp, %d\n", (total + extra) * 16); /* includes the function-address temp if indirect */
     /* float return values arrive in xmm0 -> bring them back to our convention (bit-pattern in rax) */
     if (is_float_type(sig->type) && sig->ptr == 0) {
-        if (sig->is_extern && sig->type == TYPE_F32)
-            fprintf(g->out, "    cvtss2sd xmm0, xmm0\n    movq rax, xmm0\n"); /* C returns single -> double */
+        if (c_abi && sig->type == TYPE_F32)
+            fprintf(g->out, "    cvtss2sd xmm0, xmm0\n    movq rax, xmm0\n"); /* C convention returns single -> double */
         else
             fprintf(g->out, "    movq rax, xmm0\n");
     }
@@ -1062,7 +1073,13 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
             }
         } else {
             /* the caller placed parameter 5+ on the stack at [rbp + 48 + (pos-4)*8] */
-            fprintf(g->out, "    mov rax, [rbp + %d]\n", 48 + (pos - 4) * 8);
+            if (fn->is_export && p->type == TYPE_F32 && p->ptr == 0) {
+                /* C convention: the slot holds a 4-byte single -> widen to our double bit-pattern */
+                fprintf(g->out, "    movd xmm0, dword [rbp + %d]\n    cvtss2sd xmm0, xmm0\n    movq rax, xmm0\n",
+                        48 + (pos - 4) * 8);
+            } else {
+                fprintf(g->out, "    mov rax, [rbp + %d]\n", 48 + (pos - 4) * 8);
+            }
             gen_store_var(g, psym);
         }
     }
