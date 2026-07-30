@@ -48,6 +48,38 @@ func match_evaluates_scrutinee_once() -> void {
     test.eq(total, 40);
 }
 
+// match inside a trait DEFAULT method (default bodies are cloned into impls,
+// so the desugar has to reach into trait declarations too)
+enum State { On, Off }
+
+trait Device {
+    func state(self: *Self) -> State;
+    func report(self: *Self) -> i64 {
+        let r: i64 = 0;
+        match (self.state()) {
+            State::On => { r = 1; }
+            State::Off => { r = 0; }
+        }
+        return r;
+    }
+}
+
+struct Lamp { on: bool; }
+impl Device for Lamp {
+    func state(self: *Lamp) -> State {
+        if (self.on) { return State::On; }
+        return State::Off;
+    }
+}
+
+@test
+func match_in_trait_default_method() -> void {
+    let a: Lamp = Lamp { on: true };
+    let b: Lamp = Lamp { on: false };
+    test.eq(a.report(), 1);
+    test.eq(b.report(), 0);
+}
+
 enum Mixed {
     Text(str),
     Num(f64),

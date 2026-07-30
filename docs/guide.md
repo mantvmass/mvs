@@ -79,20 +79,27 @@ src/
   lexer.{h,c}        tokenizer (hand-written, no flex)
   ast.{h,c}          AST node (one Node tagged by kind)
   parser.{h,c}       recursive-descent parser (no bison)
-  module.{h,c}       module system: resolve imports across files + std package
+  module.{h,c}       module system: imports across files + the std and core packages
+  generic.c          post-parse passes: enum/match desugar, monomorphization
+                     (functions AND structs), overload resolution, type checking
   diag.{h,c}         Rust-style diagnostics: source excerpts, carets, help notes
   codegen.{h,c}      driver: picks the backend by TargetArch
   arch/
     common.{h,c}     arch-independent: type system, struct layout, symbol table,
                      variable allocation, reachability, format strings
-    x86_64/win.c     x86-64 Windows (win64 ABI): real instructions + calling convention
-    x86_64/sysv.c    x86-64 Linux/ELF (SysV ABI): 6 GPR args + separate xmm class, no shadow space
-  main.c             CLI driving the pipeline
-std/                 standard library written in MVS (io, fs, net, string, fmt)
+    x86_64/win.c     x86-64 Windows (win64 ABI, NASM)
+    x86_64/sysv.c    x86-64 Linux/ELF (SysV ABI, NASM): 6 GPR args + xmm class, no shadow space
+    arm64/linux.c    AArch64 Linux (AAPCS64, GNU as syntax)
+  main.c             CLI driving the pipeline (+ the built-in `mvs test` runner and -O peephole)
+std/                 standard library in MVS (io, fs, net, string, fmt, math, mem,
+                     time, env, process, rand, test, option, result, vec, thread, sync)
+core/                the freestanding package (pure MVS, --nostd safe):
+                     mem, cmp, ptr, cstr, slice, bits
 ```
 
-The whole design hinges on keeping "logic" (`common.c`) separate from "instruction emission" (`win.c`).
-A new backend (say `arch/x86_64/sysv.c` for ELF/Linux) reuses `common.c` and only rewrites emission.
+The whole design hinges on keeping "logic" (`common.c` + the front-end passes)
+separate from "instruction emission" (the per-target files). A new backend reuses
+everything and only rewrites emission.
 
 ## 4. Language reference
 
@@ -1325,12 +1332,18 @@ Verified by running, not just compiling: the net loopback example round-trips re
 all three targets; C calls `mvs_square`/`mvs_sum_to` through a `.obj`; the freestanding
 `.obj` has no undefined symbols.
 
+Late additions, each detailed in its own language-reference section: generic
+structs + `Option`/`Result`/`Vec<T>` (4.15), threads + Mutex (4.16), Rust-style
+enums + exhaustive `match` (4.17), the `core` package and `::` paths (4.12),
+`*.test.mvs` testing (4.14), and the `-O` peephole on all three backends.
+
 ### Remaining
 
 See [../ROADMAP.md](../ROADMAP.md) for the full plan. Next up:
 
-- **Generic structs** (`struct Vec<T>`): the prerequisite for `Option`/`Result`, real
-  collections, and the freestanding `core` library.
+- `match` phase 2: match as an EXPRESSION, nested patterns, generic enums
+  (which would let `Option`/`Result` become true enums).
+- A hash map on top of `Vec<T>`.
 - macOS target (Mach-O + its SysV quirks).
 
 Note on io.out: the library path is COMPLETE. `fmt.outf(f, args...)` is a pure-MVS formatted

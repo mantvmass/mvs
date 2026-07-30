@@ -37,12 +37,15 @@ func main() -> i8 {
 }
 ```
 
-The language has structs, methods, traits (static and `dyn` dispatch), generics,
-overloading, real `[T; N]` arrays, 128-bit integers, conditional compilation
-(`@compile`), a small std library, C interop in both directions, Rust-style
-diagnostics, and a freestanding `--nostd` mode for OS work. Three backends
-(x86-64 Windows, x86-64 Linux/ELF, AArch64 Linux) share one
-architecture-independent core and are CI-tested against the same golden outputs.
+The language has structs, methods, traits (static and `dyn` dispatch), generics
+(functions AND structs: `Vec<i64>::new()`), Rust-style enums with exhaustive
+`match`, `Option`/`Result`, threads + Mutex, overloading, real `[T; N]` arrays,
+128-bit integers, conditional compilation (`@compile`), a std library plus a
+freestanding `core` package, built-in testing (`mvs test` + `*.test.mvs`),
+C interop in both directions, Rust-style diagnostics, and a `--nostd` mode for
+OS work. Three backends (x86-64 Windows, x86-64 Linux/ELF, AArch64 Linux) share
+one architecture-independent core and are CI-tested against the same golden
+outputs.
 
 ## Install
 

@@ -651,18 +651,28 @@ int desugar_enums(Node *prog) {
             break;
         }
         if (e->nitems > 64) {
+            /* do NOT register: later stages index per-variant arrays by 64 */
             diag_print(e->file, e->line, e->col, "error", "enum '%s' has too many variants (max 64)", e->name);
             de_err++;
+            continue;
         }
         g_enum_tab[g_num_enums].name = e->name;
         g_enum_tab[g_num_enums].decl = e;
         g_num_enums++;
     }
-    /* 2) desugar match statements everywhere (incl. generic templates and methods) */
+    /* 2) desugar match statements everywhere: function bodies, global
+     * initializers, AND trait default-method bodies (those are cloned into
+     * impls later, so a match left inside one would reach codegen raw) */
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
         if (f->kind == ND_FUNC && f->body) f->body = de_walk(f->body);
         else if (f->kind == ND_VAR_DECL && f->operand) f->operand = de_walk(f->operand);
+        else if (f->kind == ND_TRAIT) {
+            for (int j = 0; j < f->nitems; j++) {
+                Node *m = f->items[j];
+                if (m->kind == ND_FUNC && m->body) m->body = de_walk(m->body);
+            }
+        }
     }
     /* 3) turn each enum declaration into a tagged struct + constructors */
     for (int i = 0; i < prog->nitems; i++) {
