@@ -1,0 +1,4 @@
+one os variant kept
+one arch variant kept
+pair = 7
+width = 80

@@ -42,6 +42,7 @@ $runPass = @(
     "examples/01_language/arrays",
     "examples/01_language/int128",
     "examples/01_language/shadow",
+    "examples/01_language/compile_attr",
     "examples/02_functions/generics",
     "examples/02_functions/overload",
     "examples/02_functions/recursion",
@@ -58,7 +59,10 @@ $runPass = @(
     "examples/06_modules/use_import",
     "examples/08_stdlib/io_demo",
     "examples/08_stdlib/floats",
-    "examples/08_stdlib/lib_out"
+    "examples/08_stdlib/lib_out",
+    "examples/08_stdlib/lib_math",
+    "examples/08_stdlib/lib_mem",
+    "examples/08_stdlib/net_loop"
 )
 
 # fixed command-line arguments for examples that read argv
@@ -217,12 +221,16 @@ $elfTests = @(
     "examples/demo",
     "examples/01_language/arrays",
     "examples/01_language/int128",
+    "examples/01_language/compile_attr",
     "examples/02_functions/defaults",
     "examples/03_structs/methods",
     "examples/04_traits/dynamic",
     "examples/05_strings/strings",
     "examples/08_stdlib/floats",
-    "examples/08_stdlib/lib_out"
+    "examples/08_stdlib/lib_out",
+    "examples/08_stdlib/lib_math",
+    "examples/08_stdlib/lib_mem",
+    "examples/08_stdlib/net_loop"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan
 foreach ($ex in $elfTests) {

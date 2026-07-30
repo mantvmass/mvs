@@ -1,0 +1,6 @@
+//~ ERROR: unknown @compile key 'target_cpu'
+// only target_os and target_arch are valid @compile keys
+@compile(target_cpu = "ryzen")
+func f() -> i32 { return 1; }
+
+func main() -> i8 { return 0; }

@@ -1,0 +1,22 @@
+// std/net loopback round trip: server and client in one process.
+// Works on every target: std/net selects Winsock or POSIX sockets per OS
+// with @compile(target_os = ...). connect() to a listening socket completes
+// immediately on loopback, so a single thread can play both sides.
+import { io, net } from "std";
+
+func main() -> i8 {
+    let server: TcpServer = net.TcpServer("127.0.0.1", 47653);
+    let client: TcpSocket = net.TcpClient("127.0.0.1", 47653);
+    let conn: TcpSocket = server.accept();
+
+    client.send("ping");
+    io.out("server got {}", conn.recv());
+
+    conn.send("pong");
+    io.out("client got {}", client.recv());
+
+    client.close();
+    conn.close();
+    server.close();
+    return 0;
+}

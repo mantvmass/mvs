@@ -1,0 +1,6 @@
+filled = AAAAAAA
+zeroed = 0 0 0
+eq after copy = 1
+eq after edit = 0
+swapped = BAAAAAA AAAAAAA
+grown = AAAAAAA

@@ -43,6 +43,8 @@ Node *node_clone(Node *n) {
     c->type_name = dup_or_null(n->type_name);
     c->ns = dup_or_null(n->ns);
     c->mod = dup_or_null(n->mod);
+    c->cfg_os = dup_or_null(n->cfg_os);
+    c->cfg_arch = dup_or_null(n->cfg_arch);
     for (int i = 0; i < n->ngen; i++) { c->gen[i] = dup_or_null(n->gen[i]); c->gen_bound[i] = dup_or_null(n->gen_bound[i]); }
     /* deep-copy child nodes */
     c->lhs = node_clone(n->lhs);

@@ -289,6 +289,7 @@ Token lexer_next(Lexer *lx) {
             if (peek(lx) == ':') { advance(lx); return simple_token(TK_COLONCOLON, "::", line, col); } /* :: associated function call */
             return simple_token(TK_COLON, ":", line, col);
         case ',': advance(lx); return simple_token(TK_COMMA, ",", line, col);
+        case '@': advance(lx); return simple_token(TK_AT, "@", line, col);
         case '.':
             advance(lx);
             if (peek(lx) == '.' && peek_next(lx) == '.') {   /* '...' marks a variadic parameter */

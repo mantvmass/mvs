@@ -499,15 +499,33 @@ static void sig_call(Node *prog, Node *call, Bind *map, int nmap, char *buf, int
     }
 }
 
-/* Group of functions sharing a name (overload set): sig = exact, catsig = category (fallback) */
-typedef struct { char *orig; Node *defs[16]; char sig[16][SIGCAP]; char catsig[16][SIGCAP]; int n; } OvSet;
+/* Compare namespaces (NULL counts as "") */
+static int ns_eq(const char *a, const char *b) {
+    if (!a) a = "";
+    if (!b) b = "";
+    return strcmp(a, b) == 0;
+}
 
-/* Is this function eligible for overloading (a plain global function) */
+/* Group of functions sharing a namespace + name (overload set): sig = exact, catsig = category (fallback) */
+typedef struct { char *ns; char *orig; Node *defs[16]; char sig[16][SIGCAP]; char catsig[16][SIGCAP]; int n; } OvSet;
+
+/* Is this function eligible for overloading (a plain function, possibly module-namespaced) */
 static int ov_eligible(Node *f) {
     return f->kind == ND_FUNC && f->body && f->ngen == 0 && !f->variadic &&
            !f->is_export && !f->is_method && !f->is_extern &&
-           (f->ns == NULL || f->ns[0] == 0) && strcmp(f->name, "main") != 0;
+           strcmp(f->name, "main") != 0;
 }
+
+/* Find the overload set for (ns, name); -1 if none */
+static int ov_find(OvSet *sets, int nsets, const char *ns, const char *name) {
+    for (int s = 0; s < nsets; s++)
+        if (ns_eq(sets[s].ns, ns) && strcmp(sets[s].orig, name) == 0) return s;
+    return -1;
+}
+
+/* Module namespace of the function whose body is being scanned (for unqualified calls:
+ * inside std/math, abs(x) must see math's overload set before the global one) */
+static const char *ov_cur_mod = "";
 
 /* Scan for calls to overloaded functions and rename them to match the argument signature (scope-aware) */
 static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int nsets) {
@@ -531,9 +549,22 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
     scan_ov(prog, n->body, map, nmap, sets, nsets);
     for (int i = 0; i < n->nitems; i++) scan_ov(prog, n->items[i], map, nmap, sets, nsets);
 
-    if (n->kind == ND_CALL && n->operand && n->operand->kind == ND_IDENT) {
-        for (int s = 0; s < nsets; s++) {
-            if (sets[s].n < 2 || strcmp(sets[s].orig, n->operand->name) != 0) continue;
+    if (n->kind == ND_CALL && n->operand) {
+        Node *callee = n->operand;
+        int s = -1;
+        if (callee->kind == ND_IDENT) {
+            /* unqualified call: the enclosing module's overload set wins, then the global one */
+            s = ov_find(sets, nsets, ov_cur_mod, callee->name);
+            if (s < 0) s = ov_find(sets, nsets, "", callee->name);
+        } else if (callee->kind == ND_MEMBER && callee->operand &&
+                   callee->operand->kind == ND_IDENT && callee->name) {
+            /* ns.f(...): the base must be a module namespace, not a variable (obj.method) */
+            int bound = 0;
+            for (int i = *nmap - 1; i >= 0; i--)
+                if (strcmp(map[i].name, callee->operand->name) == 0) { bound = 1; break; }
+            if (!bound) s = ov_find(sets, nsets, callee->operand->name, callee->name);
+        }
+        if (s >= 0 && sets[s].n >= 2) {
             char wx[SIGCAP], wc[SIGCAP];
             sig_call(prog, n, map, *nmap, wx, 1);   /* exact signature */
             sig_call(prog, n, map, *nmap, wc, 0);   /* category signature (fallback) */
@@ -552,24 +583,16 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
                                "ambiguous call to '%s' with argument types (%s): multiple width overloads match",
                                sets[s].orig, wx);
                     diag_help("disambiguate with an explicit cast, e.g. f(x as i32)");
-                    break;
+                    return;
                 }
             }
-            if (found >= 0) { free(n->operand->name); n->operand->name = strdup(sets[s].defs[found]->name); }
+            if (found >= 0) { free(callee->name); callee->name = strdup(sets[s].defs[found]->name); }
             else {
                 diag_print(n->file, n->line, n->col, "error",
                            "no overload of '%s' matches argument types (%s)", sets[s].orig, wx);
             }
-            break;
         }
     }
-}
-
-/* Compare namespaces (NULL counts as "") */
-static int ns_eq(const char *a, const char *b) {
-    if (!a) a = "";
-    if (!b) b = "";
-    return strcmp(a, b) == 0;
 }
 
 /* Check top-level duplicates: repeated struct/trait names, and functions with the same ns+name+exact
@@ -607,16 +630,15 @@ int check_duplicates(Node *prog) {
 }
 
 void resolve_overloads(Node *prog) {
-    static OvSet sets[128]; int nsets = 0;
-    /* 1) group functions by their original name */
+    static OvSet sets[256]; int nsets = 0;
+    /* 1) group functions by namespace + original name (each module has its own sets) */
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
         if (!ov_eligible(f)) continue;
-        int si = -1;
-        for (int s = 0; s < nsets; s++) if (strcmp(sets[s].orig, f->name) == 0) { si = s; break; }
+        int si = ov_find(sets, nsets, f->ns, f->name);
         if (si < 0) {
-            if (nsets >= 128) { fprintf(stderr, "codegen error: too many distinct function names for overloading\n"); break; }
-            si = nsets++; sets[si].orig = strdup(f->name); sets[si].n = 0;
+            if (nsets >= 256) { fprintf(stderr, "codegen error: too many distinct function names for overloading\n"); break; }
+            si = nsets++; sets[si].ns = strdup(f->ns ? f->ns : ""); sets[si].orig = strdup(f->name); sets[si].n = 0;
         }
         if (sets[si].n < 16) {
             sets[si].defs[sets[si].n] = f;
@@ -643,7 +665,9 @@ void resolve_overloads(Node *prog) {
             Bind map[512]; int nmap = 0;
             seed_globals(prog, map, &nmap);
             for (int j = 0; j < f->nitems; j++) if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
+            ov_cur_mod = f->mod ? f->mod : "";   /* unqualified calls inside a module see its sets first */
             scan_ov(prog, f->body, map, &nmap, sets, nsets);
+            ov_cur_mod = "";
         } else if (f->kind == ND_VAR_DECL && f->operand) {
             Bind map[512]; int nmap = 0;   /* use a real map (avoids NULL deref if the init has a block/decl) */
             seed_globals(prog, map, &nmap);

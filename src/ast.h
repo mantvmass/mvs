@@ -124,6 +124,12 @@ typedef struct Node {
     int           ngen;       /* number of generic type parameters (0 = normal function) */
     char         *ns;         /* namespace for the "symbol label" (module for plain funcs, struct name for methods) */
     char         *mod;        /* namespace of the "module" the function belongs to; resolves unqualified calls inside methods */
+
+    /* conditional compilation: set by an @compile(...) attribute on a top-level item.
+     * NULL = unconditional. The module loader drops items whose values do not match
+     * the current target (AND semantics when both are set). */
+    char         *cfg_os;     /* required target OS, e.g. "windows" or "linux" */
+    char         *cfg_arch;   /* required target arch, e.g. "x86_64" or "aarch64" */
 } Node;
 
 /* --- node construction helpers --- */

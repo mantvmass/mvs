@@ -1,0 +1,58 @@
+/*
+ * std/mem.mvs - heap allocation and raw memory operations
+ *
+ * Thin, typed wrappers over the C runtime allocator and mem* functions,
+ * modeled on the planned core::mem (see ROADMAP.md). Everything here is
+ * CRT-backed, so it is identical on every supported target.
+ *
+ * Example:
+ *     import { mem } from "std";
+ *     let p: *u8 = mem.alloc(64);
+ *     mem.zero(p, 64);
+ *     mem.dealloc(p);
+ */
+
+// --- foreign functions from the C runtime ---
+extern func malloc(n: usize) -> *u8;
+extern func calloc(count: usize, size: usize) -> *u8;
+extern func realloc(p: *u8, n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+extern func memmove(dst: *u8, src: *u8, n: usize) -> *u8;
+extern func memset(p: *u8, value: i32, n: usize) -> *u8;
+extern func memcmp(a: *u8, b: *u8, n: usize) -> i32;
+
+// allocate n bytes (uninitialized); returns the pointer
+func alloc(n: usize) -> *u8 { return malloc(n); }
+
+// allocate n bytes filled with zero
+func alloc_zeroed(n: usize) -> *u8 { return calloc(n, 1); }
+
+// grow or shrink an allocation to n bytes, preserving contents
+func grow(p: *u8, n: usize) -> *u8 { return realloc(p, n); }
+
+// release an allocation
+func dealloc(p: *u8) -> void { free(p); }
+
+// copy n bytes from src to dst; the ranges MAY overlap (memmove semantics)
+func copy(dst: *u8, src: *u8, n: usize) -> void { memmove(dst, src, n); }
+
+// fill n bytes at p with the given byte value
+func set(p: *u8, value: u8, n: usize) -> void { memset(p, value as i32, n); }
+
+// fill n bytes at p with zero
+func zero(p: *u8, n: usize) -> void { memset(p, 0, n); }
+
+// are the two n-byte regions byte-for-byte equal?
+func eq(a: *u8, b: *u8, n: usize) -> bool { return memcmp(a, b, n) == 0; }
+
+// exchange the contents of two non-overlapping n-byte regions
+func swap(a: *u8, b: *u8, n: usize) -> void {
+    let i: usize = 0;
+    while (i < n) {
+        let t: u8 = *(a + i);
+        *(a + i) = *(b + i);
+        *(b + i) = t;
+        i = i + 1;
+    }
+}

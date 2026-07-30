@@ -34,6 +34,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `arrays.mvs` | `[T; N]` arrays: literals, indexing, `.len`, structs, decay to `*T` |
 | `int128.mvs` | full 128-bit arithmetic: mul/div/mod past 64 bits, u128 max, shifts |
 | `shadow.mvs` | scope shadowing: blocks, type-changing shadows, loop variables |
+| `compile_attr.mvs` | conditional compilation: `@compile(target_os/target_arch)` on funcs and globals |
 
 ## 02_functions: functions / generics / overloading
 
@@ -91,8 +92,11 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `io_demo.mvs` | io.out in every form (`{}`, `{:x}`, struct, many args) + io.print |
 | `floats.mvs` | floating point + C math (`sqrt`) |
 | `files.mvs` | `fs.write`/`fs.read` + `io.in` |
-| `net_client.mvs` / `net_server.mvs` | TCP over Winsock (`net.TcpClient`/`TcpServer`) |
+| `net_client.mvs` / `net_server.mvs` | TCP client/server skeletons (`net.TcpClient`/`TcpServer`) |
+| `net_loop.mvs` | TCP loopback round trip in one process; cross-platform sockets via `@compile` |
 | `lib_out.mvs` | `fmt.outf`: io.out as a pure-MVS library (variadic `...dyn Display`, impl-on-primitive) |
+| `lib_math.mvs` | `std/math`: libm wrappers + overloaded `abs`/`min`/`max`/`clamp`, `gcd`/`lcm`/`ipow` |
+| `lib_mem.mvs` | `std/mem`: alloc/copy/set/eq/swap/grow over raw `*u8` buffers |
 
 ## 09_no_std: freestanding (OS / bare-metal, `--nostd`)
 

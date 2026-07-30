@@ -108,7 +108,8 @@ typedef enum {
     TK_COLON,        /* :  */
     TK_COLONCOLON,   /* :: (associated function call, e.g. Point::new) */
     TK_COMMA,        /* ,  */
-    TK_DOT           /* .  */
+    TK_DOT,          /* .  */
+    TK_AT            /* @  (attribute marker, e.g. @compile(target_os = "linux")) */
 } TokenType;
 
 /* Structure of a single Token */

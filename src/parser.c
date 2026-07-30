@@ -82,7 +82,7 @@ static void synchronize_top(Parser *p) {
             case TK_EOF:
             case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT:
             case TK_IMPORT: case TK_EXTERN: case TK_EXPORT:
-            case TK_LET: case TK_CONST:
+            case TK_LET: case TK_CONST: case TK_AT:
                 return;
             default:
                 advance(p);
@@ -971,7 +971,59 @@ static Node *parse_struct(Parser *p) {
     return n;
 }
 
-/* program := (import | struct_decl | func_def | extern_func | global var_decl ';')* */
+/* attribute := '@' 'compile' '(' key '=' STRING (',' key '=' STRING)* ')'
+ * key := 'target_os' | 'target_arch'
+ * The only attribute today is @compile; it gates the NEXT top-level item so it is
+ * kept only when the values match the current target. Values are free strings,
+ * but unknown ones are warned about (in the entry file) since they never match. */
+static void parse_attribute(Parser *p, char **os, char **arch) {
+    advance(p); /* consume '@' */
+    if (!check(p, TK_IDENT) || strcmp(p->cur.lexeme, "compile") != 0) {
+        error(p, "unknown attribute; only @compile(...) is supported");
+        return;
+    }
+    advance(p); /* consume 'compile' */
+    expect(p, TK_LPAREN, "expected '(' after @compile");
+    do {
+        if (!check(p, TK_IDENT)) {
+            error(p, "expected 'target_os' or 'target_arch' inside @compile(...)");
+            return;
+        }
+        char key[32];
+        snprintf(key, sizeof(key), "%s", p->cur.lexeme);
+        int kline = p->cur.line, kcol = p->cur.col;
+        advance(p);
+        expect(p, TK_ASSIGN, "expected '=' after the @compile key");
+        if (!check(p, TK_STRING)) {
+            error(p, "expected a string value, e.g. @compile(target_os = \"linux\")");
+            return;
+        }
+        const char *val = p->cur.lexeme;
+        if (strcmp(key, "target_os") == 0) {
+            if (strcmp(val, "windows") != 0 && strcmp(val, "linux") != 0 && diag_is_primary(p->lx->filename))
+                diag_print(p->lx->filename, p->cur.line, p->cur.col, "warning",
+                           "unknown target_os \"%s\" (known: \"windows\", \"linux\"); this item will never be compiled", val);
+            free(*os);
+            *os = strdup(val);
+        } else if (strcmp(key, "target_arch") == 0) {
+            if (strcmp(val, "x86_64") != 0 && strcmp(val, "aarch64") != 0 && diag_is_primary(p->lx->filename))
+                diag_print(p->lx->filename, p->cur.line, p->cur.col, "warning",
+                           "unknown target_arch \"%s\" (known: \"x86_64\", \"aarch64\"); this item will never be compiled", val);
+            free(*arch);
+            *arch = strdup(val);
+        } else {
+            diag_print(p->lx->filename, kline, kcol, "syntax error",
+                       "unknown @compile key '%s'; expected 'target_os' or 'target_arch'", key);
+            p->had_error = 1;
+            p->panic = 1;
+            return;
+        }
+        advance(p); /* consume the string value */
+    } while (match(p, TK_COMMA));
+    expect(p, TK_RPAREN, "expected ')' to close @compile(...)");
+}
+
+/* program := (attribute* (import | struct_decl | func_def | extern_func | global var_decl ';'))* */
 Node *parse_program(const char *src, const char *filename, int *had_error) {
     Lexer lx;
     lexer_init(&lx, src, filename);
@@ -987,7 +1039,14 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
 
     Node *prog = node_new(ND_PROGRAM, 1);
     while (!check(&p, TK_EOF) && !p.fatal) {
-        if (check(&p, TK_IMPORT)) {
+        /* attributes gate the NEXT declaration; several @compile lines may stack */
+        char *cfg_os = NULL, *cfg_arch = NULL;
+        while (check(&p, TK_AT) && !p.fatal && !p.panic)
+            parse_attribute(&p, &cfg_os, &cfg_arch);
+        int cfg_start = prog->nitems;   /* stamp every item added by this iteration */
+        if (p.panic) {
+            /* the attribute itself failed to parse; skip stamping and recover below */
+        } else if (check(&p, TK_IMPORT)) {
             node_add_item(prog, parse_import(&p));
         } else if (check(&p, TK_FUNC)) {
             node_add_item(prog, parse_func_decl(&p, 0));
@@ -1014,6 +1073,17 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
             node_add_item(prog, n);
         } else {
             error(&p, "expected an import, function, or global declaration");
+        }
+        /* apply pending @compile attributes to everything this iteration produced
+         * (an impl block spreads several methods; all of them are gated together) */
+        if (cfg_os || cfg_arch) {
+            for (int i = cfg_start; i < prog->nitems; i++) {
+                Node *it = prog->items[i];
+                if (cfg_os && !it->cfg_os) it->cfg_os = strdup(cfg_os);
+                if (cfg_arch && !it->cfg_arch) it->cfg_arch = strdup(cfg_arch);
+            }
+            free(cfg_os);
+            free(cfg_arch);
         }
         if (p.panic) synchronize_top(&p);   /* recover and keep checking the rest of the file */
     }

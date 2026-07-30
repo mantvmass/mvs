@@ -103,10 +103,14 @@ freestanding ELF links with GNU ld for GRUB OS dev) · impl-on-primitive
 (`impl Display for i64`) · variadic `...dyn Trait` parameters (packed dyn slices) ·
 `fmt.outf` = io.out as a pure-MVS library · native Linux build + Linux CI job ·
 ARM64 backend (`--target arm64`, AAPCS64, GNU as syntax, full suite run under
-qemu-aarch64 in CI with the same goldens as x86).
+qemu-aarch64 in CI with the same goldens as x86) · conditional compilation
+`@compile(target_os/target_arch)` (filtered in the module loader) · cross-platform
+`std/net` (Winsock vs POSIX selected with `@compile`) · `std/math` + `std/mem` ·
+namespace-aware overloading (`math.abs` i64 vs f64) + `ns.func` reaching a
+module's externs (`math.fmod` -> libm).
 
-**Remaining:** see [ROADMAP.md](ROADMAP.md) (conditional compilation
-`@compile(...)` and the `core` library are next).
+**Remaining:** see [ROADMAP.md](ROADMAP.md) (generic structs -> `Option`/`Result`,
+the freestanding `core` library, macOS target).
 
 ## Project-specific cautions (full list in docs/rules.md)
 

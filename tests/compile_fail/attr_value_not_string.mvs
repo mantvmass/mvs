@@ -1,0 +1,6 @@
+//~ ERROR: expected a string value
+// @compile values must be string literals
+@compile(target_os = linux)
+func f() -> i32 { return 1; }
+
+func main() -> i8 { return 0; }

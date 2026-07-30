@@ -1,0 +1,34 @@
+// std/mem: heap allocation and raw memory operations
+import { io, mem } from "std";
+
+func main() -> i8 {
+    // alloc + set + read back (a raw *u8 prints as an address, so cast to str)
+    let p: *u8 = mem.alloc(8);
+    mem.set(p, 65, 7);          // fill with 'A'
+    *(p + 7) = 0;
+    io.out("filled = {}", p as str);   // AAAAAAA
+
+    // zeroed allocation
+    let z: *u8 = mem.alloc_zeroed(4);
+    io.out("zeroed = {} {} {}", *z, *(z + 1), *(z + 3));
+
+    // copy (overlap-safe) + eq
+    let q: *u8 = mem.alloc(8);
+    mem.copy(q, p, 8);
+    io.out("eq after copy = {}", mem.eq(p, q, 8));
+    *(q + 0) = 66;              // 'B'
+    io.out("eq after edit = {}", mem.eq(p, q, 8));
+
+    // swap two regions
+    mem.swap(p, q, 8);
+    io.out("swapped = {} {}", p as str, q as str);   // BAAAAAA AAAAAAA
+
+    // grow keeps the old contents
+    let g: *u8 = mem.grow(q, 16);
+    io.out("grown = {}", g as str);
+
+    mem.dealloc(p);
+    mem.dealloc(g);
+    mem.dealloc(z);
+    return 0;
+}

@@ -14,11 +14,15 @@
 #include "ast.h"
 
 /* Load the entry file and resolve all imports; returns an ND_PROGRAM merging every module.
- *   entry_path - the initial .mvs file
- *   stddir     - standard library folder (used when importing from a package such as "std")
- *   nostd      - 1 = freestanding mode: package imports (such as "std") are forbidden
- *   had_error  - set to 1 if an error occurred
+ *   entry_path  - the initial .mvs file
+ *   stddir      - standard library folder (used when importing from a package such as "std")
+ *   nostd       - 1 = freestanding mode: package imports (such as "std") are forbidden
+ *   target_os   - current target OS ("windows" or "linux"); items whose
+ *                 @compile(target_os = ...) does not match are dropped here
+ *   target_arch - current target arch ("x86_64" or "aarch64"); same filtering
+ *   had_error   - set to 1 if an error occurred
  */
-Node *module_load(const char *entry_path, const char *stddir, int nostd, int *had_error);
+Node *module_load(const char *entry_path, const char *stddir, int nostd,
+                  const char *target_os, const char *target_arch, int *had_error);
 
 #endif /* MVS_MODULE_H */

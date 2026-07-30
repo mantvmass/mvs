@@ -131,10 +131,14 @@ int main(int argc, char **argv) {
         snprintf(stddir, sizeof(stddir), "%s/std", exedir);
     }
 
+    /* Target identity for @compile(target_os/target_arch) filtering in the loader */
+    const char *target_os = (arch == ARCH_X86_64_WIN) ? "windows" : "linux";
+    const char *target_arch = (arch == ARCH_ARM64_LINUX) ? "aarch64" : "x86_64";
+
     /* 1+2. load the entry file + resolve all imports, then parse into one merged AST */
     diag_set_primary(input);   /* warnings are only emitted for the entry file's own code */
     int had_error = 0;
-    Node *program = module_load(input, stddir, nostd, &had_error);
+    Node *program = module_load(input, stddir, nostd, target_os, target_arch, &had_error);
     if (had_error) { fprintf(stderr, "compilation failed (parse/import errors)\n"); return 1; }
 
     /* monomorphization: turn generic functions into instances for the types actually called,

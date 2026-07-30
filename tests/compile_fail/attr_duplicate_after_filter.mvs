@@ -1,0 +1,11 @@
+//~ ERROR: duplicate function 'twice'
+// exactly one of the two gated definitions survives on ANY target, so together
+// with the ungated one there are always two 'twice' functions left: a duplicate
+@compile(target_os = "windows")
+func twice(x: i32) -> i32 { return x * 2; }
+@compile(target_os = "linux")
+func twice(x: i32) -> i32 { return x + x; }
+
+func twice(x: i32) -> i32 { return 2 * x; }
+
+func main() -> i8 { return twice(1) as i8; }

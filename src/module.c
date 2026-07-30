@@ -30,8 +30,18 @@ typedef struct {
     int         nloading;
     const char *stddir;              /* standard library folder */
     int         nostd;               /* 1 = freestanding mode (package imports like std are forbidden) */
+    const char *target_os;           /* current target OS, matched against @compile(target_os = ...) */
+    const char *target_arch;         /* current target arch, matched against @compile(target_arch = ...) */
     int         had_error;
 } Loader;
+
+/* Does this item survive @compile filtering for the current target?
+ * No attribute = always kept; both keys set = both must match (AND semantics). */
+static int cfg_matches(Loader *L, Node *it) {
+    if (it->cfg_os && strcmp(it->cfg_os, L->target_os) != 0) return 0;
+    if (it->cfg_arch && strcmp(it->cfg_arch, L->target_arch) != 0) return 0;
+    return 1;
+}
 
 /* Read a whole file into memory; returns a string (caller frees) or NULL */
 static char *read_file(const char *path) {
@@ -302,15 +312,19 @@ static void load_module(Loader *L, const char *path, const char *ns) {
 
     for (int i = 0; i < prog->nitems; i++) {
         Node *it = prog->items[i];
+        if (!cfg_matches(L, it)) continue;    /* @compile says this item is not for this target */
         if (it->kind == ND_IMPORT) {
             handle_import(L, it, dir);            /* nested import: keep loading recursively */
         } else {
-            if (ns && ns[0] && it->kind == ND_FUNC && !it->is_extern) {
-                /* Every function with a body in this module belongs to module ns (resolves internal calls) */
+            if (ns && ns[0] && it->kind == ND_FUNC) {
+                /* Every function in this module belongs to module ns. For functions with a
+                 * body this resolves internal calls; for externs it lets ns.func(...) reach
+                 * foreign functions the module declares (e.g. math.fmod -> libm fmod). */
                 it->mod = strdup(ns);
                 /* The symbol label (ns) is applied only to plain functions (called as ns.func):
-                 * - methods already use the struct name as ns; exports keep the raw name for C */
-                if (!it->is_method && !it->is_export) it->ns = strdup(ns);
+                 * - methods already use the struct name as ns; exports keep the raw name for C
+                 * - externs keep the raw C symbol name */
+                if (!it->is_extern && !it->is_method && !it->is_export) it->ns = strdup(ns);
             }
             node_add_item(L->result, it);
         }
@@ -330,12 +344,15 @@ static void load_module(Loader *L, const char *path, const char *ns) {
     }
 }
 
-Node *module_load(const char *entry_path, const char *stddir, int nostd, int *had_error) {
+Node *module_load(const char *entry_path, const char *stddir, int nostd,
+                  const char *target_os, const char *target_arch, int *had_error) {
     Loader L;
     memset(&L, 0, sizeof(L));
     L.result = node_new(ND_PROGRAM, 1);
     L.stddir = stddir;
     L.nostd = nostd;
+    L.target_os = target_os;
+    L.target_arch = target_arch;
 
     /* The entry file loads with an empty namespace (function names used directly, contains main) */
     load_module(&L, entry_path, "");

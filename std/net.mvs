@@ -1,9 +1,11 @@
 /*
  * std/net.mvs - the net (TCP networking) module, Rust style: struct + method
  *
- * Uses Windows Winsock2 (the compiler links ws2_32 automatically)
- * Status: experimental. The structures and Winsock calls are complete,
- *         but real testing needs a server/client on the other end.
+ * Cross-platform: on Windows it uses Winsock2 (the compiler links ws2_32
+ * automatically); on Linux it uses the plain POSIX socket API from libc.
+ * The BSD socket names (socket/connect/bind/listen/accept/send/recv, htons,
+ * inet_addr) are identical on both, so only startup and close differ; those
+ * are selected per target with @compile(target_os = ...).
  *
  * Example (client):
  *     import { net } from "std";
@@ -38,8 +40,7 @@ struct TcpServer {
     fd: usize;     // listening socket handle
 }
 
-// --- foreign functions from Winsock (ws2_32) and the C runtime ---
-extern func WSAStartup(version: u16, data: *u8) -> i32;
+// --- foreign functions: BSD socket API (same names on Winsock and POSIX) ---
 extern func socket(family: i32, kind: i32, protocol: i32) -> usize;
 extern func connect(s: usize, addr: *u8, addrlen: i32) -> i32;
 extern func bind(s: usize, addr: *u8, addrlen: i32) -> i32;
@@ -47,17 +48,50 @@ extern func listen(s: usize, backlog: i32) -> i32;
 extern func accept(s: usize, addr: *u8, addrlen: *u8) -> usize;
 extern func send(s: usize, buf: str, len: i32, flags: i32) -> i32;
 extern func recv(s: usize, buf: *u8, len: i32, flags: i32) -> i32;
-extern func closesocket(s: usize) -> i32;
 extern func htons(value: u16) -> u16;
+extern func setsockopt(s: usize, level: i32, optname: i32, optval: *i32, optlen: i32) -> i32;
 extern func inet_addr(ip: str) -> u32;
 extern func strlen(s: str) -> usize;
 extern func malloc(n: usize) -> *u8;
 
-// initialize Winsock (safe to call repeatedly)
+// --- per-target foreign functions ---
+@compile(target_os = "windows")
+extern func WSAStartup(version: u16, data: *u8) -> i32;
+@compile(target_os = "windows")
+extern func closesocket(s: usize) -> i32;
+@compile(target_os = "linux")
+extern func close(s: usize) -> i32;
+
+// initialize the socket subsystem (safe to call repeatedly)
+@compile(target_os = "windows")
 func startup() -> i32 {
     let data: *u8 = malloc(512);   // WSADATA buffer
     return WSAStartup(514, data);  // 514 = 0x0202 = version 2.2
 }
+@compile(target_os = "linux")
+func startup() -> i32 {
+    return 0;                      // POSIX sockets need no initialization
+}
+
+// close a socket handle (Winsock has its own close function; POSIX uses close)
+@compile(target_os = "windows")
+func close_fd(s: usize) -> i32 {
+    return closesocket(s);
+}
+@compile(target_os = "linux")
+func close_fd(s: usize) -> i32 {
+    return close(s);
+}
+
+// socket option constants differ between Winsock and Linux
+@compile(target_os = "windows")
+func sol_socket() -> i32 { return 65535; }    // SOL_SOCKET = 0xFFFF
+@compile(target_os = "windows")
+func so_reuseaddr() -> i32 { return 4; }      // SO_REUSEADDR
+@compile(target_os = "linux")
+func sol_socket() -> i32 { return 1; }        // SOL_SOCKET
+@compile(target_os = "linux")
+func so_reuseaddr() -> i32 { return 2; }      // SO_REUSEADDR
 
 // --- TcpSocket methods ---
 impl TcpSocket {
@@ -75,7 +109,7 @@ impl TcpSocket {
     }
     // close the socket
     func close(self: *TcpSocket) -> i32 {
-        return closesocket(self.fd);
+        return close_fd(self.fd);
     }
 }
 
@@ -88,7 +122,7 @@ impl TcpServer {
     }
     // close the server
     func close(self: *TcpServer) -> i32 {
-        return closesocket(self.fd);
+        return close_fd(self.fd);
     }
 }
 
@@ -111,6 +145,9 @@ func TcpClient(ip: str, port: u16) -> TcpSocket {
 func TcpServer(ip: str, port: u16) -> TcpServer {
     startup();
     let fd: usize = socket(2, 1, 6);
+    // allow quick rebinding of the port (avoids EADDRINUSE from TIME_WAIT sockets)
+    let one: i32 = 1;
+    setsockopt(fd, sol_socket(), so_reuseaddr(), &one, 4);
     let sa: sockaddr_in;
     sa.family = 2;
     sa.port = htons(port);

@@ -1,0 +1,6 @@
+//~ ERROR: unknown attribute
+// @compile is the only attribute; @inline does not exist
+@inline
+func f() -> i32 { return 1; }
+
+func main() -> i8 { return 0; }

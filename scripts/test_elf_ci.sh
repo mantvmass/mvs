@@ -17,6 +17,7 @@ examples/01_language/bitwise
 examples/01_language/arrays
 examples/01_language/int128
 examples/01_language/shadow
+examples/01_language/compile_attr
 examples/02_functions/generics
 examples/02_functions/overload
 examples/02_functions/recursion
@@ -33,7 +34,10 @@ examples/05_strings/strings
 examples/06_modules/use_import
 examples/08_stdlib/io_demo
 examples/08_stdlib/floats
-examples/08_stdlib/lib_out"
+examples/08_stdlib/lib_out
+examples/08_stdlib/lib_math
+examples/08_stdlib/lib_mem
+examples/08_stdlib/net_loop"
 
 for t in $tests; do
     name=$(echo "$t" | sed 's|^examples/||; s|/|_|g')

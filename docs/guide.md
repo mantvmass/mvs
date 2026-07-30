@@ -497,9 +497,20 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 |--------|----------------|
 | `io` | `io.out(fmt, ...)`, `io.print(s)`, `io.in(prompt) -> str` |
 | `fs` | `fs.write(path, content)`, `fs.read(path) -> str` |
-| `net` | `net.TcpClient(ip, port)`, `net.TcpServer(ip, port)` + `accept`/`send`/`recv`/`close` |
+| `net` | `net.TcpClient(ip, port)`, `net.TcpServer(ip, port)` + `accept`/`send`/`recv`/`close`; cross-platform (Winsock on Windows, POSIX sockets on Linux, selected with `@compile`) |
 | `string` | `String` (heap string): `String::from(s)`, `from_int`/`from_uint`/`from_float`/`from_char`, `.push_str(s)` (chain), `.as_str() -> str`, `.len()`, `.drop()` |
 | `fmt` | trait `Display { fmt(self) -> String }` (impl'd for every primitive) + `fmt.println(x)` / `fmt.print(x)` (static dispatch) + `fmt.outf(f, args...)`, a pure-MVS io.out with run-time `{}` handling |
+| `math` | `sqrt`/`pow`/`floor`/`ceil`/`round`/`fmod` (libm), `pi()`/`e()`, and overloaded `abs`/`min`/`max`/`clamp` (i64 + f64) plus `sign`/`gcd`/`lcm`/`ipow` |
+| `mem` | `alloc`/`alloc_zeroed`/`grow`/`dealloc`, `copy` (overlap-safe), `set`/`zero`, `eq`, `swap` |
+
+Two resolution rules make modules pleasant to use:
+
+- `ns.func(...)` also reaches a foreign function the module DECLARED: `math.fmod(x, y)`
+  calls libm's `fmod` because `std/math.mvs` declares `extern func fmod(...)`. Externs keep
+  their raw C symbol name; the namespace only scopes the lookup.
+- Function overloading works through namespaces: `math.abs(-4)` picks `abs(i64)` while
+  `math.abs(-2.5)` picks `abs(f64)`. Each module has its own overload sets, so a user
+  function named `abs` never collides with `math.abs`.
 
 ```rust
 import { io, string } from "std";
@@ -509,6 +520,36 @@ io.out("{} (len {})", s.as_str(), s.len());  // hello, world (len 12)
 let n: String = String::from_int(42);        // "42"
 s.drop(); n.drop();                          // free it yourself (no GC)
 ```
+
+### 4.13 Conditional compilation (@compile)
+
+An `@compile(...)` attribute before any top-level item (function, extern, struct, global,
+impl block, even an import) keeps that item only when the current target matches. This is
+how one source file supports several platforms:
+
+```rust
+@compile(target_os = "windows")
+extern func closesocket(s: usize) -> i32;
+@compile(target_os = "linux")
+extern func close(s: usize) -> i32;
+
+@compile(target_os = "windows")
+func close_fd(s: usize) -> i32 { return closesocket(s); }
+@compile(target_os = "linux")
+func close_fd(s: usize) -> i32 { return close(s); }
+
+// both keys on one item = AND
+@compile(target_os = "linux", target_arch = "aarch64")
+func pause() -> void { /* ... */ }
+```
+
+- Keys: `target_os` (`"windows"`, `"linux"`) and `target_arch` (`"x86_64"`, `"aarch64"`).
+  The values follow the `--target` flag: `win64` = windows/x86_64, `elf64` = linux/x86_64,
+  `arm64` = linux/aarch64.
+- Filtering happens in the module loader, BEFORE duplicate checks and type checking, so two
+  gated definitions of the same function are fine as long as only one survives per target.
+- An unknown key is a compile error; an unknown value only warns (it can never match).
+- `std/net.mvs` is the reference user: Winsock vs POSIX sockets in one file.
 
 ---
 

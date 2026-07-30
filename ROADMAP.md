@@ -17,31 +17,21 @@ The backend split (`src/arch/common.c` holds all logic, per-target files hold on
 instruction emission) exists exactly so new rows in this table stay cheap. Targets
 that cannot run locally are verified on GitHub CI (cross toolchains + qemu-user).
 
-## Conditional compilation (design sketch)
+## Conditional compilation: done
 
-Cross-platform code needs a way to select code per target at compile time. The
-working idea is a decorator/attribute form; the syntax is NOT final:
-
-```rust
-@compile(target_os = "linux")
-func page_size() -> usize { return 4096; }
-
-@compile(target_os = "windows")
-func page_size() -> usize { return dwPageSize(); }
-
-@compile(target_arch = "aarch64")
-func pause() -> void { /* wfe */ }
-```
-
-Open questions: attribute grammar (`@compile(...)` vs `#[cfg(...)]`), whether it
-gates whole items only or also blocks, and how it interacts with imports and
-tree-shaking. With three ABIs now live (win64, SysV, AAPCS64) there are real use
-cases to design against; this is the next language feature up.
+`@compile(target_os = ...)` / `@compile(target_arch = ...)` is implemented (see
+[docs/guide.md](docs/guide.md) section 4.13). It gates whole top-level items, is
+resolved in the module loader before duplicate/type checks, and already carries
+`std/net` (Winsock vs POSIX sockets in one file). Possible extensions, not
+committed: gating blocks inside a function, a `not`/`any` combinator form, and
+custom user-defined keys (feature flags).
 
 ## Core library (`core`), modeled on Rust
 
-Today `std/` is small (`io`, `fs`, `net`, `string`, `fmt`) and CRT-backed. The plan
-is a `core` layer that works under `--nostd` too:
+Today `std/` is CRT-backed: `io`, `fs`, `net` (cross-platform via `@compile`),
+`string`, `fmt`, `math` (libm + overloaded integer/float helpers), and `mem`
+(allocation + raw memory ops). The plan is a `core` layer that works under
+`--nostd` too:
 
 | Module | Purpose |
 |--------|---------|
@@ -58,9 +48,9 @@ is a `core` layer that works under `--nostd` too:
 | `core::panic` | panic/abort support with a `--nostd` hook |
 | `core::arch` | architecture intrinsics (inline `asm`, SIMD, `pause`/`wfe`) |
 
-`Option`/`Result` need generic STRUCTS (today only functions are generic), and
-`core::arch` needs the conditional-compilation story above; both are prerequisites
-worth building first.
+`std/mem` and `std/math` are the first (CRT-backed) slice of this plan.
+`Option`/`Result` need generic STRUCTS (today only functions are generic); that is
+the main prerequisite left now that conditional compilation exists.
 
 ## Language
 

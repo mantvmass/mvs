@@ -52,11 +52,13 @@ gcc examples/demo.o -o demo -no-pie -lm && ./demo
 
 Structs + methods + traits (static AND dynamic dispatch via `dyn Trait`) · generics
 with bounds and `where` clauses · function overloading · real `[T; N]` arrays ·
-full 128-bit integers · function pointers · heap `String` · modules + a small std
-(`io`/`fs`/`net`/`string`/`fmt`) · C interop in both directions · Rust-style
-compiler diagnostics · freestanding `--nostd` mode for OS/bare-metal work · three
-backends (x86-64 win64, x86-64 SysV/ELF, AArch64 AAPCS64) sharing one
-architecture-independent core, all CI-tested against the same golden outputs.
+full 128-bit integers · function pointers · heap `String` · conditional compilation
+(`@compile(target_os/target_arch)`) · modules + a std library
+(`io`/`fs`/`net`/`string`/`fmt`/`math`/`mem`, with cross-platform TCP networking) ·
+C interop in both directions · Rust-style compiler diagnostics · freestanding
+`--nostd` mode for OS/bare-metal work · three backends (x86-64 win64, x86-64
+SysV/ELF, AArch64 AAPCS64) sharing one architecture-independent core, all CI-tested
+against the same golden outputs.
 
 ## Documentation
 

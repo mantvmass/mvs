@@ -33,6 +33,16 @@ Node *find_func(Gen *g, const char *ns, const char *name) {
         const char *fns = f->ns ? f->ns : "";
         if (strcmp(f->name, name) == 0 && strcmp(fns, ns) == 0) return f;
     }
+    /* Namespace fallback: ns.func(...) also reaches an extern DECLARED by module ns
+     * (externs keep their raw C label, so they carry mod instead of ns; this makes
+     * calls like math.fmod(...) hit the libm fmod that std/math declared) */
+    if (ns && ns[0]) {
+        for (int i = 0; i < g->nfuncs; i++) {
+            Node *f = g->funcs[i];
+            if (f->is_extern && strcmp(f->name, name) == 0 &&
+                f->mod && strcmp(f->mod, ns) == 0) return f;
+        }
+    }
     return NULL;
 }
 

@@ -1,0 +1,39 @@
+// @compile(...): conditional compilation per target OS / architecture.
+// Exactly ONE definition of each function below survives per target; if the
+// attribute filtering failed, the compiler would reject the duplicates.
+// Every variant prints the same text so the golden output is target-independent.
+import { io } from "std";
+
+@compile(target_os = "windows")
+func os_pick() -> str { return "one os variant kept"; }
+
+@compile(target_os = "linux")
+func os_pick() -> str { return "one os variant kept"; }
+
+@compile(target_arch = "x86_64")
+func arch_pick() -> str { return "one arch variant kept"; }
+
+@compile(target_arch = "aarch64")
+func arch_pick() -> str { return "one arch variant kept"; }
+
+// both keys on one item = AND: kept only when os AND arch match
+@compile(target_os = "windows", target_arch = "x86_64")
+func pair_pick() -> i32 { return 7; }
+@compile(target_os = "linux", target_arch = "x86_64")
+func pair_pick() -> i32 { return 7; }
+@compile(target_os = "linux", target_arch = "aarch64")
+func pair_pick() -> i32 { return 7; }
+
+// attributes also gate globals, structs, and impl blocks
+@compile(target_os = "windows")
+const WIDTH: i32 = 80;
+@compile(target_os = "linux")
+const WIDTH: i32 = 80;
+
+func main() -> i8 {
+    io.out("{}", os_pick());
+    io.out("{}", arch_pick());
+    io.out("pair = {}", pair_pick());
+    io.out("width = {}", WIDTH);
+    return 0;
+}
