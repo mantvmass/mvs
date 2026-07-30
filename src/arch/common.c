@@ -65,6 +65,12 @@ Sym *find_var(Gen *g, const char *name) {
 
 /* Register a string in the pool; returns its index (used as the label name str_<idx>) */
 int intern_string(Gen *g, const char *data, int len) {
+    /* really intern: identical literals share one label, so the same text
+     * appearing many times costs one copy in .data and compares equal by
+     * address (which is what a reader expects from a name like this) */
+    for (int i = 0; i < g->nstrs; i++)
+        if (g->strs[i].len == len && memcmp(g->strs[i].data, data, (size_t)len) == 0)
+            return i;
     if (g->nstrs >= MAX_STR) { fprintf(stderr, "codegen error: too many string literals (max %d)\n", MAX_STR); g->had_error = 1; return 0; }
     int idx = g->nstrs++;
     g->strs[idx].data = (unsigned char *)malloc(len + 1);

@@ -106,6 +106,18 @@ Done:
   contextual keyword, struct literals as arguments, and a warning for `==` on
   two `str` values
 
+- `scripts/audit.sh`: ONE command running every check (golden suites on both
+  Linux targets, the built-in runner, the feature matrix, differential tests,
+  `-O` equality for every example, freestanding symbol checks, `-g` line
+  tables, the suite under ASan/UBSan, and the fuzzer). Hand-picked probing
+  finds a few bugs per session and never converges; this is exhaustive over
+  its axes, so a clean run means something
+- `scripts/matrix.sh`: every type carried through every context (local,
+  global, parameter, return, struct field, array element, `Vec` element,
+  `Option` payload, enum payload, match binding, method receiver, generic
+  instance, `io.out`). The generated programs check themselves, so there are
+  no goldens to drift
+
 Still open, roughly in order of value:
 
 - More real programs, and larger ones (this is still the strongest bug finder).

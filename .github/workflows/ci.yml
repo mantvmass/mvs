@@ -73,6 +73,13 @@ jobs:
       - name: Differential test against the C reference
         run: sh scripts/difftest.sh elf64
 
+      # Exhaustive rather than sampled: every type carried through every
+      # context (local, global, param, return, field, array element, Vec
+      # element, Option payload, enum payload, match binding, method receiver,
+      # generic instance, io.out). Each generated program checks itself.
+      - name: Feature matrix (every type through every context)
+        run: sh scripts/matrix.sh elf64
+
       - name: Upload Linux binary
         uses: actions/upload-artifact@v4
         with:
@@ -130,3 +137,6 @@ jobs:
       # both run under qemu, output must match the C reference exactly
       - name: Differential test against the C reference (AArch64)
         run: sh scripts/difftest.sh arm64
+
+      - name: Feature matrix on AArch64
+        run: sh scripts/matrix.sh arm64

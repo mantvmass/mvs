@@ -1307,6 +1307,58 @@ static int gs_sweep(Node *prog) {
 
 /* ---------- main driver ---------- */
 
+/* The type the surrounding code EXPECTS from the expression being scanned:
+ * the declared type of a variable being initialized, or the return type of the
+ * function containing a return statement. A generic call uses it to bind type
+ * parameters that appear in the template's return type, so
+ *     let o: Option<u16> = Some(400);
+ * infers T = u16 from the annotation instead of i64 from the literal. */
+static const char *g_expect_sname = NULL;
+static const char *g_cur_ret_sname = NULL;
+
+/* The pretty canonical name of a struct instance ("Option__u16" -> "Option<u16>"),
+ * which the instantiation stored in the declaration's type_name */
+static const char *canon_of_instance(Node *prog, const char *mangled) {
+    if (!mangled) return NULL;
+    if (strchr(mangled, '<')) return mangled;          /* already canonical */
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *d = prog->items[i];
+        if (d->kind == ND_STRUCT_DECL && d->name && strcmp(d->name, mangled) == 0)
+            return d->type_name;                        /* NULL for a plain struct */
+    }
+    return NULL;
+}
+
+/* Unify a template's declared return type with the expected type and fill the
+ * matching generic parameters. Returns a bitmask of the parameters it bound. */
+static int unify_ret_with_expected(Node *prog, Node *tmpl, const char *expect_sname, Bind *gmap) {
+    if (!expect_sname || !tmpl->type_name || tmpl->type != TYPE_STRUCT || tmpl->ptr != 0) return 0;
+    const char *want = canon_of_instance(prog, expect_sname);
+    if (!want || !strchr(want, '<') || !strchr(tmpl->type_name, '<')) return 0;
+
+    char wbase[128], tbase[128];
+    char *wargs[4], *targs[4];
+    int wn = gs_split(want, wbase, sizeof(wbase), wargs);
+    int tn = gs_split(tmpl->type_name, tbase, sizeof(tbase), targs);
+    int bound = 0;
+    if (wn > 0 && wn == tn && strcmp(wbase, tbase) == 0) {
+        for (int i = 0; i < tn; i++) {
+            for (int gi = 0; gi < tmpl->ngen; gi++) {
+                if (!tmpl->gen[gi] || strcmp(targs[i], tmpl->gen[gi]) != 0) continue;
+                int made = 0;
+                gmap[gi].name = tmpl->gen[gi];
+                gmap[gi].t = gs_text_type(prog, wargs[i], &made, tmpl->file, tmpl->line, tmpl->col);
+                gmap[gi].is_const = 0; gmap[gi].decl = NULL; gmap[gi].used = 0;
+                bound |= 1 << gi;
+                break;
+            }
+        }
+    }
+    for (int i = 0; i < wn; i++) free(wargs[i]);
+    for (int i = 0; i < tn; i++) free(targs[i]);
+    return bound;
+}
+
 /* Scan nodes in a concrete function for generic calls, then instantiate + rename the call sites.
  * Scope-aware (map/nmap grows with declarations) so argument types infer correctly under shadowing.
  * Returns the number of new instances created (used for the fixpoint check) */
@@ -1314,7 +1366,23 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
     if (!n) return *made;
     switch (n->kind) {                          /* handle scopes first */
         case ND_BLOCK: { int s = *nmap; for (int i=0;i<n->nitems;i++) scan_calls(prog,n->items[i],map,nmap,made); *nmap=s; return *made; }
-        case ND_VAR_DECL: { scan_calls(prog,n->operand,map,nmap,made); add_bind(map,nmap,n); return *made; }
+        case ND_VAR_DECL: {
+            /* the declared type is what the initializer is expected to produce */
+            const char *save = g_expect_sname;
+            g_expect_sname = (n->type == TYPE_STRUCT && n->ptr == 0) ? n->type_name : NULL;
+            scan_calls(prog,n->operand,map,nmap,made);
+            g_expect_sname = save;
+            add_bind(map,nmap,n);
+            return *made;
+        }
+        case ND_RETURN: {
+            /* a returned expression is expected to have the function's return type */
+            const char *save = g_expect_sname;
+            g_expect_sname = g_cur_ret_sname;
+            scan_calls(prog,n->operand,map,nmap,made);
+            g_expect_sname = save;
+            return *made;
+        }
         case ND_FOR: { int s=*nmap; scan_calls(prog,n->init,map,nmap,made); scan_calls(prog,n->cond,map,nmap,made); scan_calls(prog,n->step,map,nmap,made); scan_calls(prog,n->body,map,nmap,made); *nmap=s; return *made; }
         case ND_IF: { scan_calls(prog,n->cond,map,nmap,made); int s1=*nmap; scan_calls(prog,n->then_branch,map,nmap,made); *nmap=s1; int s2=*nmap; scan_calls(prog,n->else_branch,map,nmap,made); *nmap=s2; return *made; }
         case ND_WHILE: case ND_DOWHILE: { scan_calls(prog,n->cond,map,nmap,made); int s=*nmap; scan_calls(prog,n->body,map,nmap,made); *nmap=s; return *made; }
@@ -1401,6 +1469,10 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                 }
                 gmap[gi].name = tmpl->gen[gi]; gmap[gi].t = concrete;
             }
+            /* the expected type wins over argument inference for the parameters
+             * it determines: `let o: Option<u16> = Some(400)` must bind T = u16,
+             * not i64 from the literal */
+            unify_ret_with_expected(prog, tmpl, g_expect_sname, gmap);
             }
             /* Check trait bounds: with <T: A + B> the concrete type must impl every listed trait */
             for (int gi = 0; gi < tmpl->ngen; gi++) {
@@ -2626,7 +2698,10 @@ int monomorphize(Node *prog) {
                 seed_globals(prog, map, &nmap);
                 for (int j = 0; j < f->nitems; j++) if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
                 g_cur_mod = f->mod ? f->mod : "";
+                /* return statements inside expect the function's return type */
+                g_cur_ret_sname = (f->type == TYPE_STRUCT && f->ptr == 0) ? f->type_name : NULL;
                 scan_calls(prog, f->body, map, &nmap, &made);
+                g_cur_ret_sname = NULL;
                 g_cur_mod = "";
             } else if (f->kind == ND_VAR_DECL && f->operand) {   /* generic calls in global initializers */
                 Bind map[512]; int nmap = 0;

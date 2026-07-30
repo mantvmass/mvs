@@ -22,6 +22,14 @@ hand-written.
 ## Main commands
 
 ```powershell
+# ONE command that runs every check there is (Linux/WSL). Use this instead of
+# spot-checking: golden suites on both Linux targets, mvs test, the feature
+# matrix, differential tests against C, -O equality for every example,
+# freestanding symbol checks, -g line tables, the suite under ASan/UBSan, and
+# the fuzzer. Exit code 0 means everything passed.
+#   sh scripts/audit.sh          full
+#   sh scripts/audit.sh quick    skips arm64 and shortens the fuzz
+
 # fuzz + sanitizers (Linux/WSL; the CI job runs both on every push)
 #   gcc -g -O1 -fsanitize=address,undefined ... -o mvs_asan
 #   ASAN_OPTIONS=detect_leaks=0 ./mvs_asan test
