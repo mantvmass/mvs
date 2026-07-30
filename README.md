@@ -1,18 +1,23 @@
+<div align="center">
+
 # MVS
 
-[![CI](https://github.com/mantvmass/mvs/actions/workflows/ci.yml/badge.svg)](https://github.com/mantvmass/mvs/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64-informational.svg)](ROADMAP.md)
-[![Written in](https://img.shields.io/badge/written%20in-plain%20C-555.svg)](src/)
-[![Dependencies](https://img.shields.io/badge/deps-no%20LLVM%2C%20no%20flex%2Fbison-success.svg)](docs/rules.md)
+**A small low-level language with Rust-flavored syntax and a compiler written by hand in plain C.**
 
-A compiler for **MVS**, a small low-level language at roughly C's level with a
-friendlier, Rust-flavored syntax. The lexer, parser, type checker, and code
-generators are all hand-written in plain C, and the output is real assembly you
-can read.
+No LLVM, no flex, no bison: the output is real assembly you can read.
+
+[![CI](https://img.shields.io/github/actions/workflow/status/mantvmass/mvs/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI)](https://github.com/mantvmass/mvs/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](#license)
+[![Platforms](https://img.shields.io/badge/platforms-win64%20%C2%B7%20elf64%20%C2%B7%20arm64-8250df?style=flat-square)](ROADMAP.md)
+[![Written in C](https://img.shields.io/badge/written%20in-plain%20C-A8B9CC?style=flat-square&logo=c&logoColor=white)](src/)
+
+[Install](#install) · [Build](#build-from-source) · [Docs](#documentation) · [Examples](docs/examples.md) · [Roadmap](ROADMAP.md)
+
+</div>
 
 > **For education.** This project exists to show how a real compiler works end to
-> end. It is a learning subset, not a production toolchain.
+> end (lexer, parser, type checker, and three code generators, all hand-written).
+> It is a learning subset, not a production toolchain.
 
 ```rust
 import { io, math } from "std";
