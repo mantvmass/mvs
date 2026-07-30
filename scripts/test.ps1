@@ -2,8 +2,8 @@
 #  MVS compiler test suite
 #
 #  Usage:
-#    powershell -ExecutionPolicy Bypass -File tests/run.ps1            # run all tests
-#    powershell -ExecutionPolicy Bypass -File tests/run.ps1 -Update    # regenerate golden files
+#    powershell -ExecutionPolicy Bypass -File scripts/test.ps1            # run all tests
+#    powershell -ExecutionPolicy Bypass -File scripts/test.ps1 -Update    # regenerate golden files
 #
 #  Three test groups:
 #    1. run-pass:     compile + run an example, diff stdout against tests/expected/<name>.txt
@@ -26,7 +26,7 @@ if (-not (Test-Path $mvs)) {
     exit 1
 }
 
-$expectedDir = Join-Path $PSScriptRoot "expected"
+$expectedDir = Join-Path $root "tests/expected"
 if (-not (Test-Path $expectedDir)) { New-Item -ItemType Directory $expectedDir | Out-Null }
 
 # examples that compile and run deterministically (no input, no network)
@@ -235,7 +235,7 @@ foreach ($ex in $elfTests) {
         continue
     }
     if (-not $wslOk) { $pass++; Write-Host "  ok    elf64 $name (assembled)"; continue }
-    $out = cmd /c "wsl -e sh tests/run_elf.sh $ex 2>&1" | Out-String
+    $out = cmd /c "wsl -e sh scripts/test_elf_wsl.sh $ex 2>&1" | Out-String
     $lines = ($out -replace "`r`n", "`n") -split "`n"
     $rc = "?"
     if ($lines.Count -gt 0 -and $lines[0] -match "rc=(\S+)") { $rc = $Matches[1] }
@@ -255,7 +255,7 @@ foreach ($ex in $elfTests) {
 }
 
 Write-Host "=== compile-fail (expected errors) ===" -ForegroundColor Cyan
-$failDir = Join-Path $PSScriptRoot "compile_fail"
+$failDir = Join-Path $root "testsmpile_fail"
 if (Test-Path $failDir) {
     foreach ($f in (Get-ChildItem $failDir -Filter *.mvs | Sort-Object Name)) {
         $first = (Get-Content $f.FullName -TotalCount 1)

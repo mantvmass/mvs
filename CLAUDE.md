@@ -76,9 +76,9 @@ make test
 ## Before calling it done
 
 1. `make` passes with no warnings.
-2. `make test` passes: the golden output + compile-only + compile-fail suite in `tests/run.ps1`.
-3. New feature → add an example under `examples/`, register it in `tests/run.ps1` + the Makefile
-   `EXAMPLES` list, and regenerate goldens with `tests/run.ps1 -Update`. New error → add a
+2. `make test` passes: the golden output + compile-only + compile-fail suite in `scripts/test.ps1`.
+3. New feature → add an example under `examples/`, register it in `scripts/test.ps1` + the Makefile
+   `EXAMPLES` list, and regenerate goldens with `scripts/test.ps1 -Update`. New error → add a
    `tests/compile_fail/*.mvs` with a `//~ ERROR:` header.
 
 ## Feature status (details in docs/guide.md)

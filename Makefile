@@ -65,7 +65,7 @@ examples: $(TARGET)
 
 # run the test suite: golden output tests + compile-only + compile-fail (expected errors)
 test: $(TARGET)
-	powershell -ExecutionPolicy Bypass -File tests/run.ps1
+	powershell -ExecutionPolicy Bypass -File scripts/test.ps1
 
 # remove all generated files (including subfolders of examples)
 clean:
