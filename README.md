@@ -19,7 +19,7 @@ No LLVM, no flex, no bison: the output is real assembly you can read.
 > end (lexer, parser, type checker, and three code generators, all hand-written).
 > It is a learning subset, not a production toolchain.
 
-```rust
+```txt
 import { io, math } from "std";
 
 struct Point { x: f64; y: f64; }

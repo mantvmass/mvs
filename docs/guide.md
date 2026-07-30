@@ -98,7 +98,7 @@ A new backend (say `arch/x86_64/sysv.c` for ELF/Linux) reuses `common.c` and onl
 
 ### 4.1 Comments
 
-```rust
+```txt
 // single line
 /* multi
    line */
@@ -136,7 +136,7 @@ when stored (mid-computation it's still 64-bit).
 | Create | `let s: str = "hi";` | `let s: String = String::from("hi");` |
 | With io.out | `io.out("{}", s)` directly | `s.as_str()` → returns `str` |
 
-```rust
+```txt
 import { io } from "std";
 import { String } from "std/string";
 let lit: str = "hello";                 // fixed, read-only
@@ -150,7 +150,7 @@ Rule of thumb: `str` for fixed text and read-only parameters; `String` when you 
 
 #### Arrays `[T; N]`
 
-```rust
+```txt
 let a: [i32; 5] = [10, 20, 30, 40, 50];  // literal must have exactly N elements
 a[0] = 99;  a[1] += 5;                   // element read/write (any expression as index)
 io.out("{}", a);                         // [99, 25, 30, 40, 50]  (expands like Rust's {:?})
@@ -171,7 +171,7 @@ For dynamically-sized buffers use `malloc` + pointer arithmetic as before.
 Integer literals may be written in decimal, hex, or binary; all are plain `TK_INT`
 tokens with the same 64-bit value:
 
-```rust
+```txt
 let color: u32 = 0xFF8800;    // hex
 let mask: u8 = 0b10100101;    // binary
 io.out("{:x}", color);        // prints back as hex: ff8800
@@ -182,7 +182,7 @@ with arithmetic, e.g. `(1 as i128) << 100`).
 
 ### 4.3 Variables
 
-```rust
+```txt
 let name: type = value;     // mutable
 const NAME: type = value;   // constant: initializer required, any later write is a compile error
 let x: i32;                 // declared, uninitialized (stack value not guaranteed)
@@ -216,7 +216,7 @@ write `(-2) ** 2` to square the negative value.
 The language won't let types slide: it catches mismatches at compile time, which matters for
 low-level/OS/embedded work where a type bug can fail silently at runtime. Immediate errors:
 
-```rust
+```txt
 let x: i32 = 50 + "50";   // error: cannot apply '+'/'-' to 'i64' and 'str'
 let y: u8  = "hello";     // error: cannot initialize variable: ... 'u8' and 'str'
 let z: i32 = pt * 2;      // error (pt is a struct): cannot apply arithmetic to 'Point' and 'i64'
@@ -234,7 +234,7 @@ methods) must match in type and count. It stays lenient about correct low-level 
 
 To convert for real, use `as` (binds tighter than arithmetic):
 
-```rust
+```txt
 let a: i32 = 7;
 a as f64 / 2.0     // 3.5   (int -> float; without the cast: 7/2 = 3)
 3.9 as i32         // 3     (float -> int: truncates, no rounding)
@@ -246,7 +246,7 @@ ptr as usize       // address as integer (pointer <-> integer)
 
 ### 4.5 Control flow
 
-```rust
+```txt
 if (cond) { ... } elseif (cond) { ... } else { ... }
 while (cond) { ... }
 for (let i: i32 = 0; i < 10; i++) { ... }
@@ -265,7 +265,7 @@ continue;  // next iteration (inside switch, jumps to the enclosing loop)
 
 ### 4.6 Functions
 
-```rust
+```txt
 func add(a: i32, b: i32) -> i32 { return a + b; }
 func greet() -> void { ... }        // no return value
 ```
@@ -276,7 +276,7 @@ func greet() -> void { ... }        // no return value
 
 #### Default parameter values
 
-```rust
+```txt
 func area(w: i32, h: i32 = 10, scale: i32 = 1) -> i32 { return w * h * scale; }
 area(3);        // 30 (h=10, scale=1 filled in at compile time)
 area(3, 4, 2);  // 24
@@ -287,7 +287,7 @@ methods too (`p.shifted()`), but not for overloaded names, generic templates, or
 
 #### Generic functions (monomorphization)
 
-```rust
+```txt
 func max<T>(a: T, b: T) -> T {
     if (a > b) { return a; }
     return b;
@@ -301,7 +301,7 @@ The compiler infers the real type from arguments and emits a per-type copy (like
 
 #### Function overloading
 
-```rust
+```txt
 func show(n: i32) -> void { io.out("int: {}", n); }
 func show(s: str) -> void { io.out("str: {}", s); }
 func show(p: Point) -> void { io.out("point: ({}, {})", p.x, p.y); }
@@ -315,7 +315,7 @@ then renamed internally by signature (`show__i`, `show__s`); see `resolve_overlo
 
 #### Generic + overload = a duck-typed constraint
 
-```rust
+```txt
 func print_all<T>(a: T, b: T) -> void { show(a); show(b); }  // T must have a matching show
 print_all(1, 2);      // uses show(i32)
 print_all("a", "b");  // uses show(str)
@@ -326,7 +326,7 @@ explicit, checked constraint, use `trait`.
 
 #### Trait + associated function + generic bound
 
-```rust
+```txt
 struct Point { x: i32; y: i32; }
 struct Circle { r: i32; }
 
@@ -358,7 +358,7 @@ describe(c);                         // 75, Circle::area
 
 #### Trait objects: `dyn Trait` (dynamic dispatch)
 
-```rust
+```txt
 let s: dyn Shape = &rect;            // fat pointer {data, vtable}; &circle works too
 io.out("{}", s.area());              // dispatches through the vtable at run time
 s = &circle;                          // same variable, different concrete type
@@ -374,7 +374,7 @@ used as conditions, or passed to extern C.
 
 #### Multiple bounds: `<T: A + B>` and `where`
 
-```rust
+```txt
 func both<T: Shape + Named>(v: T) -> i32 { ... }          // inline form
 func both<T>(v: T) -> i32 where T: Shape + Named { ... }  // where clause (same meaning)
 ```
@@ -383,7 +383,7 @@ Every listed trait is checked at instantiation; the error names the first missin
 
 ### 4.7 struct and methods (Rust-style)
 
-```rust
+```txt
 struct Rect { w: i32; h: i32; }    // fields separated by ; or ,
 
 impl Rect {
@@ -404,7 +404,7 @@ Functions can return structs, and you can reach nested structs (`a.b.c`) and go 
 
 ### 4.8 Pointers
 
-```rust
+```txt
 let y: i32 = 42;
 let p: *i32 = &y;     // p points at y
 let v: i32 = *p;      // read what p points to (= 42)
@@ -415,7 +415,7 @@ let v: i32 = *p;      // read what p points to (= 42)
 
 The type `func(P1, P2, ...) -> R` is a value: it points at a function you call through a variable or field.
 
-```rust
+```txt
 func add(a: i32, b: i32) -> i32 { return a + b; }
 func mul(a: i32, b: i32) -> i32 { return a * b; }
 
@@ -437,7 +437,7 @@ code is `lea rax, [rel <label>]` for the value and `call rax` for the call (see 
 
 ### 4.9 Floats
 
-```rust
+```txt
 let pi: f64 = 3.14159;
 let area: f64 = pi * 2.0 * 2.0;
 io.out("{}", 1.5 + 2);     // int -> float automatically -> 3.500000
@@ -445,7 +445,7 @@ io.out("{}", 1.5 + 2);     // int -> float automatically -> 3.500000
 
 ### 4.10 Printing with io.out (Rust-style)
 
-```rust
+```txt
 import { io } from "std";
 io.out("hello");                  // hello
 io.out("x = {}", 42);             // x = 42      ({} = a value, newline appended)
@@ -474,7 +474,7 @@ value through its `Display` impl (every primitive ships one; user structs join b
 
 ### 4.11 Module system: three forms (the path decides)
 
-```rust
+```txt
 // A) submodule namespace: path is a bare package -> names in {} are submodules -> call as io.xxx
 import { io, fs, net } from "std";        // io.out(...), net.TcpServer(...)
 
@@ -506,7 +506,7 @@ Import checks (immediate errors):
   structs/traits are global and work either way).
 - a cycle (A→B→A) → `circular import detected`.
 
-```rust
+```txt
 extern func printf(fmt: str) -> i32;          // call C (MVS -> C)
 export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name)
     return a + b;
@@ -539,7 +539,7 @@ Two resolution rules make modules pleasant to use:
   `math.abs(-2.5)` picks `abs(f64)`. Each module has its own overload sets, so a user
   function named `abs` never collides with `math.abs`.
 
-```rust
+```txt
 import { io, string } from "std";
 let s: String = String::from("hello");
 s.push_str(", world");                       // append on the heap (reallocates)
@@ -554,7 +554,7 @@ An `@compile(...)` attribute before any top-level item (function, extern, struct
 impl block, even an import) keeps that item only when the current target matches. This is
 how one source file supports several platforms:
 
-```rust
+```txt
 @compile(target_os = "windows")
 extern func closesocket(s: usize) -> i32;
 @compile(target_os = "linux")
@@ -584,7 +584,7 @@ Tests live in files named `somefile.test.mvs`. A test file defines test function
 (no `main` needed) and asserts through `std/test`. A test is either marked with
 the `@test` decorator (any name) or simply named `test_*`:
 
-```rust
+```txt
 // math.test.mvs
 import { test, math } from "std";
 
@@ -647,7 +647,7 @@ a pointer to a local (`return &local;`): that memory is gone (dangling).
 For memory that must outlive a function or whose size is unknown, use the heap. MVS has no built-in
 `new`/`malloc`; call the C runtime via `extern`:
 
-```rust
+```txt
 extern func malloc(n: usize) -> *u8;
 extern func free(p: *u8) -> void;
 
@@ -671,7 +671,7 @@ simplicity in this subset); real programs should wrap and free.
 In freestanding mode there is no `malloc` (no C runtime); write your own allocator, like in a real
 kernel. The basic approach is a bump allocator over memory whose address you know:
 
-```rust
+```txt
 func bump_alloc(heap_ptr: *usize, current: usize, size: usize) -> usize {
     return current + size;   // hand back the old address, advance current by size
 }
@@ -700,7 +700,7 @@ Every snippet below is **real compiler output**; reproduce it with `mvs file.mvs
 
 ### 6.1 Variables + arithmetic
 
-```rust
+```txt
 func main() -> i8 {
     let a: i32 = 5;
     let b: i32 = a + 3;
@@ -740,7 +740,7 @@ pushes it to a temp, evaluates the right, then combines; `i32` stores via `eax` 
 
 ### 6.2 Calling a function (win64 ABI)
 
-```rust
+```txt
 func add(x: i32, y: i32) -> i32 { return x + y; }
 func main() -> i8 { return add(7, 8); }
 ```
@@ -784,7 +784,7 @@ at the `call`.
 
 ### 6.3 struct layout and member access
 
-```rust
+```txt
 struct P { x: i32; y: i32; }
 func main() -> i8 {
     let p: P = P { x: 10, y: 20 };
@@ -868,7 +868,7 @@ Common tasks, copy-and-adjust.
 
 ### Allocate and free heap memory
 
-```rust
+```txt
 extern func malloc(n: usize) -> *u8;
 extern func free(p: *u8) -> void;
 let buf: *u8 = malloc(256);
@@ -878,7 +878,7 @@ free(buf);                       // always free yourself
 
 ### Fixed-size arrays (stack) and dynamic buffers (malloc)
 
-```rust
+```txt
 let a: [i32; 10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];   // fixed size: a real array, no malloc
 for (let i: i32 = 0; i < 10; i++) { a[i] = i * i; }
 io.out("a[3] = {}", a[3]);           // 9
@@ -895,7 +895,7 @@ io.out("arr[3] = {}", arr[3]);       // 9
 
 ### Command-line arguments (argc/argv)
 
-```rust
+```txt
 extern func atoi(s: str) -> i32;
 func main(argc: i32, argv: **u8) -> i32 {   // declare main with parameters
     let prog: *u8 = *(argv + 0);            // argv[0] = program name; argv[i] = *(argv + i)
@@ -908,7 +908,7 @@ The CRT already calls `main(argc, argv)` per the C ABI; `argv` is an array of `*
 
 ### Array of structs (malloc + pointer)
 
-```rust
+```txt
 extern func malloc(n: usize) -> *u8;
 struct Pt { x: i32; y: i32; }
 let pts: *Pt = malloc(80);           // 10 slots (sizeof(Pt) = 8)
@@ -923,7 +923,7 @@ io.out("pts[3] = ({}, {})", (*(pts + 3)).x, (*(pts + 3)).y);   // 3 30
 
 ### Linked list / tree via a self-referential struct
 
-```rust
+```txt
 struct Node { val: i32; next: *Node; }   // points to itself through a pointer
 let n2: Node;  n2.val = 20;  n2.next = 0;     // 0 = NULL
 let n1: Node;  n1.val = 10;  n1.next = &n2;
@@ -934,7 +934,7 @@ Structs can reference each other freely (layout is computed by fixpoint); declar
 
 ### Compare strings (not with ==)
 
-```rust
+```txt
 extern func strcmp(a: str, b: str) -> i32;
 // s == "x" compares addresses, not contents! use strcmp.
 if (strcmp(name, "admin") == 0) { io.out("welcome admin"); }
@@ -942,7 +942,7 @@ if (strcmp(name, "admin") == 0) { io.out("welcome admin"); }
 
 ### Call C math functions
 
-```rust
+```txt
 extern func sqrt(x: f64) -> f64;
 extern func pow(b: f64, e: f64) -> f64;
 io.out("sqrt(2)={}", sqrt(2.0));
@@ -950,7 +950,7 @@ io.out("sqrt(2)={}", sqrt(2.0));
 
 ### Let C call MVS code (produce a .obj)
 
-```rust
+```txt
 // lib.mvs (no main needed)
 export func mvs_add(a: i32, b: i32) -> i32 { return a + b; }
 ```
@@ -962,7 +962,7 @@ clang main.c lib.obj -o app # link into a C program
 
 ### Freestanding code (no OS: kernel/bare-metal)
 
-```rust
+```txt
 // no std import / no io.out in this mode
 export func poke(addr: *u8, value: u8) -> void { *addr = value; }  // write VGA buffer, etc.
 ```
@@ -973,7 +973,7 @@ mvs.exe kernel.mvs --nostd  # kernel.obj with no CRT dependency (link/embed your
 
 ### Files and input
 
-```rust
+```txt
 import { io, fs } from "std";
 fs.write("out.txt", "hello");
 let text: str = fs.read("out.txt");
@@ -982,7 +982,7 @@ let name: str = io.in("your name: ");   // reads one word
 
 ### TCP echo server
 
-```rust
+```txt
 import { io, net } from "std";
 let server: TcpServer = net.TcpServer("0.0.0.0", 8080);
 let conn: TcpSocket = server.accept();
@@ -993,7 +993,7 @@ conn.close(); server.close();
 
 ### Bitmask / flags (with XOR)
 
-```rust
+```txt
 let READ: u32 = 1;  let WRITE: u32 = 2;
 let perm: u32 = READ | WRITE;
 if ((perm & WRITE) != 0) { io.out("writable"); }
@@ -1005,7 +1005,7 @@ io.out("xor = {}", a ^ b);       // 6   (^ = XOR; power is **)
 
 ### Walk a buffer with a pointer (like C)
 
-```rust
+```txt
 extern func malloc(n: usize) -> *u8;
 let buf: *i32 = malloc(40);
 let p: *i32 = buf;
@@ -1016,7 +1016,7 @@ io.out("count = {}", p - buf);   // 10   (ptr - ptr divides by sizeof automatica
 
 ### Return multiple values via out-pointers (no tuples)
 
-```rust
+```txt
 func divmod(a: i32, b: i32, q: *i32, r: *i32) -> void {
     *q = a / b;
     *r = a % b;

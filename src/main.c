@@ -29,7 +29,7 @@
 #include <sys/stat.h>  /* stat() for directory detection in the test runner */
 #endif
 
-#define MVS_VERSION "0.2.0-dev"
+#define MVS_VERSION "0.2.0"
 #define PATHBUF 1024
 
 /* popen is spelled _popen on Windows; everything else is portable */
