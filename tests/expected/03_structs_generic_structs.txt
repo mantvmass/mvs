@@ -2,4 +2,6 @@ first = 42
 second = hello
 q = 1.500000 7
 boxed = 99
+counter = 106
+Pair<i64,str> { a: 42, b: hello }
 nested = 3

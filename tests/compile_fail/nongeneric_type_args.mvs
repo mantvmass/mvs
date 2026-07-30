@@ -1,0 +1,8 @@
+//~ ERROR: 'plain' takes no generic type arguments
+// explicit type arguments must not be silently dropped on a non-generic call
+func plain(x: i64) -> i64 { return x * 2; }
+
+func main() -> i8 {
+    plain<i64>(21);
+    return 0;
+}

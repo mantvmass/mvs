@@ -21,6 +21,16 @@ impl Boxed<T> {
     func set(self: *Boxed<T>, v: T) -> void { self.val = v; }
 }
 
+// NOTE: every method is instantiated for every instance (eagerly, unlike Rust),
+// so numeric-only methods live on their own struct rather than on Boxed<T>
+// (Boxed<Pair<...>> would otherwise fail to typecheck '+').
+struct Counter<T> { val: T; }
+impl Counter<T> {
+    func add(self: *Counter<T>, by: i64 = 1) -> void {  // default args work on generic methods
+        self.val = self.val + by;
+    }
+}
+
 func main() -> i8 {
     let p: Pair<i64, str> = Pair<i64, str> { a: 42, b: "hello" };
     io.out("first = {}", p.first());
@@ -32,6 +42,12 @@ func main() -> i8 {
     let bx: Boxed<i64> = Boxed<i64> { val: 10 };
     bx.set(99);
     io.out("boxed = {}", bx.get());
+
+    let c: Counter<i64> = Counter<i64> { val: 100 };
+    c.add();                               // default by = 1
+    c.add(5);
+    io.out("counter = {}", c.val);         // 106
+    io.out("{}", p);                       // prints the pretty generic name
 
     // nested generic: a box of a pair
     let nb: Boxed<Pair<i64, i64>> = Boxed<Pair<i64, i64>> { val: Pair<i64, i64> { a: 1, b: 2 } };

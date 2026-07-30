@@ -118,6 +118,8 @@ void register_struct(Gen *g, Node *decl) {
     if (g->nstructs >= MAX_FUNC) { fprintf(stderr, "codegen error: too many structs\n"); g->had_error = 1; return; }
     StructInfo *s = &g->structs[g->nstructs++];
     s->name = decl->name;
+    /* generic instances stash their pretty canonical name in decl->type_name */
+    s->display = decl->type_name ? decl->type_name : decl->name;
     s->nfields = 0;
     s->size = 0;
     for (int i = 0; i < decl->nitems; i++) {
@@ -394,7 +396,7 @@ static void expand_struct(Gen *g, Node *base, const char *sname,
         fr->type = TYPE_STRUCT; fr->type_name = strdup(sname);
         base = fr;
     }
-    buf_append(out, len, cap, sname);
+    buf_append(out, len, cap, s->display ? s->display : sname);
     buf_append(out, len, cap, " { ");
     for (int i = 0; i < s->nfields; i++) {
         if (i) buf_append(out, len, cap, ", ");

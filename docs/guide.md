@@ -472,6 +472,14 @@ variadic `...dyn Display` slice, walks the `{}` placeholders at run time, and di
 value through its `Display` impl (every primitive ships one; user structs join by writing
 `impl Display for T`). See `examples/08_stdlib/lib_out.mvs`.
 
+#### `::` as a path separator
+
+Like Rust, `::` reaches into namespaces: modules (`math::abs(-5)`, `io::out`),
+types (`String::from`, `Vec<i64>::new`), and associated functions in general.
+`.` is for instance access (fields and methods on a value). The parser accepts
+either in both positions, but the convention is Rust's: paths use `::`, values
+use `.`.
+
 ### 4.11 Module system: three forms (the path decides)
 
 ```txt
@@ -684,7 +692,9 @@ Methods: `is_some`/`is_none`/`unwrap`/`unwrap_or` on Option;
 `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` on Result.
 Limits (v1): type arguments must be primitives or named structs (no pointers,
 arrays, or function types), max 4 parameters, and `impl Trait for Vec<T>` is
-not supported yet. `match` is the planned next step (see ROADMAP).
+not supported yet. Methods are instantiated EAGERLY: every method of an
+instantiated struct must typecheck for that instance (Rust only checks the
+methods you call), so keep type-specific methods on their own structs.
 
 ### 4.16 Threads + Mutex (std/thread, std/sync)
 

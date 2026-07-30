@@ -533,6 +533,8 @@ static void gs_instantiate(Node *prog, const char *cname, char *out_mangled, siz
     Node *inst = node_clone(tmpl);
     free(inst->name);
     inst->name = strdup(out_mangled);
+    free(inst->type_name);
+    inst->type_name = strdup(cname);   /* the pretty name, shown by io.out */
     inst->ngen = 0;
     node_add_item(prog, inst);
     (*made)++;
@@ -645,6 +647,22 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
     }
     if (is_gcall) {
         Node *tmpl = find_template(prog, n->operand->name);
+        if (!tmpl && n->operand->ngen > 0) {
+            /* explicit type arguments on a call that resolves to no generic function:
+             * silently dropping them would change the call's meaning behind the
+             * programmer's back, so it is an error when the name exists at all
+             * (a fully unknown name gets the normal undefined-function error later) */
+            for (int i = 0; i < prog->nitems; i++) {
+                Node *d = prog->items[i];
+                if (d->kind == ND_FUNC && d->name && strcmp(d->name, n->operand->name) == 0) {
+                    diag_print(n->file, n->line, n->col, "error",
+                               "'%s' takes no generic type arguments (it is not a generic function)",
+                               n->operand->name);
+                    mono_err++;
+                    break;
+                }
+            }
+        }
         if (tmpl) {
             Bind gmap[4];
             if (n->operand->ngen > 0) {
@@ -728,8 +746,12 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                     (*made)++;
                 }
             }
-            /* Rewrite the call site to point at the instance */
+            /* Rewrite the call site to point at the instance; the explicit type
+             * arguments are consumed here (a later fixpoint round must see a
+             * plain concrete call, not "instance name + leftover type args") */
             free(n->operand->name); n->operand->name = strdup(mangled);
+            for (int gi = 0; gi < n->operand->ngen; gi++) { free(n->operand->gen[gi]); n->operand->gen[gi] = NULL; }
+            n->operand->ngen = 0;
         }
     }
     return *made;
@@ -1026,10 +1048,22 @@ static void df_fill_call(Node *prog, Node *call, Bind *map, int nmap) {
     } else if (callee->kind == ND_MEMBER) {
         CType bt = infer(prog, callee->operand, map, nmap);
         if (bt.base == TYPE_STRUCT && bt.sname) {    /* obj.method(...) */
+            /* this pass runs BEFORE monomorphization, so a generic receiver still
+             * carries its canonical name ("Counter<i64>"); the methods live under
+             * the TEMPLATE name ("Counter") until instantiation */
+            char mbase[128];
+            const char *mns = bt.sname;
+            const char *lt = strchr(bt.sname, '<');
+            if (lt) {
+                size_t bl = (size_t)(lt - bt.sname);
+                if (bl >= sizeof(mbase)) bl = sizeof(mbase) - 1;
+                memcpy(mbase, bt.sname, bl); mbase[bl] = '\0';
+                mns = mbase;
+            }
             for (int i = 0; i < prog->nitems; i++) {
                 Node *d = prog->items[i];
                 if (d->kind == ND_FUNC && d->is_method && d->ns && callee->name &&
-                    strcmp(d->ns, bt.sname) == 0 && strcmp(d->name, callee->name) == 0) { fn = d; argoff = 1; break; }
+                    strcmp(d->ns, mns) == 0 && strcmp(d->name, callee->name) == 0) { fn = d; argoff = 1; break; }
             }
         } else if (callee->operand->kind == ND_IDENT && callee->name) {
             /* ns.f(...): fill defaults for a module function too, but only when the base
@@ -1049,7 +1083,10 @@ static void df_fill_call(Node *prog, Node *call, Bind *map, int nmap) {
             }
         }
     }
-    if (!fn || fn->ngen > 0 || fn->variadic) return; /* generic/variadic: not default-fillable */
+    /* generic FUNCTIONS are not default-fillable (their defaults would bypass
+     * inference), but generic-STRUCT methods are: the default expression is a
+     * plain value cloned into the caller, and the instance keeps the same list */
+    if (!fn || (fn->ngen > 0 && !fn->is_method) || fn->variadic) return;
     int total = fn->nitems - argoff;
     int min = df_min_args(fn, argoff);
     if (call->nitems < min || call->nitems >= total) return;  /* wrong count: typecheck reports it */

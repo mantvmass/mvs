@@ -53,6 +53,8 @@ typedef struct {
 /* Layout information for one struct type */
 typedef struct {
     char  *name;
+    char  *display;     /* name shown by io.out: "Pair<i64,str>" for a generic
+                         * instance whose internal name is the mangled "Pair__i64_str" */
     Field  fields[64];
     int    nfields;
     int    size;        /* total size of the struct (bytes) */
