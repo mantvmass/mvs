@@ -6,3 +6,6 @@ back to outer x = 1
 loop x = 10
 loop x = 11
 after loop x = 1
+sib a = 1
+sib b = 1
+sib after = 7

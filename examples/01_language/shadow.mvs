@@ -23,5 +23,21 @@ func main() -> i8 {
         io.out("loop x = {}", x);       // 10, 11
     }
     io.out("after loop x = {}", x);     // 1
+
+    // shadowing across SIBLING scopes with 16-byte types: each `v` below must
+    // resolve to its own declaration in every compiler pass (temp-slot
+    // reservation once resolved these to the last declaration and corrupted
+    // the frame at run time)
+    let big: i128 = (1 as i128) << 100;
+    {
+        let v: i128 = big;
+        io.out("sib a = {}", v >> 100);          // 1
+    }
+    {
+        let v: i128 = big + big;
+        io.out("sib b = {}", v >> 101);          // 1
+    }
+    let v: i64 = 7;
+    io.out("sib after = {}", v);                 // 7
     return 0;
 }

@@ -1574,11 +1574,11 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
     for (int i = 0; i < fn->nitems; i++) /* parameters (never arrays: the parser rejects [T; N] params) */
         add_local(g, fn->items[i]->name, fn->items[i]->type, fn->items[i]->ptr, 0, fn->items[i]->type_name, fn->items[i]->sig, &frame);
     collect_locals(g, fn->body, &frame);   /* locals inside the body */
-    /* temp slots for structs returned from functions when used as rvalues
-     * every local must be temporarily visible so type_of can infer method receiver types
-     * (e.g. p.fmt() must know which struct p is), then reset before real gen begins */
+    /* temp slots for structs returned from functions when used as rvalues.
+     * Only the PARAMETERS are pre-visible; the pass opens/closes body scopes
+     * itself so shadowed names resolve exactly as they will during real gen */
     int saved_vis = g->nvisible;
-    for (int i = 0; i < g->nlocals; i++) g->visible[g->nvisible++] = i;
+    for (int i = 0; i < fn->nitems; i++) g->visible[g->nvisible++] = param_start + i;
     collect_struct_temps(g, fn->body, &frame);
     g->nvisible = saved_vis;
 

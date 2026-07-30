@@ -1400,8 +1400,10 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
     for (int i = 0; i < fn->nitems; i++)
         add_local(g, fn->items[i]->name, fn->items[i]->type, fn->items[i]->ptr, 0, fn->items[i]->type_name, fn->items[i]->sig, &frame);
     collect_locals(g, fn->body, &frame);
+    /* only the parameters are pre-visible; collect_struct_temps scopes the body
+     * itself so shadowed names resolve as they will during real gen */
     int saved_vis = g->nvisible;
-    for (int i = 0; i < g->nlocals; i++) g->visible[g->nvisible++] = i;
+    for (int i = 0; i < fn->nitems; i++) g->visible[g->nvisible++] = param_start + i;
     collect_struct_temps(g, fn->body, &frame);
     g->nvisible = saved_vis;
 

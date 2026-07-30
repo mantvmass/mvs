@@ -528,9 +528,39 @@ void collect_locals(Gen *g, Node *n, int *frame) {
 
 /* Walk the whole tree (expressions included), reserving a temp slot for every call that "returns a struct".
  * The offset is stored in the ND_CALL node's int_val, used when the struct result is used as an rvalue
- * (e.g. as an argument, or as the base of .field) that needs a real address for the result */
+ * (e.g. as an argument, or as the base of .field) that needs a real address for the result.
+ *
+ * SCOPE-AWARE like real codegen: this pass calls type_of, and shadowed names
+ * must resolve to the declaration visible AT THAT POINT. (An all-visible
+ * shortcut here once made `v` in an early block resolve to a later same-named
+ * declaration, so an i128 operation got NO scratch slot and scribbled over
+ * the frame at run time.) The visibility rules below mirror gen_stmt exactly:
+ * blocks open/close scopes, a declaration becomes visible AFTER its
+ * initializer, and for-init variables are scoped to the loop. */
 void collect_struct_temps(Gen *g, Node *n, int *frame) {
     if (!n) return;
+    switch (n->kind) {
+        case ND_BLOCK: {
+            int mark = g->nvisible;
+            for (int i = 0; i < n->nitems; i++) collect_struct_temps(g, n->items[i], frame);
+            g->nvisible = mark;
+            return;
+        }
+        case ND_VAR_DECL:
+            collect_struct_temps(g, n->operand, frame);   /* the init sees the OUTER name */
+            g->visible[g->nvisible++] = (int)n->int_val;
+            return;
+        case ND_FOR: {
+            int mark = g->nvisible;
+            collect_struct_temps(g, n->init, frame);
+            collect_struct_temps(g, n->cond, frame);
+            collect_struct_temps(g, n->step, frame);
+            collect_struct_temps(g, n->body, frame);
+            g->nvisible = mark;
+            return;
+        }
+        default: break;
+    }
     if (n->kind == ND_CALL) {
         ExprType rt = type_of(g, n);
         if ((rt.base == TYPE_STRUCT || is_blob16(rt.base, rt.ptr)) && rt.ptr == 0)
