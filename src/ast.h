@@ -130,6 +130,8 @@ typedef struct Node {
      * the current target (AND semantics when both are set). */
     char         *cfg_os;     /* required target OS, e.g. "windows" or "linux" */
     char         *cfg_arch;   /* required target arch, e.g. "x86_64" or "aarch64" */
+    int           is_test;    /* ND_FUNC: marked with @test; --test-main calls it from the
+                               * generated main (functions named test_* count as well) */
 } Node;
 
 /* --- node construction helpers --- */

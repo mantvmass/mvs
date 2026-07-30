@@ -972,14 +972,20 @@ static Node *parse_struct(Parser *p) {
 }
 
 /* attribute := '@' 'compile' '(' key '=' STRING (',' key '=' STRING)* ')'
+ *            | '@' 'test'
  * key := 'target_os' | 'target_arch'
- * The only attribute today is @compile; it gates the NEXT top-level item so it is
- * kept only when the values match the current target. Values are free strings,
- * but unknown ones are warned about (in the entry file) since they never match. */
-static void parse_attribute(Parser *p, char **os, char **arch) {
+ * @compile gates the NEXT top-level item (kept only when the values match the
+ * current target; unknown values warn since they never match). @test marks the
+ * next function as a test for `mvs test` / --test-main. */
+static void parse_attribute(Parser *p, char **os, char **arch, int *is_test) {
     advance(p); /* consume '@' */
+    if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "test") == 0) {
+        advance(p); /* @test takes no arguments */
+        *is_test = 1;
+        return;
+    }
     if (!check(p, TK_IDENT) || strcmp(p->cur.lexeme, "compile") != 0) {
-        error(p, "unknown attribute; only @compile(...) is supported");
+        error(p, "unknown attribute; only @compile(...) and @test are supported");
         return;
     }
     advance(p); /* consume 'compile' */
@@ -1039,10 +1045,11 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
 
     Node *prog = node_new(ND_PROGRAM, 1);
     while (!check(&p, TK_EOF) && !p.fatal) {
-        /* attributes gate the NEXT declaration; several @compile lines may stack */
+        /* attributes gate the NEXT declaration; several attribute lines may stack */
         char *cfg_os = NULL, *cfg_arch = NULL;
+        int cfg_test = 0;
         while (check(&p, TK_AT) && !p.fatal && !p.panic)
-            parse_attribute(&p, &cfg_os, &cfg_arch);
+            parse_attribute(&p, &cfg_os, &cfg_arch, &cfg_test);
         int cfg_start = prog->nitems;   /* stamp every item added by this iteration */
         if (p.panic) {
             /* the attribute itself failed to parse; skip stamping and recover below */
@@ -1074,13 +1081,14 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
         } else {
             error(&p, "expected an import, function, or global declaration");
         }
-        /* apply pending @compile attributes to everything this iteration produced
+        /* apply pending attributes to everything this iteration produced
          * (an impl block spreads several methods; all of them are gated together) */
-        if (cfg_os || cfg_arch) {
+        if (cfg_os || cfg_arch || cfg_test) {
             for (int i = cfg_start; i < prog->nitems; i++) {
                 Node *it = prog->items[i];
                 if (cfg_os && !it->cfg_os) it->cfg_os = strdup(cfg_os);
                 if (cfg_arch && !it->cfg_arch) it->cfg_arch = strdup(cfg_arch);
+                if (cfg_test && it->kind == ND_FUNC) it->is_test = 1;
             }
             free(cfg_os);
             free(cfg_arch);

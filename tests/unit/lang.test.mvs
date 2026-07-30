@@ -1,0 +1,45 @@
+// unit tests for core language behavior, run by `mvs test`
+import { test } from "std";
+
+struct P { x: i64; y: i64; }
+impl P {
+    func sum(self: *P) -> i64 { return self.x + self.y; }
+}
+
+func add<T>(a: T, b: T) -> T { return a + b; }
+
+// @test allows any function name; the test_* naming convention works too
+@test
+func arithmetic_basics() -> void {
+    test.eq(2 ** 10, 1024);
+    test.eq(7 % 3, 1);
+    test.eq(0x1F as i64, 31);
+    test.eq(0b1011 as i64, 11);
+    test.eq((10 - 3) * 2, 14);
+}
+
+func test_struct() -> void {
+    let p: P = P { x: 3, y: 4 };
+    test.eq(p.sum(), 7);
+    p.x = 10;
+    test.eq(p.sum(), 14);
+}
+
+func test_generic() -> void {
+    test.eq(add(2, 3), 5);
+    test.near(add(1.5, 2.25), 3.75, 0.000001);
+}
+
+func test_i128() -> void {
+    let big: i128 = (1 as i128) << 100;
+    test.ok(big > 0);
+    test.eq((big >> 100) as i64, 1);
+    test.eq((big % 1000000) as i64, 205376);
+}
+
+func test_strings() -> void {
+    let s: str = "hello";
+    test.eq(s, "hello");        // content comparison (strcmp inside std/test)
+    let t: str = s;
+    test.eq(t, s);
+}

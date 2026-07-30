@@ -1,0 +1,65 @@
+/*
+ * std/test.mvs - assertions for test files (somefile.test.mvs)
+ *
+ * A test file defines test functions: either marked @test (any name) or named
+ * test_*. `mvs test` discovers the file, generates a main() that calls every
+ * test in order (compile with --test-main to do the same by hand), and prints
+ * "  ok    <name>" after each one returns. A failed assertion prints
+ * "  FAIL  ..." and exits the test binary with 1.
+ *
+ * Example (math.test.mvs):
+ *     import { test, math } from "std";
+ *
+ *     @test
+ *     func gcd_of_common_factors() -> void {
+ *         test.eq(math.gcd(48, 18), 6);
+ *     }
+ *     func test_sqrt() -> void {
+ *         test.near(math.sqrt(2.0), 1.4142135, 0.0001);
+ *     }
+ */
+import { io } from "std";
+
+extern func exit(code: i32) -> void;
+extern func strcmp(a: str, b: str) -> i32;
+
+// abort the test binary with a message
+func fail(msg: str) -> void {
+    io.out("  FAIL  {}", msg);
+    exit(1);
+}
+
+// the condition must hold
+func ok(cond: bool) -> void {
+    if (!cond) { fail("expected true"); }
+}
+
+// exact equality (overloaded per type)
+func eq(got: i64, want: i64) -> void {
+    if (got != want) {
+        io.out("  FAIL  expected {} but got {}", want, got);
+        exit(1);
+    }
+}
+func eq(got: f64, want: f64) -> void {
+    if (got != want) {
+        io.out("  FAIL  expected {} but got {}", want, got);
+        exit(1);
+    }
+}
+func eq(got: str, want: str) -> void {
+    if (strcmp(got, want) != 0) {
+        io.out("  FAIL  expected {} but got {}", want, got);
+        exit(1);
+    }
+}
+
+// float equality within a tolerance
+func near(got: f64, want: f64, eps: f64) -> void {
+    let d: f64 = got - want;
+    if (d < 0.0) { d = 0.0 - d; }
+    if (d > eps) {
+        io.out("  FAIL  expected {} within {} but got {}", want, eps, got);
+        exit(1);
+    }
+}

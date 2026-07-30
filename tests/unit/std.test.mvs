@@ -1,0 +1,55 @@
+// unit tests for the std library, run by `mvs test`
+import { test, math, mem, string, rand } from "std";
+
+func test_math_int() -> void {
+    test.eq(math.abs(0 - 5), 5);
+    test.eq(math.gcd(48, 18), 6);
+    test.eq(math.lcm(4, 6), 12);
+    test.eq(math.ipow(2, 10), 1024);
+    test.eq(math.clamp(15, 0, 10), 10);
+    test.eq(math.sign(0 - 9), 0 - 1);
+}
+
+func test_math_float() -> void {
+    test.near(math.sqrt(2.0), 1.4142135, 0.0001);
+    test.near(math.pow(2.0, 10.0), 1024.0, 0.0001);
+    test.eq(math.abs(0.0 - 2.5), 2.5);
+    test.eq(math.max(1.5, 2.5), 2.5);
+}
+
+func test_mem() -> void {
+    let p: *u8 = mem.alloc(8);
+    mem.set(p, 7, 8);
+    test.eq(*(p + 3) as i64, 7);
+    let q: *u8 = mem.alloc(8);
+    mem.copy(q, p, 8);
+    test.ok(mem.eq(p, q, 8));
+    mem.zero(q, 8);
+    test.eq(*q as i64, 0);
+    test.ok(!mem.eq(p, q, 8));
+    mem.dealloc(p);
+    mem.dealloc(q);
+}
+
+func test_string() -> void {
+    let s: String = String::from("ab");
+    s.push_str("cd");
+    test.eq(s.as_str(), "abcd");
+    test.eq(s.len() as i64, 4);
+    s.drop();
+    let n: String = String::from_int(0 - 42);
+    test.eq(n.as_str(), "-42");
+    n.drop();
+}
+
+@test
+func rand_is_deterministic() -> void {
+    rand.seed(7);
+    let a: u64 = rand.next();
+    rand.seed(7);
+    test.eq(rand.next() as i64, a as i64);   // same seed, same sequence
+    let d: i64 = rand.range(1, 6);
+    test.ok(d >= 1 && d <= 6);
+    let u: f64 = rand.unit();
+    test.ok(u >= 0.0 && u < 1.0);
+}

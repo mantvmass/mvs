@@ -26,6 +26,7 @@
 #include <io.h>        /* _findfirst/_findnext for the built-in test runner */
 #else
 #include <dirent.h>
+#include <sys/stat.h>  /* stat() for directory detection in the test runner */
 #endif
 
 #define MVS_VERSION "0.2.0-dev"
@@ -167,6 +168,63 @@ static void peephole_x86(const char *path) {
     free(lines);
 }
 
+/* ---------- --test-main: synthesize main() for a test file ----------
+ *
+ * A test file (somefile.test.mvs) defines functions named test_* and no main.
+ * This pass appends a generated main() that calls every test_* from the ENTRY
+ * file in order and prints "  ok    <name>" after each returns (an assertion
+ * failure inside std/test prints FAIL and exits first). A file that already
+ * has a main() is left untouched. Returns the number of tests, -1 if none. */
+static int synthesize_test_main(Node *program) {
+    for (int i = 0; i < program->nitems; i++) {
+        Node *f = program->items[i];
+        if (f->kind == ND_FUNC && f->body && f->name && strcmp(f->name, "main") == 0)
+            return 0;                          /* the file brings its own harness */
+    }
+    Node *body = node_new(ND_BLOCK, 0);
+    int ntests = 0;
+    for (int i = 0; i < program->nitems; i++) {
+        Node *f = program->items[i];
+        if (f->kind != ND_FUNC || !f->body || f->is_method || f->ngen > 0 || !f->name) continue;
+        if (!f->is_test && strncmp(f->name, "test_", 5) != 0) continue; /* @test or test_* naming */
+        if (!diag_is_primary(f->file)) continue;   /* only the entry file's own tests */
+        Node *call = node_new(ND_CALL, 0);
+        call->operand = node_new(ND_IDENT, 0);
+        call->operand->name = strdup(f->name);
+        Node *st = node_new(ND_EXPR_STMT, 0);
+        st->operand = call;
+        node_add_item(body, st);
+        char buf[300];
+        snprintf(buf, sizeof(buf), "  ok    %s\n", f->name);
+        Node *msg = node_new(ND_STR, 0);
+        msg->str_val = strdup(buf); msg->str_len = (int)strlen(buf); msg->type = TYPE_STR;
+        Node *pc = node_new(ND_CALL, 0);
+        pc->operand = node_new(ND_IDENT, 0);
+        pc->operand->name = strdup("printf");
+        node_add_item(pc, msg);
+        Node *ps = node_new(ND_EXPR_STMT, 0);
+        ps->operand = pc;
+        node_add_item(body, ps);
+        ntests++;
+    }
+    if (ntests == 0) return -1;
+    Node *ret = node_new(ND_RETURN, 0);
+    ret->operand = node_new(ND_INT, 0);
+    ret->operand->int_val = 0; ret->operand->type = TYPE_I64;
+    node_add_item(body, ret);
+    /* declare extern printf for the ok lines (repeated extern declarations are fine) */
+    Node *pf = node_new(ND_FUNC, 0);
+    pf->name = strdup("printf"); pf->is_extern = 1; pf->type = TYPE_I32;
+    Node *p0 = node_new(ND_PARAM, 0);
+    p0->name = strdup("fmt"); p0->type = TYPE_STR;
+    node_add_item(pf, p0);
+    node_add_item(program, pf);
+    Node *mn = node_new(ND_FUNC, 0);
+    mn->name = strdup("main"); mn->type = TYPE_I8; mn->body = body;
+    node_add_item(program, mn);
+    return ntests;
+}
+
 /* ---------- `mvs test`: the built-in test runner ----------
  *
  * Runs the portable core of the suite from the repo root without PowerShell:
@@ -215,6 +273,53 @@ static int tr_list_dir(const char *dir, const char *ext, char names[][TR_NAME_LE
     return n;
 }
 
+/* --- discovery of user test files (somefile.test.mvs) --- */
+
+#define TR_MAX_TF 256
+static char g_tf[TR_MAX_TF][PATHBUF + 320];   /* discovered .test.mvs paths */
+static int  g_ntf = 0;
+
+static int tr_is_test_file(const char *name) {
+    size_t l = strlen(name);
+    return l > 9 && strcmp(name + l - 9, ".test.mvs") == 0;
+}
+
+/* recursively collect *.test.mvs under dir (skips .git) */
+static void tr_find_tests(const char *dir) {
+    char full[PATHBUF + 300];
+#ifdef _WIN32
+    char pat[PATHBUF + 310];
+    snprintf(pat, sizeof(pat), "%s/*", dir);
+    struct _finddata_t fd;
+    intptr_t h = _findfirst(pat, &fd);
+    if (h == -1) return;
+    do {
+        if (strcmp(fd.name, ".") == 0 || strcmp(fd.name, "..") == 0 || strcmp(fd.name, ".git") == 0) continue;
+        snprintf(full, sizeof(full), "%s/%s", dir, fd.name);
+        if (fd.attrib & _A_SUBDIR) tr_find_tests(full);
+        else if (tr_is_test_file(fd.name) && g_ntf < TR_MAX_TF)
+            snprintf(g_tf[g_ntf++], sizeof(g_tf[0]), "%s", full);
+    } while (_findnext(h, &fd) == 0);
+    _findclose(h);
+#else
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0 || strcmp(e->d_name, ".git") == 0) continue;
+        snprintf(full, sizeof(full), "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (stat(full, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) tr_find_tests(full);
+        else if (tr_is_test_file(e->d_name) && g_ntf < TR_MAX_TF)
+            snprintf(g_tf[g_ntf++], sizeof(g_tf[0]), "%s", full);
+    }
+    closedir(d);
+#endif
+}
+
+static int tr_tf_cmp(const void *a, const void *b) { return strcmp((const char *)a, (const char *)b); }
+
 /* golden name -> example path: "01_language_arrays" -> "examples/01_language/arrays"
  * (groups are NN_word, so the SECOND underscore is the separator; no underscore = top level) */
 static void tr_name_to_path(const char *name, char *out, size_t on) {
@@ -255,15 +360,71 @@ static int tr_capture(const char *cmdline, char **out) {
     return PCLOSE(p);
 }
 
-static int run_test_suite(const char *argv0) {
-    char names[TR_MAX_FILES][TR_NAME_LEN];
+static int run_test_suite(const char *argv0, const char *path_arg) {
+    static char names[TR_MAX_FILES][TR_NAME_LEN];
     char cmd[PATHBUF * 2], path[PATHBUF], gold_path[PATHBUF];
     int pass = 0, fail = 0;
 
-    int ngold = tr_list_dir("tests/expected", ".txt", names, TR_MAX_FILES);
-    if (ngold == 0) {
-        fprintf(stderr, "error: tests/expected/ not found; run `mvs test` from the repository root\n");
+    /* discover user test files first: an explicit file, a directory, or the
+     * current tree (recursively); the repo golden suite joins in when
+     * tests/expected/ exists next to us */
+    g_ntf = 0;
+    if (path_arg && tr_is_test_file(path_arg)) {
+        snprintf(g_tf[g_ntf++], sizeof(g_tf[0]), "%s", path_arg);
+    } else {
+        tr_find_tests(path_arg ? path_arg : ".");
+        qsort(g_tf, (size_t)g_ntf, sizeof(g_tf[0]), tr_tf_cmp);
+    }
+    int ngold = path_arg ? 0 : tr_list_dir("tests/expected", ".txt", names, TR_MAX_FILES);
+    if (ngold == 0 && g_ntf == 0) {
+        fprintf(stderr, "error: no tests found: no *.test.mvs file%s%s\n",
+                path_arg ? " under " : " here (and no tests/expected/ repo suite)",
+                path_arg ? path_arg : "");
         return 1;
+    }
+
+    /* --- user test files (somefile.test.mvs) --- */
+    if (g_ntf > 0) printf("=== test files (*.test.mvs) ===\n");
+    for (int i = 0; i < g_ntf; i++) {
+        printf("--- %s\n", g_tf[i]);
+        char *out = NULL;
+        char tbase[PATHBUF + 320];
+        snprintf(tbase, sizeof(tbase), "%s", g_tf[i]);
+        tbase[strlen(tbase) - 4] = '\0';           /* strip ".mvs" -> base ends in ".test" */
+#ifdef _WIN32
+        snprintf(cmd, sizeof(cmd), "\"%s\" %s --test-main", argv0, g_tf[i]);
+        int crc = tr_capture(cmd, &out);
+        if (crc != 0) { printf("  FAIL  (compile)\n%s", out); free(out); fail++; continue; }
+        free(out);
+        char texe[PATHBUF + 330];
+        snprintf(texe, sizeof(texe), "%s.exe", tbase);
+        for (char *c = texe; *c; c++) if (*c == '/') *c = '\\';
+        int rrc = tr_capture(texe, &out);
+        printf("%s", out);
+        snprintf(texe, sizeof(texe), "%s.exe", tbase); remove(texe);
+        snprintf(texe, sizeof(texe), "%s.obj", tbase); remove(texe);
+#else
+        snprintf(cmd, sizeof(cmd), "\"%s\" %s --test-main --target elf64", argv0, g_tf[i]);
+        int crc = tr_capture(cmd, &out);
+        if (crc != 0) { printf("  FAIL  (compile)\n%s", out); free(out); fail++; continue; }
+        free(out);
+        snprintf(cmd, sizeof(cmd), "gcc \"%s.o\" -o /tmp/mvs_selftest -no-pie -lm", tbase);
+        int lrc = tr_capture(cmd, &out);
+        if (lrc != 0) { printf("  FAIL  (link)\n%s", out); free(out); fail++; continue; }
+        free(out);
+        int rrc = tr_capture("/tmp/mvs_selftest", &out);
+        printf("%s", out);
+        snprintf(cmd, sizeof(cmd), "%s.o", tbase); remove(cmd);
+#endif
+        if (rrc != 0) { printf("  FAILED (exit %d)\n", rrc); fail++; }
+        else pass++;
+        free(out);
+    }
+    if (ngold == 0) {
+        printf("\n");
+        if (fail > 0) { printf("FAILED: %d failure(s), %d passed\n", fail, pass); return 1; }
+        printf("ALL PASS: %d test file(s)\n", pass);
+        return 0;
     }
 
     printf("=== run-pass (golden output, %s) ===\n",
@@ -372,18 +533,20 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (argc >= 2 && strcmp(argv[1], "test") == 0)
-        return run_test_suite(argv[0]);   /* built-in test runner (run from the repo root) */
+        return run_test_suite(argv[0], argc >= 3 ? argv[2] : NULL);
     if (argc < 2) {
         fprintf(stderr,
             "MVS compiler %s\n"
             "usage: %s <input.mvs> [options]\n"
-            "       %s test            run the golden test suite (from the repo root)\n"
+            "       %s test [path]     run tests: every *.test.mvs under path (default .),\n"
+            "                          plus the repo golden suite when tests/expected/ exists\n"
             "  -o <file>     set the output file name\n"
             "  -S            emit assembly (.asm) only, then stop\n"
             "  -c            emit an object file (.obj) only (for linking with C)\n"
             "  -O            peephole-optimize the generated assembly (x86 targets)\n"
             "  --nostd       freestanding mode: no std/C runtime/OS (emits .obj) - for OS dev\n"
             "  --target <t>  target: win64 (default), elf64 (x86-64 Linux), arm64 (AArch64 Linux)\n"
+            "  --test-main   generate main() from the file's test_* functions (used by `mvs test`)\n"
             "  --keep        keep intermediate files (.asm, .obj)\n"
             "  --version     print the compiler version\n", MVS_VERSION, argv[0], argv[0]);
         return 1;
@@ -397,11 +560,13 @@ int main(int argc, char **argv) {
     int nostd = 0;     /* --nostd : freestanding (no std/CRT dependency) */
     int keep = 0;      /* --keep */
     int optimize = 0;  /* -O : peephole pass over the generated assembly */
+    int test_main = 0; /* --test-main : synthesize main() from test_* functions */
     TargetArch arch = ARCH_X86_64_WIN;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-S") == 0) only_asm = 1;
         else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--emit-obj") == 0) emit_obj = 1;
         else if (strcmp(argv[i], "-O") == 0) optimize = 1;
+        else if (strcmp(argv[i], "--test-main") == 0) test_main = 1;
         else if (strcmp(argv[i], "--nostd") == 0) { nostd = 1; emit_obj = 1; } /* freestanding -> produce .obj */
         else if (strcmp(argv[i], "--keep") == 0) keep = 1;
         else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
@@ -448,6 +613,12 @@ int main(int argc, char **argv) {
     int had_error = 0;
     Node *program = module_load(input, stddir, nostd, target_os, target_arch, &had_error);
     if (had_error) { fprintf(stderr, "compilation failed (parse/import errors)\n"); return 1; }
+
+    /* --test-main: a test file has test_* functions instead of a main; generate one */
+    if (test_main && synthesize_test_main(program) < 0) {
+        fprintf(stderr, "error: no test functions found (define `func test_xxx() -> void`, or write a main)\n");
+        return 1;
+    }
 
     /* monomorphization: turn generic functions into instances for the types actually called,
      * followed by overload resolution (including generic instances that may call overloads) */

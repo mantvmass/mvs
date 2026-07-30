@@ -528,6 +528,7 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `env` | `get(name)` (missing reads as `""`), `set(name, value)`; per-OS via `@compile` |
 | `process` | `run(cmd)` (shell command), `pid()`, `exit(code)` (the extern, reached through the namespace) |
 | `rand` | xorshift64 in pure MVS: `seed`/`next`/`range(lo, hi)`/`unit()`; the same seed gives the SAME sequence on every platform |
+| `test` | assertions for `*.test.mvs` files: `ok(cond)`, `eq(got, want)` (i64/f64/str overloads), `near(got, want, eps)`, `fail(msg)`; see section 4.14 |
 
 Two resolution rules make modules pleasant to use:
 
@@ -576,6 +577,48 @@ func pause() -> void { /* ... */ }
   gated definitions of the same function are fine as long as only one survives per target.
 - An unknown key is a compile error; an unknown value only warns (it can never match).
 - `std/net.mvs` is the reference user: Winsock vs POSIX sockets in one file.
+
+### 4.14 Testing (`mvs test` + `*.test.mvs`)
+
+Tests live in files named `somefile.test.mvs`. A test file defines test functions
+(no `main` needed) and asserts through `std/test`. A test is either marked with
+the `@test` decorator (any name) or simply named `test_*`:
+
+```rust
+// math.test.mvs
+import { test, math } from "std";
+
+@test
+func gcd_of_common_factors() -> void {
+    test.eq(math.gcd(48, 18), 6);
+}
+
+func test_sqrt() -> void {              // the naming convention works too
+    test.near(math.sqrt(2.0), 1.4142135, 0.0001);
+}
+```
+
+```
+$ mvs test              # every *.test.mvs under the current directory (recursive)
+$ mvs test src/         # ... under a specific directory
+$ mvs test math.test.mvs
+=== test files (*.test.mvs) ===
+--- math.test.mvs
+  ok    gcd_of_common_factors
+  ok    test_sqrt
+ALL PASS: 1 test file(s)
+```
+
+How it works: `mvs test` compiles each file with `--test-main`, which appends a
+generated `main()` calling every test function in the ENTRY file in order and
+printing `ok <name>` after each returns. A failed assertion prints `FAIL expected
+... but got ...` and exits with 1, so the remaining tests in that file are skipped
+and the file counts as failed. A test file that defines its own `main` is run as is.
+
+Assertions: `test.ok(cond)` · `test.eq(got, want)` (overloaded for i64/f64/str;
+str compares CONTENT via strcmp) · `test.near(got, want, eps)` for floats ·
+`test.fail(msg)`. In the MVS repository itself, `mvs test` additionally runs the
+golden example suite when it finds `tests/expected/`.
 
 ---
 
