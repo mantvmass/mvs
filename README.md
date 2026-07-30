@@ -12,7 +12,25 @@ and the output is real x86-64 assembly you can read.
 file.mvs -> lexer -> parser -> typecheck -> codegen -> .asm -> nasm -> .obj -> link -> run
 ```
 
-## Quick start
+## Install
+
+Prebuilt binaries from the latest release (macOS is on the [roadmap](ROADMAP.md)):
+
+Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mantvmass/mvs/main/scripts/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/mantvmass/mvs/main/scripts/install.ps1 | iex
+```
+
+Uninstall with `scripts/uninstall.sh` / `scripts/uninstall.ps1`.
+
+## Build from source
 
 Needs `clang` and `nasm` on PATH (Windows), or `gcc` and `nasm` (Linux).
 
@@ -36,8 +54,9 @@ Structs + methods + traits (static AND dynamic dispatch via `dyn Trait`) · gene
 with bounds and `where` clauses · function overloading · real `[T; N]` arrays ·
 full 128-bit integers · function pointers · heap `String` · modules + a small std
 (`io`/`fs`/`net`/`string`/`fmt`) · C interop in both directions · Rust-style
-compiler diagnostics · freestanding `--nostd` mode for OS/bare-metal work · two
-backends (x86-64 win64 and x86-64 SysV/ELF) sharing one architecture-independent core.
+compiler diagnostics · freestanding `--nostd` mode for OS/bare-metal work · three
+backends (x86-64 win64, x86-64 SysV/ELF, AArch64 AAPCS64) sharing one
+architecture-independent core, all CI-tested against the same golden outputs.
 
 ## Documentation
 

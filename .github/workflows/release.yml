@@ -18,7 +18,7 @@ jobs:
       - name: Install NASM
         run: choco install nasm -y
       - name: Build
-        run: clang -Wall -Wextra -Werror -O2 -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c -o mvs.exe
+        run: clang -Wall -Wextra -Werror -O2 -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs.exe
       - name: Package
         run: Compress-Archive -Path mvs.exe, std, docs, README.md, LICENSE-MIT, LICENSE-APACHE -DestinationPath mvs-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
@@ -33,7 +33,7 @@ jobs:
       - name: Install NASM
         run: sudo apt-get update && sudo apt-get install -y nasm
       - name: Build
-        run: gcc -Wall -Wextra -Werror -O2 -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c -o mvs
+        run: gcc -Wall -Wextra -Werror -O2 -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs
       - name: Package
         run: tar czf mvs-linux-x86_64.tar.gz mvs std docs README.md LICENSE-MIT LICENSE-APACHE
       - uses: actions/upload-artifact@v4

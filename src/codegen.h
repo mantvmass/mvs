@@ -13,8 +13,8 @@
 /* Supported target architectures */
 typedef enum {
     ARCH_X86_64_WIN,  /* x86-64 on Windows (output is NASM syntax, win64 ABI) */
-    ARCH_X86_64_SYSV  /* x86-64 Linux/ELF (NASM elf64, System V AMD64 ABI) */
-    /* future: ARCH_ARM64, ... */
+    ARCH_X86_64_SYSV, /* x86-64 Linux/ELF (NASM elf64, System V AMD64 ABI) */
+    ARCH_ARM64_LINUX  /* AArch64 Linux (GNU as syntax, AAPCS64) */
 } TargetArch;
 
 /* Generate an assembly file from the AST, written to asm_path.

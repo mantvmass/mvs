@@ -9,7 +9,7 @@ current state of the language lives in [docs/guide.md](docs/guide.md).
 |--------|-----|---------------|--------|
 | x86-64 Windows | win64 | COFF/PE (`nasm -f win64`) | done, default target |
 | x86-64 Linux | System V AMD64 | ELF64 (`nasm -f elf64`) | done (`--target elf64`), CI-tested |
-| AArch64 Linux | AAPCS64 | ELF64 (GNU as syntax) | next up (`src/arch/arm64/`) |
+| AArch64 Linux | AAPCS64 | ELF64 (GNU as syntax) | done (`--target arm64`), CI-tested under qemu |
 | x86-64 macOS | System V + Mach-O quirks | Mach-O | planned |
 | RISC-V Linux | RV64 psABI | ELF64 | under consideration |
 
@@ -35,8 +35,8 @@ func pause() -> void { /* wfe */ }
 
 Open questions: attribute grammar (`@compile(...)` vs `#[cfg(...)]`), whether it
 gates whole items only or also blocks, and how it interacts with imports and
-tree-shaking. This lands together with the second architecture backend so it can
-be designed against a real use case.
+tree-shaking. With three ABIs now live (win64, SysV, AAPCS64) there are real use
+cases to design against; this is the next language feature up.
 
 ## Core library (`core`), modeled on Rust
 

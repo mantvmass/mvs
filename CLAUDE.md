@@ -59,6 +59,7 @@ make test
 | `src/arch/common.{h,c}` | shared backend (arch-independent): types, structs, symtab, tree-shaking |
 | `src/arch/x86_64/win.c` | x86-64 win64 backend (emits NASM, stack machine) |
 | `src/arch/x86_64/sysv.c` | x86-64 Linux/ELF backend (SysV ABI, `--target elf64`) |
+| `src/arch/arm64/linux.c` | AArch64 Linux backend (AAPCS64, `--target arm64`, GNU as syntax) |
 | `src/main.c` | CLI driving the whole pipeline |
 | `std/*.mvs` | standard library written in MVS (`io`/`string`/`fmt`/`fs`/`net`) |
 
@@ -100,10 +101,12 @@ full 128-bit `i128`/`u128` arithmetic (software divmod helpers + decimal io.out)
 (`<T: A + B>`, `where` clauses) · ELF/SysV backend (`--target elf64`, run-tested in WSL;
 freestanding ELF links with GNU ld for GRUB OS dev) · impl-on-primitive
 (`impl Display for i64`) · variadic `...dyn Trait` parameters (packed dyn slices) ·
-`fmt.outf` = io.out as a pure-MVS library · native Linux build + Linux CI job.
+`fmt.outf` = io.out as a pure-MVS library · native Linux build + Linux CI job ·
+ARM64 backend (`--target arm64`, AAPCS64, GNU as syntax, full suite run under
+qemu-aarch64 in CI with the same goldens as x86).
 
-**Remaining:** see [ROADMAP.md](ROADMAP.md) (ARM64 backend next, then conditional
-compilation and the `core` library).
+**Remaining:** see [ROADMAP.md](ROADMAP.md) (conditional compilation
+`@compile(...)` and the `core` library are next).
 
 ## Project-specific cautions (full list in docs/rules.md)
 

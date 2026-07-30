@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
             "  -S            emit assembly (.asm) only, then stop\n"
             "  -c            emit an object file (.obj) only (for linking with C)\n"
             "  --nostd       freestanding mode: no std/C runtime/OS (emits .obj) - for OS dev\n"
-            "  --target <t>  target ABI: win64 (default) or elf64 (Linux/SysV; emits a .o to link on Linux)\n"
+            "  --target <t>  target: win64 (default), elf64 (x86-64 Linux), arm64 (AArch64 Linux)\n"
             "  --keep        keep intermediate files (.asm, .obj)\n", argv[0]);
         return 1;
     }
@@ -100,22 +100,23 @@ int main(int argc, char **argv) {
             const char *t = argv[++i];
             if (strcmp(t, "win64") == 0) arch = ARCH_X86_64_WIN;
             else if (strcmp(t, "elf64") == 0) arch = ARCH_X86_64_SYSV;
-            else { fprintf(stderr, "error: unknown target '%s' (supported: win64, elf64)\n", t); return 1; }
+            else if (strcmp(t, "arm64") == 0) arch = ARCH_ARM64_LINUX;
+            else { fprintf(stderr, "error: unknown target '%s' (supported: win64, elf64, arm64)\n", t); return 1; }
         }
         else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) output = argv[++i];
         else if (argv[i][0] != '-') input = argv[i];
     }
     if (!input) { fprintf(stderr, "error: no input file\n"); return 1; }
-    /* elf64 objects cannot be linked into a Windows exe here: stop at the .o
+    /* elf64/arm64 objects cannot be linked into a Windows exe here: stop at the .o
      * (link on a Linux system, e.g. `gcc file.o -o file`) */
-    if (arch == ARCH_X86_64_SYSV) emit_obj = 1;
+    if (arch == ARCH_X86_64_SYSV || arch == ARCH_ARM64_LINUX) emit_obj = 1;
 
     /* derive the various output file names from the base name */
     char base[PATHBUF];
     if (!base_name(input, base)) return 1;
     char asm_path[PATHBUF + 8], obj_path[PATHBUF + 8], exe_path[PATHBUF + 8];
-    snprintf(asm_path, sizeof(asm_path), "%s.asm", base);
-    snprintf(obj_path, sizeof(obj_path), arch == ARCH_X86_64_SYSV ? "%s.o" : "%s.obj", base);
+    snprintf(asm_path, sizeof(asm_path), arch == ARCH_ARM64_LINUX ? "%s.s" : "%s.asm", base);
+    snprintf(obj_path, sizeof(obj_path), arch == ARCH_X86_64_WIN ? "%s.obj" : "%s.o", base);
     if (output) snprintf(exe_path, sizeof(exe_path), "%s", output);
     else        snprintf(exe_path, sizeof(exe_path), "%s.exe", base);
 
@@ -163,24 +164,40 @@ int main(int argc, char **argv) {
     printf("[mvs] generated %s\n", asm_path);
     if (only_asm) return 0; /* -S: stop at the assembly file */
 
-    /* 4. assemble with nasm into an object file; first check that nasm is installed */
+    /* 4. assemble into an object file (nasm for x86-64; a GNU-as-compatible driver for arm64) */
     char cmd[PATHBUF * 3], ver[256];
-    if (!tool_version("nasm", ver, sizeof(ver))) {
-        fprintf(stderr, "error: 'nasm' not found. MVS needs the NASM assembler.\n"
-                        "       Install it from https://www.nasm.us and make sure it is on your PATH.\n");
-        return 1;
+    if (arch == ARCH_ARM64_LINUX) {
+        const char *as_tool = NULL;
+        if (tool_version("aarch64-linux-gnu-gcc", ver, sizeof(ver))) as_tool = "aarch64-linux-gnu-gcc -c";
+        else if (tool_version("clang", ver, sizeof(ver))) as_tool = "clang --target=aarch64-linux-gnu -c";
+        else {
+            fprintf(stderr, "error: no AArch64 assembler found.\n"
+                            "       Install aarch64-linux-gnu-gcc (Linux) or clang (any platform).\n");
+            return 1;
+        }
+        printf("[mvs] using %s\n", ver);
+        snprintf(cmd, sizeof(cmd), "%s \"%s\" -o \"%s\"", as_tool, asm_path, obj_path);
+        printf("[mvs] %s\n", cmd);
+        if (system(cmd) != 0) { fprintf(stderr, "error: assembler failed\n"); return 1; }
+    } else {
+        if (!tool_version("nasm", ver, sizeof(ver))) {
+            fprintf(stderr, "error: 'nasm' not found. MVS needs the NASM assembler.\n"
+                            "       Install it from https://www.nasm.us and make sure it is on your PATH.\n");
+            return 1;
+        }
+        printf("[mvs] using %s\n", ver);
+        snprintf(cmd, sizeof(cmd), "nasm -f %s \"%s\" -o \"%s\"",
+                 arch == ARCH_X86_64_SYSV ? "elf64" : "win64", asm_path, obj_path);
+        printf("[mvs] %s\n", cmd);
+        if (system(cmd) != 0) { fprintf(stderr, "error: nasm failed\n"); return 1; }
     }
-    printf("[mvs] using %s\n", ver);
-    snprintf(cmd, sizeof(cmd), "nasm -f %s \"%s\" -o \"%s\"",
-             arch == ARCH_X86_64_SYSV ? "elf64" : "win64", asm_path, obj_path);
-    printf("[mvs] %s\n", cmd);
-    if (system(cmd) != 0) { fprintf(stderr, "error: nasm failed\n"); return 1; }
 
     /* -c / --nostd / elf64 mode: stop at the object file */
     if (emit_obj || nostd) {
         printf("[mvs] produced object file %s%s\n", obj_path,
                nostd ? " (freestanding, no std/CRT)" :
-               arch == ARCH_X86_64_SYSV ? " (ELF64; link on Linux, e.g. gcc file.o -o file)" : "");
+               arch == ARCH_X86_64_SYSV ? " (ELF64; link on Linux, e.g. gcc file.o -o file)" :
+               arch == ARCH_ARM64_LINUX ? " (AArch64; link with aarch64-linux-gnu-gcc, run with qemu-aarch64)" : "");
         if (!keep) remove(asm_path);
         return 0;
     }
