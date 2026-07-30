@@ -550,6 +550,14 @@ static Node *de_match(Node *n) {
     decl->operand = n->cond;                     /* the scrutinee, evaluated exactly once */
     node_add_item(blk, decl);
 
+    /* the LAST variant arm of an exhaustive match (no '_') becomes the ELSE
+     * branch: the tag can only be that variant by then, and the complete
+     * if/else chain lets the missing-return analysis accept a match whose
+     * arms all return (as Rust does) */
+    int last_variant = -1;
+    for (int i = 0; i < n->nitems; i++)
+        if (n->items[i]->name) last_variant = i;
+
     Node *first_if = NULL, *cur = NULL;
     for (int i = 0; i < n->nitems; i++) {
         Node *arm = n->items[i];
@@ -558,14 +566,6 @@ static Node *de_match(Node *n) {
         for (int v = 0; v < ei->decl->nitems; v++)
             if (strcmp(ei->decl->items[v]->name, arm->name) == 0) { vi = v; break; }
         if (vi < 0) continue;                    /* already reported */
-        Node *iff = de_node(ND_IF, arm);
-        Node *cmp = de_node(ND_BINARY, arm);
-        cmp->op = TK_EQ;
-        cmp->lhs = de_member(tmp, "__tag", arm);
-        cmp->rhs = de_node(ND_INT, arm);
-        cmp->rhs->int_val = vi;
-        cmp->rhs->type = TYPE_I64;
-        iff->cond = cmp;
         Node *tb = de_node(ND_BLOCK, arm);
         Node *variant = ei->decl->items[vi];
         for (int j = 0; j < arm->nitems && j < variant->nitems; j++) {
@@ -582,6 +582,19 @@ static Node *de_match(Node *n) {
             node_add_item(tb, bd);
         }
         node_add_item(tb, arm->body);            /* the arm's block runs after the bindings */
+        if (!def_arm && i == last_variant) {     /* exhaustive: final arm needs no tag test */
+            if (cur) cur->else_branch = tb;
+            else if (!first_if) first_if = tb;   /* a single-arm match is just its block */
+            break;
+        }
+        Node *iff = de_node(ND_IF, arm);
+        Node *cmp = de_node(ND_BINARY, arm);
+        cmp->op = TK_EQ;
+        cmp->lhs = de_member(tmp, "__tag", arm);
+        cmp->rhs = de_node(ND_INT, arm);
+        cmp->rhs->int_val = vi;
+        cmp->rhs->type = TYPE_I64;
+        iff->cond = cmp;
         iff->then_branch = tb;
         if (!first_if) first_if = iff;
         else cur->else_branch = iff;

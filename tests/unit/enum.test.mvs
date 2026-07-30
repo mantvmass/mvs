@@ -24,6 +24,42 @@ func payload_variants() -> void {
     test.eq(calc(Op::Zero()), 0);
 }
 
+// an exhaustive match may be a function's final statement with every arm
+// returning (the last arm desugars to an else, completing the return analysis)
+func code(op: Op) -> i64 {
+    match (op) {
+        Op::Add(a, b) => { return a * 100 + b; }
+        Op::Neg(x) => { return 0 - x; }
+        Op::Zero => { return 0; }
+    }
+}
+
+@test
+func exhaustive_match_returns() -> void {
+    test.eq(code(Op::Add(2, 3)), 203);
+    test.eq(code(Op::Neg(9)), 0 - 9);
+    test.eq(code(Op::Zero()), 0);
+}
+
+@test
+func break_continue_through_match() -> void {
+    let i: i64 = 0;
+    let hits: i64 = 0;
+    while (i < 10) {
+        let op: Op = Op::Zero();
+        if (i == 4) { op = Op::Neg(1); }
+        if (i == 7) { op = Op::Add(1, 1); }
+        match (op) {
+            Op::Add(a, b) => { hits = hits + a + b; break; }   // breaks the LOOP
+            Op::Neg(x) => { i = i + x + 1; continue; }         // continues the LOOP
+            Op::Zero => { }
+        }
+        i = i + 1;
+    }
+    test.eq(hits, 2);
+    test.eq(i, 7);
+}
+
 @test
 func catch_all_arm() -> void {
     let op: Op = Op::Add(1, 1);
