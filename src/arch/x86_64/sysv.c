@@ -1628,6 +1628,13 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
     int saved_vis = g->nvisible;
     for (int i = 0; i < fn->nitems; i++) g->visible[g->nvisible++] = param_start + i;
     collect_struct_temps(g, fn->body, &frame);
+    /* main also RUNS the global initializers in its own frame, so their scratch
+     * must be reserved here too (otherwise it lands at [rbp - 0], on top of the
+     * saved rbp and the return address) */
+    if ((fn->ns == NULL || fn->ns[0] == 0) && strcmp(fn->name, "main") == 0)
+        for (int i = 0; i < program->nitems; i++)
+            if (program->items[i]->kind == ND_VAR_DECL && program->items[i]->operand)
+                collect_struct_temps(g, program->items[i]->operand, &frame);
     g->nvisible = saved_vis;
 
     /* round the frame size up to a multiple of 16 to keep the stack aligned */

@@ -1,6 +1,6 @@
 <div align="center">
 
-# MVS
+# The MVS Compiler
 
 **A small low-level language with Rust-flavored syntax and a compiler written by hand in plain C.**
 

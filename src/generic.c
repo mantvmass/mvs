@@ -178,9 +178,44 @@ static int func_ret_type(Node *prog, const char *name, CType *out) {
     return 1;
 }
 
-/* Find the type of a struct field (used to infer a.b) */
+/* Find the type of a struct field (used to infer a.b).
+ * A canonical generic name ("Wrap<Option<i64>>") resolves against the TEMPLATE
+ * ("Wrap"), with the field's declared type specialized for these arguments,
+ * because instances do not exist yet while the enum/match desugar runs. */
 static int struct_field_type(Node *prog, const char *sname, const char *field, CType *out) {
     if (!sname) return 0;
+    if (strchr(sname, '<')) {
+        char base[128];
+        char *args[4];
+        int nargs = gs_split(sname, base, sizeof(base), args);
+        if (nargs > 0) {
+            for (int i = 0; i < prog->nitems; i++) {
+                Node *d = prog->items[i];
+                if (d->kind != ND_STRUCT_DECL || !d->name || strcmp(d->name, base) != 0) continue;
+                if (d->ngen != nargs) break;
+                for (int j = 0; j < d->nitems; j++) {
+                    Node *f = d->items[j];
+                    if (strcmp(f->name, field) != 0) continue;
+                    out->base = f->type; out->ptr = f->ptr; out->sname = f->type_name;
+                    out->sig = f->sig; out->arr = f->arr;
+                    if (f->type == TYPE_STRUCT && f->type_name) {
+                        /* the field's type may BE a parameter (T) or mention one
+                         * (Option<T>): specialize it with this instance's arguments */
+                        char *spec = spec_type_name(f->type_name, d, sname);
+                        if (spec) {
+                            DataType prim = datatype_from_name(spec);
+                            if (prim != TYPE_UNKNOWN) { out->base = prim; out->sname = NULL; }
+                            else out->sname = spec;
+                        }
+                    }
+                    for (int a = 0; a < nargs; a++) free(args[a]);
+                    return 1;
+                }
+                break;
+            }
+            for (int a = 0; a < nargs; a++) free(args[a]);
+        }
+    }
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
         if (d->kind == ND_STRUCT_DECL && strcmp(d->name, sname) == 0) {
@@ -1359,6 +1394,64 @@ static int unify_ret_with_expected(Node *prog, Node *tmpl, const char *expect_sn
     return bound;
 }
 
+/* The struct type expected of argument `argi` of this call, or NULL when there
+ * is none to be had. For a method on a generic instance the declared parameter
+ * type is specialized for the receiver, so Vec<Option<u8>>::push expects an
+ * Option<u8>. `buf` holds the specialized name when one is built. */
+static const char *call_param_expect(Node *prog, Node *call, int argi, Bind *map, int nmap,
+                                     char *buf, size_t bufn) {
+    Node *callee = call->operand;
+    if (!callee) return NULL;
+    Node *fn = NULL;
+    const char *recv_canon = NULL;
+    if (callee->kind == ND_IDENT) {
+        for (int i = 0; i < prog->nitems; i++) {
+            Node *d = prog->items[i];
+            if (d->kind != ND_FUNC || d->is_extern || d->is_method || d->ngen != 0) continue;
+            if (!d->name || strcmp(d->name, callee->name) != 0) continue;
+            fn = d;
+            break;
+        }
+        if (!fn || argi >= fn->nitems) return NULL;
+        Node *p = fn->items[argi];
+        return (p->type == TYPE_STRUCT && p->ptr == 0) ? p->type_name : NULL;
+    }
+    if (callee->kind != ND_MEMBER || !callee->name) return NULL;
+    CType bt = infer(prog, callee->operand, map, nmap);
+    if (bt.base != TYPE_STRUCT || !bt.sname) return NULL;
+    char nsbuf[128];
+    const char *ns = bt.sname;
+    const char *lt = strchr(bt.sname, '<');
+    if (lt) {
+        size_t bl = (size_t)(lt - bt.sname);
+        if (bl >= sizeof(nsbuf)) return NULL;
+        memcpy(nsbuf, bt.sname, bl); nsbuf[bl] = '\0';
+        ns = nsbuf;
+        recv_canon = bt.sname;
+    }
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *d = prog->items[i];
+        if (d->kind != ND_FUNC || !d->is_method || !d->ns || !d->name) continue;
+        if (strcmp(d->ns, ns) != 0 || strcmp(d->name, callee->name) != 0) continue;
+        fn = d;
+        break;
+    }
+    if (!fn) return NULL;
+    int pi = argi + 1;                       /* items[0] is self */
+    if (pi >= fn->nitems) return NULL;
+    Node *p = fn->items[pi];
+    if (p->type != TYPE_STRUCT || p->ptr != 0 || !p->type_name) return NULL;
+    if (recv_canon && fn->ngen > 0) {
+        char *spec = spec_type_name(p->type_name, fn, recv_canon);
+        if (spec) {
+            snprintf(buf, bufn, "%s", spec);
+            free(spec);
+            return buf;
+        }
+    }
+    return p->type_name;
+}
+
 /* Scan nodes in a concrete function for generic calls, then instantiate + rename the call sites.
  * Scope-aware (map/nmap grows with declarations) so argument types infer correctly under shadowing.
  * Returns the number of new instances created (used for the fixpoint check) */
@@ -1397,7 +1490,37 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
     scan_calls(prog, n->then_branch, map, nmap, made); scan_calls(prog, n->else_branch, map, nmap, made);
     scan_calls(prog, n->init, map, nmap, made);  scan_calls(prog, n->step, map, nmap, made);
     scan_calls(prog, n->body, map, nmap, made);
-    for (int i = 0; i < n->nitems; i++) scan_calls(prog, n->items[i], map, nmap, made);
+    if (n->kind == ND_CALL) {
+        /* each argument is expected to have its PARAMETER's type, so
+         * `v.push(Some(10))` on a Vec<Option<u8>> binds T = u8 */
+        for (int i = 0; i < n->nitems; i++) {
+            char specbuf[256];
+            const char *save = g_expect_sname;
+            g_expect_sname = call_param_expect(prog, n, i, map, *nmap, specbuf, sizeof(specbuf));
+            scan_calls(prog, n->items[i], map, nmap, made);
+            g_expect_sname = save;
+        }
+    } else if (n->kind == ND_STRUCT_LIT && n->name) {
+        /* each field initializer is expected to have that field's declared type,
+         * so `Wrap<Option<u8>> { inner: Some(20) }` binds T = u8 */
+        const char *canon = canon_of_instance(prog, n->name);
+        if (!canon) canon = n->name;
+        for (int i = 0; i < n->nitems; i++) {
+            Node *fi = n->items[i];
+            const char *save = g_expect_sname;
+            g_expect_sname = NULL;
+            if (fi->kind == ND_ASSIGN && fi->lhs && fi->lhs->name) {
+                CType ft = { TYPE_UNKNOWN, 0, NULL, NULL, 0 };
+                if (struct_field_type(prog, canon, fi->lhs->name, &ft) &&
+                    ft.base == TYPE_STRUCT && ft.ptr == 0)
+                    g_expect_sname = ft.sname;
+            }
+            scan_calls(prog, fi, map, nmap, made);
+            g_expect_sname = save;
+        }
+    } else {
+        for (int i = 0; i < n->nitems; i++) scan_calls(prog, n->items[i], map, nmap, made);
+    }
 
     /* Generic calls: both f(...) (ND_IDENT) and ns.f(...) (ND_MEMBER whose base is a namespace, not a struct)
      * - lets generic helpers in std be called as module.func (checking the base is not a struct avoids methods) */
