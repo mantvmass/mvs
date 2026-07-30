@@ -100,6 +100,7 @@ static void gen_load_var(Gen *g, Sym *s) {
     else              { fprintf(g->out, "    lea rax, [rbp - %d]\n", s->offset); }
     if (s->arr > 0) return;                            /* [T; N]: decays to the array's address */
     if (s->type == TYPE_STRUCT && s->ptr == 0) return; /* struct: keep the address in rax */
+    if (is_i128(s->type, s->ptr)) return;              /* i128: address-as-value */
     gen_load_typed(g, s->ptr > 0 ? TYPE_USIZE : s->type, s->size); /* pointer = load 8 bytes */
 }
 
@@ -262,6 +263,160 @@ static void gen_binop_apply(Gen *g, TokenType op, int uns) {
     }
 }
 
+/* ---------- 128-bit integer support ----------
+ *
+ * i128/u128 values use the address-as-value convention (like structs): an
+ * expression of 128-bit type leaves the ADDRESS of a 16-byte blob in rax.
+ * Arithmetic runs pair-wise on qwords through scratch slots reserved by
+ * collect_struct_temps (result at [rbp - int_val], operands right below it).
+ * Division and decimal printing go through helper routines emitted once at
+ * the end of .text (see emit_i128_helpers). */
+
+/* Copy the 16-byte value at [rax] to the slot [rbp - off] */
+static void i128_copy_to_slot(Gen *g, int off) {
+    fprintf(g->out, "    mov rcx, [rax]\n    mov [rbp - %d], rcx\n", off);
+    fprintf(g->out, "    mov rcx, [rax + 8]\n    mov [rbp - %d], rcx\n", off - 8);
+}
+
+/* Materialize expression e as a 128-bit value at [rbp - off]:
+ * an i128-typed e yields its address (copy 16 bytes); anything narrower is a
+ * 64-bit value in rax and gets sign/zero extended by its own signedness */
+static void gen_i128_operand(Gen *g, Node *e, int off) {
+    ExprType t = type_of(g, e);
+    gen_expr(g, e);
+    if (is_i128(t.base, t.ptr)) { i128_copy_to_slot(g, off); return; }
+    fprintf(g->out, "    mov [rbp - %d], rax\n", off);
+    if (is_unsigned_val(t.base, t.ptr))
+        fprintf(g->out, "    mov qword [rbp - %d], 0\n", off - 8);
+    else
+        fprintf(g->out, "    mov rcx, rax\n    sar rcx, 63\n    mov [rbp - %d], rcx\n", off - 8);
+}
+
+/* Store the rhs value (in rcx, following the rhs type's convention) into the
+ * 16-byte i128 target whose address is in rax */
+static void gen_i128_store(Gen *g, ExprType rhs_t) {
+    if (is_i128(rhs_t.base, rhs_t.ptr)) {
+        fprintf(g->out, "    mov rdx, [rcx]\n    mov [rax], rdx\n");
+        fprintf(g->out, "    mov rdx, [rcx + 8]\n    mov [rax + 8], rdx\n");
+    } else if (is_unsigned_val(rhs_t.base, rhs_t.ptr)) {
+        fprintf(g->out, "    mov [rax], rcx\n    mov qword [rax + 8], 0\n");
+    } else {
+        fprintf(g->out, "    mov [rax], rcx\n    mov rdx, rcx\n    sar rdx, 63\n    mov [rax + 8], rdx\n");
+    }
+}
+
+/* Gen a 128-bit binary operation. Slots: result at ro, lhs at ro-16, rhs at ro-32.
+ * Comparisons leave a 0/1 bool in rax; every other op leaves the result ADDRESS in rax. */
+static void gen_i128_binop(Gen *g, Node *n) {
+    int ro = (int)n->int_val, ao = ro - 16, bo = ro - 32;
+    ExprType lt = type_of(g, n->lhs), rt = type_of(g, n->rhs);
+    int uns = (lt.base == TYPE_U128 || rt.base == TYPE_U128 ||
+               (is_unsigned_val(lt.base, lt.ptr) && is_unsigned_val(rt.base, rt.ptr)));
+    gen_i128_operand(g, n->lhs, ao);
+    gen_i128_operand(g, n->rhs, bo);
+    switch (n->op) {
+        case TK_PLUS: case TK_MINUS:
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    mov rdx, [rbp - %d]\n", ao, ao - 8);
+            if (n->op == TK_PLUS)
+                fprintf(g->out, "    add rax, [rbp - %d]\n    adc rdx, [rbp - %d]\n", bo, bo - 8);
+            else
+                fprintf(g->out, "    sub rax, [rbp - %d]\n    sbb rdx, [rbp - %d]\n", bo, bo - 8);
+            fprintf(g->out, "    mov [rbp - %d], rax\n    mov [rbp - %d], rdx\n", ro, ro - 8);
+            break;
+        case TK_AMP: case TK_PIPE: case TK_CARET: {
+            const char *op = n->op == TK_AMP ? "and" : n->op == TK_PIPE ? "or" : "xor";
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    %s rax, [rbp - %d]\n    mov [rbp - %d], rax\n", ao, op, bo, ro);
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    %s rax, [rbp - %d]\n    mov [rbp - %d], rax\n", ao - 8, op, bo - 8, ro - 8);
+            break;
+        }
+        case TK_SHL: case TK_SHR: {
+            int l = new_label(g);
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n    and rcx, 127\n", bo);
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    mov rdx, [rbp - %d]\n", ao, ao - 8);
+            if (n->op == TK_SHL) {
+                fprintf(g->out,
+                    "    cmp cl, 64\n    jb .Lsh%d\n"
+                    "    mov rdx, rax\n    xor eax, eax\n    sub cl, 64\n    shl rdx, cl\n    jmp .Lshd%d\n"
+                    ".Lsh%d:\n    shld rdx, rax, cl\n    shl rax, cl\n"
+                    ".Lshd%d:\n", l, l, l, l);
+            } else if (uns) {
+                fprintf(g->out,
+                    "    cmp cl, 64\n    jb .Lsh%d\n"
+                    "    mov rax, rdx\n    xor edx, edx\n    sub cl, 64\n    shr rax, cl\n    jmp .Lshd%d\n"
+                    ".Lsh%d:\n    shrd rax, rdx, cl\n    shr rdx, cl\n"
+                    ".Lshd%d:\n", l, l, l, l);
+            } else {
+                fprintf(g->out,
+                    "    cmp cl, 64\n    jb .Lsh%d\n"
+                    "    mov rax, rdx\n    sar rdx, 63\n    sub cl, 64\n    sar rax, cl\n    jmp .Lshd%d\n"
+                    ".Lsh%d:\n    shrd rax, rdx, cl\n    sar rdx, cl\n"
+                    ".Lshd%d:\n", l, l, l, l);
+            }
+            fprintf(g->out, "    mov [rbp - %d], rax\n    mov [rbp - %d], rdx\n", ro, ro - 8);
+            break;
+        }
+        case TK_STAR:
+            /* 128 x 128 multiply: lo = low(a.lo*b.lo); hi = high(a.lo*b.lo) + a.lo*b.hi + a.hi*b.lo */
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    mul qword [rbp - %d]\n", ao, bo);
+            fprintf(g->out, "    mov [rbp - %d], rax\n    mov rcx, rdx\n", ro);
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    imul rax, [rbp - %d]\n    add rcx, rax\n", ao, bo - 8);
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    imul rax, [rbp - %d]\n    add rcx, rax\n", ao - 8, bo);
+            fprintf(g->out, "    mov [rbp - %d], rcx\n", ro - 8);
+            break;
+        case TK_SLASH: case TK_PERCENT: {
+            /* software divmod through the emitted helper (both results produced at once) */
+            g->need_i128 = 1;
+            const char *fn = uns ? "mvs_u128_divmod" : "mvs_s128_divmod";
+            int qoff = n->op == TK_SLASH ? ro : ao;   /* '/' keeps the quotient, '%' the remainder */
+            int roff = n->op == TK_SLASH ? ao : ro;
+            fprintf(g->out, "    lea rcx, [rbp - %d]\n    lea rdx, [rbp - %d]\n", ao, bo);
+            fprintf(g->out, "    lea r8, [rbp - %d]\n    lea r9, [rbp - %d]\n", qoff, roff);
+            fprintf(g->out, "    sub rsp, 32\n    call %s\n    add rsp, 32\n", fn);
+            break;
+        }
+        case TK_EQ: case TK_NEQ:
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    xor rax, [rbp - %d]\n", ao, bo);
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n    xor rcx, [rbp - %d]\n    or rax, rcx\n", ao - 8, bo - 8);
+            fprintf(g->out, n->op == TK_EQ ? "    cmp rax, 0\n    sete al\n    movzx rax, al\n"
+                                           : "    cmp rax, 0\n    setne al\n    movzx rax, al\n");
+            return;   /* bool result already in rax */
+        case TK_LT: case TK_GT: case TK_LE: case TK_GE: {
+            /* hi qwords decide unless equal (signed for i128, unsigned for u128); lo compares unsigned */
+            int l = new_label(g);
+            const char *hi_cc, *lo_cc;
+            switch (n->op) {
+                case TK_LT: hi_cc = uns ? "setb" : "setl"; lo_cc = "setb";  break;
+                case TK_GT: hi_cc = uns ? "seta" : "setg"; lo_cc = "seta";  break;
+                case TK_LE: hi_cc = uns ? "setb" : "setl"; lo_cc = "setbe"; break;
+                default:    hi_cc = uns ? "seta" : "setg"; lo_cc = "setae"; break;
+            }
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    cmp rax, [rbp - %d]\n    jne .Li128c%d\n", ao - 8, bo - 8, l);
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    cmp rax, [rbp - %d]\n    %s al\n    jmp .Li128d%d\n", ao, bo, lo_cc, l);
+            fprintf(g->out, ".Li128c%d:\n    %s al\n", l, hi_cc);
+            fprintf(g->out, ".Li128d%d:\n    movzx rax, al\n", l);
+            return;
+        }
+        default:
+            fprintf(stderr, "codegen error: this operator is not supported on 128-bit integers\n");
+            g->had_error = 1;
+            return;
+    }
+    fprintf(g->out, "    lea rax, [rbp - %d]\n", ro);   /* value = the result's address */
+}
+
+/* Gen unary - / ~ on a 128-bit value (slots: result at ro, operand at ro-16) */
+static void gen_i128_unary(Gen *g, Node *n) {
+    int ro = (int)n->int_val, ao = ro - 16;
+    gen_i128_operand(g, n->operand, ao);
+    fprintf(g->out, "    mov rax, [rbp - %d]\n    mov rdx, [rbp - %d]\n", ao, ao - 8);
+    if (n->op == TK_MINUS)
+        fprintf(g->out, "    not rax\n    not rdx\n    add rax, 1\n    adc rdx, 0\n");
+    else
+        fprintf(g->out, "    not rax\n    not rdx\n");
+    fprintf(g->out, "    mov [rbp - %d], rax\n    mov [rbp - %d], rdx\n", ro, ro - 8);
+    fprintf(g->out, "    lea rax, [rbp - %d]\n", ro);
+}
+
 
 /* Gen an expression; the result is always in rax */
 static void gen_expr(Gen *g, Node *n) {
@@ -312,6 +467,12 @@ static void gen_expr(Gen *g, Node *n) {
                 break;
             }
             ExprType lt = type_of(g, n->lhs), rt = type_of(g, n->rhs);
+
+            /* full 128-bit arithmetic goes through its own pair-wise qword path */
+            if (is_i128(lt.base, lt.ptr) || is_i128(rt.base, rt.ptr)) {
+                gen_i128_binop(g, n);
+                break;
+            }
 
             /* floating point operations (use xmm registers)
              * supports + - * / and comparisons; if either side is an int it is converted to double first */
@@ -401,6 +562,11 @@ static void gen_expr(Gen *g, Node *n) {
             break;
         }
         case ND_UNARY: {
+            /* 128-bit - and ~ have their own pair-wise path (reserved scratch slots) */
+            if (n->op == TK_MINUS || n->op == TK_TILDE) {
+                ExprType ot0 = type_of(g, n->operand);
+                if (is_i128(ot0.base, ot0.ptr)) { gen_i128_unary(g, n); break; }
+            }
             if (n->op == TK_MINUS) {
                 gen_expr(g, n->operand);
                 ExprType ot = type_of(g, n->operand);
@@ -457,6 +623,36 @@ static void gen_expr(Gen *g, Node *n) {
             break;
         }
         case ND_CAST: {
+            /* casts to/from 128-bit integers first (address-as-value on the 128-bit side) */
+            {
+                ExprType st0 = type_of(g, n->operand);
+                if (is_i128(n->type, n->ptr)) {
+                    /* to i128: materialize into the reserved slot, value = its address */
+                    int ro = (int)n->int_val;
+                    gen_i128_operand(g, n->operand, ro);
+                    fprintf(g->out, "    lea rax, [rbp - %d]\n", ro);
+                    break;
+                }
+                if (is_i128(st0.base, st0.ptr)) {
+                    /* from i128: take the low qword, then adjust width like any integer */
+                    gen_expr(g, n->operand);               /* rax = address */
+                    if (n->ptr == 0 && n->type == TYPE_BOOL) {
+                        fprintf(g->out, "    mov rcx, [rax]\n    or rcx, [rax + 8]\n"
+                                        "    cmp rcx, 0\n    setne al\n    movzx rax, al\n");
+                        break;
+                    }
+                    fprintf(g->out, "    mov rax, [rax]\n");
+                    if (n->ptr == 0 && !is_float_type(n->type) &&
+                        n->type != TYPE_STR && n->type != TYPE_VOID && n->type != TYPE_STRUCT) {
+                        int sz = type_size(g, n->type, 0, NULL);
+                        int sgn = is_signed_type(n->type);
+                        if (sz == 1)      fprintf(g->out, sgn ? "    movsx rax, al\n"   : "    movzx rax, al\n");
+                        else if (sz == 2) fprintf(g->out, sgn ? "    movsx rax, ax\n"   : "    movzx rax, ax\n");
+                        else if (sz == 4) fprintf(g->out, sgn ? "    movsxd rax, eax\n" : "    mov eax, eax\n");
+                    }
+                    break;
+                }
+            }
             /* explicit type cast: the source value was gen'ed into rax (int = integer bits, float = double bits) */
             gen_expr(g, n->operand);
             ExprType st = type_of(g, n->operand);
@@ -523,6 +719,19 @@ static void gen_expr(Gen *g, Node *n) {
             if (tt.arr > 0) {
                 fprintf(stderr, "codegen error: whole-array assignment is not supported; copy element by element\n");
                 g->had_error = 1; break;
+            }
+            if (is_i128(tt.base, tt.ptr)) {
+                if (n->op != TK_ASSIGN) {
+                    fprintf(stderr, "codegen error: compound assignment is not supported on 128-bit integers; write x = x + y\n");
+                    g->had_error = 1; break;
+                }
+                ExprType rvt = type_of(g, n->rhs);
+                gen_expr(g, n->rhs);                       /* rax = rhs value (address or 64-bit) */
+                push_tmp(g);
+                gen_addr(g, target);                       /* rax = target address */
+                pop_tmp(g, "rcx");
+                gen_i128_store(g, rvt);
+                break;                                     /* rax = target address as the expr value */
             }
             /* whole-struct assignment (copy/literal) */
             if (tt.base == TYPE_STRUCT && tt.ptr == 0 && n->op == TK_ASSIGN) {
@@ -618,7 +827,17 @@ static void gen_expr(Gen *g, Node *n) {
                 const char *regs[4] = { "rcx", "rdx", "r8", "r9" };
                 fprintf(g->out, "    lea rax, [rel mvs_str_%d]\n", idx);
                 push_tmp(g);
-                for (int i = 0; i < nv; i++) { gen_expr(g, vals[i]); push_tmp(g); }
+                for (int i = 0; i < nv; i++) {
+                    gen_expr(g, vals[i]);
+                    ExprType vt128 = type_of(g, vals[i]);
+                    if (is_i128(vt128.base, vt128.ptr)) {
+                        /* 128-bit value: convert to decimal text via the helper; the format uses %s */
+                        g->need_i128 = 1;
+                        fprintf(g->out, "    mov rcx, rax\n    sub rsp, 32\n    call %s\n    add rsp, 32\n",
+                                vt128.base == TYPE_U128 ? "mvs_u128_str" : "mvs_i128_str");
+                    }
+                    push_tmp(g);
+                }
                 fprintf(g->out, "    sub rsp, %d\n", callspace);
                 for (int i = 0; i < total; i++) {
                     int srcoff = callspace + (total - 1 - i) * 16;
@@ -639,10 +858,10 @@ static void gen_expr(Gen *g, Node *n) {
              * rvalue, e.g. f(make()) */
             {
                 ExprType rt = type_of(g, n);
-                if (rt.base == TYPE_STRUCT && rt.ptr == 0 && n->int_val) {
+                if ((rt.base == TYPE_STRUCT || is_i128(rt.base, rt.ptr)) && rt.ptr == 0 && n->int_val) {
                     fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val); /* sret = the temp slot */
                     gen_call(g, n, 1);
-                    fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val); /* result = struct address */
+                    fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val); /* result = the value's address */
                 } else {
                     gen_call(g, n, 0);
                 }
@@ -663,6 +882,7 @@ static void gen_expr(Gen *g, Node *n) {
             gen_addr(g, n);
             if (et.base == TYPE_STRUCT && et.ptr == 0) break; /* nested struct field: keep the address */
             if (et.arr > 0) break;                            /* [T; N] field: decays to its address */
+            if (is_i128(et.base, et.ptr)) break;              /* i128 field: address-as-value */
             gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
             break;
         }
@@ -671,6 +891,7 @@ static void gen_expr(Gen *g, Node *n) {
             ExprType et = type_of(g, n);
             gen_addr(g, n);
             if (et.base == TYPE_STRUCT && et.ptr == 0) break; /* struct element: keep the address */
+            if (is_i128(et.base, et.ptr)) break;              /* i128 element: address-as-value */
             gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
             break;
         }
@@ -726,6 +947,15 @@ static void gen_stmt(Gen *g, Node *n) {
                     if (s->is_global) { global_label(s->name, lbl); fprintf(g->out, "    lea rax, [rel %s]\n", lbl); }
                     else              { fprintf(g->out, "    lea rax, [rbp - %d]\n", s->offset); }
                     gen_store_struct(g, n->operand);
+                } else if (is_i128(s->type, s->ptr)) {
+                    /* 128-bit variable: store through the address-as-value convention */
+                    ExprType rvt = type_of(g, n->operand);
+                    gen_expr(g, n->operand);
+                    fprintf(g->out, "    mov rcx, rax\n");
+                    char lbl[LABEL_MAX];
+                    if (s->is_global) { global_label(s->name, lbl); fprintf(g->out, "    lea rax, [rel %s]\n", lbl); }
+                    else              { fprintf(g->out, "    lea rax, [rbp - %d]\n", s->offset); }
+                    gen_i128_store(g, rvt);
                 } else {
                     gen_expr(g, n->operand);     /* rax = value */
                     ExprType vt = type_of(g, n->operand), dt = { s->type, s->ptr, s->sname, s->sig, s->arr };
@@ -742,10 +972,20 @@ static void gen_stmt(Gen *g, Node *n) {
             break;
         case ND_RETURN:
             if (g->sret_off != 0 && n->operand) {
-                /* function returns a struct: write the value through the hidden pointer, then return it */
-                fprintf(g->out, "    mov rax, [rbp - %d]\n", g->sret_off);
-                gen_store_struct(g, n->operand);
-                fprintf(g->out, "    mov rax, [rbp - %d]\n", g->sret_off);
+                if (g->cur_ret_i128) {
+                    /* function returns i128: write the value through the hidden pointer */
+                    ExprType rvt = type_of(g, n->operand);
+                    gen_expr(g, n->operand);
+                    fprintf(g->out, "    mov rcx, rax\n");
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n", g->sret_off);
+                    gen_i128_store(g, rvt);
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n", g->sret_off);
+                } else {
+                    /* function returns a struct: write the value through the hidden pointer, then return it */
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n", g->sret_off);
+                    gen_store_struct(g, n->operand);
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n", g->sret_off);
+                }
             } else if (n->operand) {
                 gen_expr(g, n->operand);         /* the return value is in rax */
                 ExprType vt = type_of(g, n->operand);
@@ -993,7 +1233,7 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
         sig = target;   /* direct call: target is both the signature and the destination */
     }
 
-    int returns_struct = (sig->type == TYPE_STRUCT && sig->ptr == 0);
+    int returns_struct = ((sig->type == TYPE_STRUCT || is_i128(sig->type, sig->ptr)) && sig->ptr == 0);
     if (returns_struct && !has_sret) {
         fprintf(stderr, "codegen error: a struct-returning call must be assigned to a variable\n");
         g->had_error = 1; return;
@@ -1100,14 +1340,15 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
     int frame = 0;
     g->sret_off = 0;
 
-    /* a struct-returning function uses a hidden pointer (sret): reserve a slot for that pointer first,
-     * and the real parameters shift one register position (rcx is taken by sret) */
-    int returns_struct = (fn->type == TYPE_STRUCT && fn->ptr == 0 && !fn->is_extern);
+    /* a struct-returning (or i128-returning) function uses a hidden pointer (sret): reserve a slot
+     * for that pointer first; the real parameters shift one register position (rcx is taken) */
+    int returns_struct = ((fn->type == TYPE_STRUCT || is_i128(fn->type, fn->ptr)) && fn->ptr == 0 && !fn->is_extern);
     if (returns_struct)
         g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, NULL, NULL, &frame);
     /* a float-returning function must return via xmm0 (flag used at return time) */
     g->cur_ret_float = is_float_type(fn->type) && fn->ptr == 0;
     g->cur_ret_f32c = fn->is_export && fn->type == TYPE_F32 && fn->ptr == 0; /* export f32 -> return single to C */
+    g->cur_ret_i128 = is_i128(fn->type, fn->ptr);
 
     int param_start = g->nlocals;
     for (int i = 0; i < fn->nitems; i++) /* parameters (never arrays: the parser rejects [T; N] params) */
@@ -1141,9 +1382,9 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
         Sym *psym = &g->locals[param_start + i];
         int pos = i + base;            /* ABI position (including the hidden sret pointer) */
         int is_float_param = is_float_type(p->type) && p->ptr == 0;
-        /* struct by-value parameter: the caller passes the struct's address
-         * the callee copies the struct into its own slot (by-value: mutation does not affect the caller) */
-        if (p->type == TYPE_STRUCT && p->ptr == 0) {
+        /* struct (or i128) by-value parameter: the caller passes the value's address
+         * the callee copies it into its own slot (by-value: mutation does not affect the caller) */
+        if ((p->type == TYPE_STRUCT || p->type == TYPE_I128 || p->type == TYPE_U128) && p->ptr == 0) {
             int ssize = type_size(g, p->type, 0, p->type_name);
             if (pos < 4) fprintf(g->out, "    mov r10, %s\n", argregs[pos]);              /* src ptr */
             else         fprintf(g->out, "    mov r10, [rbp + %d]\n", 48 + (pos - 4) * 8);
@@ -1212,6 +1453,13 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
                     char gl[LABEL_MAX]; global_label(s->name, gl);
                     fprintf(g->out, "    lea rax, [rel %s]\n", gl);
                     gen_store_struct(g, d->operand);
+                } else if (is_i128(s->type, s->ptr)) {
+                    ExprType rvt = type_of(g, d->operand);
+                    gen_expr(g, d->operand);
+                    fprintf(g->out, "    mov rcx, rax\n");
+                    char gl[LABEL_MAX]; global_label(s->name, gl);
+                    fprintf(g->out, "    lea rax, [rel %s]\n", gl);
+                    gen_i128_store(g, rvt);
                 } else {
                     gen_expr(g, d->operand);
                     gen_store_var(g, s);
@@ -1225,6 +1473,115 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
 
     /* epilogue in case there is no trailing return (e.g. a void function) */
     fprintf(g->out, "    xor eax, eax\n    leave\n    ret\n");
+}
+
+/* Emit the 128-bit helper routines (once per output file, only when used):
+ *   mvs_u128_divmod(rcx=&dividend, rdx=&divisor, r8=&quotient, r9=&remainder)
+ *       classic shift-subtract long division, 128 iterations
+ *   mvs_s128_divmod  signed wrapper (C truncation: rem sign = dividend sign)
+ *   mvs_u128_str / mvs_i128_str(rcx=&value) -> rax = decimal C string
+ *       written backwards into a 4-slot ring of static buffers (io.out uses %s) */
+static void emit_i128_helpers(Gen *g) {
+    fputs(
+        "\nmvs_u128_divmod:\n"
+        "    push rbp\n    mov rbp, rsp\n    sub rsp, 80\n"
+        "    mov rax, [rcx]\n    mov [rbp - 16], rax\n"        /* dividend lo/hi */
+        "    mov rax, [rcx + 8]\n    mov [rbp - 8], rax\n"
+        "    mov rax, [rdx]\n    mov [rbp - 32], rax\n"        /* divisor lo/hi */
+        "    mov rax, [rdx + 8]\n    mov [rbp - 24], rax\n"
+        "    mov [rbp - 72], r8\n    mov [rbp - 80], r9\n"     /* output pointers */
+        "    xor eax, eax\n"
+        "    mov [rbp - 48], rax\n    mov [rbp - 40], rax\n"   /* remainder = 0 */
+        "    mov [rbp - 64], rax\n    mov [rbp - 56], rax\n"   /* quotient = 0 */
+        "    mov r10, 127\n"
+        ".Ludm_loop:\n"
+        "    mov rax, [rbp - 48]\n    mov rdx, [rbp - 40]\n"   /* rem <<= 1 */
+        "    shld rdx, rax, 1\n    shl rax, 1\n"
+        "    mov rcx, r10\n    cmp rcx, 64\n    jb .Ludm_lo\n" /* bit i of the dividend */
+        "    mov r11, [rbp - 8]\n    sub rcx, 64\n    shr r11, cl\n    jmp .Ludm_got\n"
+        ".Ludm_lo:\n    mov r11, [rbp - 16]\n    shr r11, cl\n"
+        ".Ludm_got:\n    and r11, 1\n    or rax, r11\n"
+        "    mov [rbp - 48], rax\n    mov [rbp - 40], rdx\n"
+        "    mov rdx, [rbp - 40]\n    cmp rdx, [rbp - 24]\n"   /* rem >= divisor ? */
+        "    ja .Ludm_ge\n    jb .Ludm_next\n"
+        "    mov rax, [rbp - 48]\n    cmp rax, [rbp - 32]\n    jb .Ludm_next\n"
+        ".Ludm_ge:\n"
+        "    mov rax, [rbp - 48]\n    sub rax, [rbp - 32]\n    mov [rbp - 48], rax\n"
+        "    mov rax, [rbp - 40]\n    sbb rax, [rbp - 24]\n    mov [rbp - 40], rax\n"
+        "    mov rcx, r10\n    cmp rcx, 64\n    jb .Ludm_ql\n" /* quotient bit i = 1 */
+        "    sub rcx, 64\n    mov rax, 1\n    shl rax, cl\n    or [rbp - 56], rax\n    jmp .Ludm_next\n"
+        ".Ludm_ql:\n    mov rax, 1\n    shl rax, cl\n    or [rbp - 64], rax\n"
+        ".Ludm_next:\n    dec r10\n    jns .Ludm_loop\n"
+        "    mov r8, [rbp - 72]\n"
+        "    mov rax, [rbp - 64]\n    mov [r8], rax\n"
+        "    mov rax, [rbp - 56]\n    mov [r8 + 8], rax\n"
+        "    mov r9, [rbp - 80]\n"
+        "    mov rax, [rbp - 48]\n    mov [r9], rax\n"
+        "    mov rax, [rbp - 40]\n    mov [r9 + 8], rax\n"
+        "    leave\n    ret\n"
+        "\nmvs_s128_divmod:\n"
+        "    push rbp\n    mov rbp, rsp\n    sub rsp, 96\n"
+        "    mov [rbp - 72], r8\n    mov [rbp - 80], r9\n"
+        "    mov r11, rdx\n"
+        "    mov rax, [rcx + 8]\n    mov r10, rax\n    sar r10, 63\n"  /* sa = sign mask of a */
+        "    mov [rbp - 96], r10\n"
+        "    mov rax, [rcx]\n    mov rdx, [rcx + 8]\n"                 /* |a| */
+        "    xor rax, r10\n    xor rdx, r10\n    sub rax, r10\n    sbb rdx, r10\n"
+        "    mov [rbp - 16], rax\n    mov [rbp - 8], rdx\n"
+        "    mov rax, [r11 + 8]\n    mov rcx, rax\n    sar rcx, 63\n"  /* sb */
+        "    mov [rbp - 88], rcx\n"
+        "    mov rax, [r11]\n    mov rdx, [r11 + 8]\n"                 /* |b| */
+        "    xor rax, rcx\n    xor rdx, rcx\n    sub rax, rcx\n    sbb rdx, rcx\n"
+        "    mov [rbp - 32], rax\n    mov [rbp - 24], rdx\n"
+        "    lea rcx, [rbp - 16]\n    lea rdx, [rbp - 32]\n"
+        "    lea r8, [rbp - 64]\n    lea r9, [rbp - 48]\n"
+        "    sub rsp, 32\n    call mvs_u128_divmod\n    add rsp, 32\n"
+        "    mov r10, [rbp - 96]\n    mov rcx, [rbp - 88]\n"
+        "    mov r11, r10\n    xor r11, rcx\n"                         /* quotient sign = sa ^ sb */
+        "    mov rax, [rbp - 64]\n    mov rdx, [rbp - 56]\n"
+        "    xor rax, r11\n    xor rdx, r11\n    sub rax, r11\n    sbb rdx, r11\n"
+        "    mov r8, [rbp - 72]\n    mov [r8], rax\n    mov [r8 + 8], rdx\n"
+        "    mov rax, [rbp - 48]\n    mov rdx, [rbp - 40]\n"           /* remainder sign = sa */
+        "    xor rax, r10\n    xor rdx, r10\n    sub rax, r10\n    sbb rdx, r10\n"
+        "    mov r9, [rbp - 80]\n    mov [r9], rax\n    mov [r9 + 8], rdx\n"
+        "    leave\n    ret\n"
+        "\nmvs_u128_str:\n"
+        "    push rbp\n    mov rbp, rsp\n    sub rsp, 80\n"
+        "    mov rax, [rcx]\n    mov [rbp - 16], rax\n"
+        "    mov rax, [rcx + 8]\n    mov [rbp - 8], rax\n"
+        "    mov qword [rbp - 32], 10\n    mov qword [rbp - 24], 0\n"
+        "    mov eax, [rel mvs_i128_bufidx]\n"                         /* next ring slot */
+        "    inc eax\n    and eax, 3\n    mov [rel mvs_i128_bufidx], eax\n"
+        "    imul eax, 48\n"
+        "    lea r10, [rel mvs_i128_buf]\n    add r10, rax\n"
+        "    add r10, 47\n    mov byte [r10], 0\n"                     /* build backwards */
+        ".Lu128s_loop:\n"
+        "    mov [rbp - 72], r10\n"
+        "    lea rcx, [rbp - 16]\n    lea rdx, [rbp - 32]\n"
+        "    lea r8, [rbp - 48]\n    lea r9, [rbp - 64]\n"
+        "    sub rsp, 32\n    call mvs_u128_divmod\n    add rsp, 32\n"
+        "    mov r10, [rbp - 72]\n"
+        "    mov rax, [rbp - 64]\n    add rax, 48\n"                   /* digit -> ASCII */
+        "    dec r10\n    mov [r10], al\n"
+        "    mov rax, [rbp - 48]\n    mov [rbp - 16], rax\n"           /* value = quotient */
+        "    mov rax, [rbp - 40]\n    mov [rbp - 8], rax\n"
+        "    mov rax, [rbp - 16]\n    or rax, [rbp - 8]\n    jnz .Lu128s_loop\n"
+        "    mov rax, r10\n"
+        "    leave\n    ret\n"
+        "\nmvs_i128_str:\n"
+        "    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n"
+        "    mov rax, [rcx + 8]\n    test rax, rax\n    js .Li128s_neg\n"
+        "    sub rsp, 32\n    call mvs_u128_str\n    add rsp, 32\n"
+        "    leave\n    ret\n"
+        ".Li128s_neg:\n"
+        "    mov rax, [rcx]\n    mov rdx, [rcx + 8]\n"                 /* |v| then prepend '-' */
+        "    not rax\n    not rdx\n    add rax, 1\n    adc rdx, 0\n"
+        "    mov [rbp - 16], rax\n    mov [rbp - 8], rdx\n"
+        "    lea rcx, [rbp - 16]\n"
+        "    sub rsp, 32\n    call mvs_u128_str\n    add rsp, 32\n"
+        "    dec rax\n    mov byte [rax], 45\n"
+        "    leave\n    ret\n",
+        g->out);
 }
 
 /* Main entry point of the backend */
@@ -1304,6 +1661,7 @@ int x86_64_win_generate(Node *program, FILE *out) {
         if (!reached[func_index(&g, d)]) continue; /* tree-shaking: skip functions never called */
         gen_func(&g, d, program);
     }
+    if (g.need_i128) emit_i128_helpers(&g);   /* 128-bit divmod + decimal print routines */
 
     /* read-only data section: all string constants (including format strings from std/io.mvs) */
     fprintf(out, "\nsection .data\n");
@@ -1320,6 +1678,11 @@ int x86_64_win_generate(Node *program, FILE *out) {
         int slot = (g.globals[i].size + 7) / 8 * 8;
         if (slot < 8) slot = 8;
         fprintf(out, "%s: resb %d\n", lbl, slot);
+    }
+    if (g.need_i128) {
+        /* ring of 4 conversion buffers + rotation index for mvs_u128_str/mvs_i128_str */
+        fprintf(out, "mvs_i128_buf: resb 192\n");
+        fprintf(out, "mvs_i128_bufidx: resd 1\n");
     }
 
     return g.had_error ? 1 : 0;

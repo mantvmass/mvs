@@ -1,0 +1,7 @@
+//~ ERROR: compound assignment is not supported on 128-bit
+// x += y on i128 must be written out as x = x + y
+func main() -> i8 {
+    let x: i128 = 1 as i128;
+    x += 2;
+    return 0;
+}

@@ -103,7 +103,7 @@ A new backend (say `arch/x86_64/sysv.c` for ELF/Linux) reuses `common.c` and onl
 |------|---------|-------------------|---------|
 | `i8` `i16` `i32` `i64` | signed integer (idiv, setl/setg) | 1, 2, 4, 8 | yes |
 | `u8` `u16` `u32` `u64` | unsigned integer (div, setb/seta, real wrap) | 1, 2, 4, 8 | no |
-| `i128` `u128` | 128-bit integer (stored/passed as 16 bytes, computed as 64-bit for now) | 16 | - |
+| `i128` `u128` | full 128-bit integer (real 128-bit + - * / % shifts and compares) | 16 | i/u |
 | `isize` `usize` | pointer-sized | 8 | i/u |
 | `bool` | `true` / `false` | 1 | no |
 | `char` | a character, `'A'` (single quotes only) | 1 | no |
@@ -910,7 +910,11 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
   unsigned div/setb, real wrap), but mid-expression overflow is 64-bit. (`let a: u8 = 200; io.out("{}", a + 100)`
   prints 300, but `let c: u8 = a + 100` stores 44; `~` masks to width, e.g. `~(u8)0 = 255`.) The **result type**
   of integer arithmetic is the wider operand (`i32 + i64` → i64).
-- `i128`/`u128` store/pass 16 bytes but still compute as 64-bit (no full 128-bit math yet).
+- `i128`/`u128` compute with full 128-bit precision (`+ - * / % << >> & | ^ ~` and comparisons; division
+  is a software shift-subtract routine). Known edges: no compound assignment or `++`/`--` (write
+  `x = x + y`), no direct float casts (go through `i64`), not usable in `switch` or as a bare condition
+  (compare `!= 0`), not supported across the extern C boundary, `{:x}` prints decimal like `{}`, and one
+  `io.out` call can print at most 4 separate 128-bit values (conversion buffer ring).
 - **No divide-by-zero check** (crashes at runtime).
 - `u64`↔`f64` conversion of values ≥ 2^63 uses the unsigned path (correct); dereferencing a non-pointer is a
   compile error.
@@ -995,6 +999,10 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
   slots 5+, for extern C calls, C callers of exports, and MVS callers of its own exports.
 - Golden test suite (`make test`): run-pass output diffs, compile-only, and compile-fail
   (expected-error) tests in `tests/`, run by CI.
+- Full 128-bit `i128`/`u128` arithmetic: address-as-value convention (like structs), pair-wise
+  qword add/sub/mul/bitwise/shift/compare, software shift-subtract division emitted as helper
+  routines (`mvs_u128_divmod` and friends), decimal printing via `io.out`, and hidden-pointer
+  parameter/return passing.
 - Real `[T; N]` array type: stack/.bss storage, literals with exact-length checking, indexing
   (arrays and pointers, `p[i]` = `*(p + i)`), `a.len`, compile-time bounds check for constant
   indices, arrays in structs and structs in arrays, io.out expansion (`[1, 2, 3]`), and decay
@@ -1011,8 +1019,6 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 
 ### Remaining
 
-- **Full 128-bit i128/u128 math**: needs a two-register value model (rdx:rax) plus software 128-bit division
-  (x86 has no 128/128 divide). Today the 16 bytes are stored but computed as 64-bit.
 - **Dynamic dispatch (`dyn Trait` / vtable)** and multi-condition `where`. This is also the prerequisite for
   making `io.out`'s `{}` form a real library function (see below).
 - **`io.out` as a library** instead of an intrinsic. This needs three things, in order:

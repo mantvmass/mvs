@@ -1,0 +1,51 @@
+// ============================================================
+//  int128: full 128-bit integer arithmetic
+//  build:  mvs.exe examples/01_language/int128.mvs
+//  run:    examples\01_language\int128.exe
+//
+//  i128/u128 compute with real 128-bit precision: + - * / % << >> & | ^ ~
+//  and comparisons all work past the 64-bit boundary. Division runs through
+//  a software shift-subtract routine; io.out prints full decimal digits.
+//  Not supported (compile errors guide you): compound assignment (x += y),
+//  ++/--, direct float casts, switch/if on a bare i128 (compare with != 0).
+// ============================================================
+import { io } from "std";
+
+func square128(x: i128) -> i128 {
+    return x * x;
+}
+
+func main() -> i8 {
+    let big: i128 = (1 as i128) << 100;
+    io.out("2^100        = {}", big);               // 1267650600228229401496703205376
+    io.out("2^100 + 1    = {}", big + 1);
+    io.out("2^80         = {}", ((1 as i128) << 40) * ((1 as i128) << 40));
+
+    // software division and modulo (full precision)
+    io.out("2^100 / 1e6  = {}", big / 1000000);     // 1267650600228229401496703
+    io.out("2^100 % 1e6  = {}", big % 1000000);     // 205376
+
+    // signed: C truncation rules (remainder keeps the dividend's sign)
+    let neg: i128 = 0 - big;
+    io.out("-2^100 / 1e3 = {}", neg / 1000);        // -1267650600228229401496703205
+    io.out("-2^100 % 1e3 = {}", neg % 1000);        // -376
+
+    // comparisons decided by the high 64 bits when needed
+    io.out("big > 1      = {}", big > 1);           // 1
+    io.out("neg < 0      = {}", neg < 0);           // 1
+
+    // u128 wraps at 2^128
+    let zero: u128 = 0 as u128;
+    io.out("u128 max     = {}", zero - 1);          // 340282366920938463463374607431768211455
+
+    // shifts and bitwise work across the boundary
+    io.out("big >> 100   = {}", big >> 100);        // 1
+    io.out("~0 as u128   = {}", ~(0 as u128));      // u128 max again
+
+    // i128 passes to and returns from functions (hidden-pointer convention)
+    io.out("(2^50)^2     = {}", square128((1 as i128) << 50));   // 2^100
+
+    // explicit narrowing back to 64-bit
+    io.out("low 64 bits  = {}", (big + 42) as i64); // 42
+    return 0;
+}

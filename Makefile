@@ -34,7 +34,7 @@ HDR = src/token.h src/lexer.h src/ast.h src/parser.h src/module.h src/generic.h 
 EXAMPLES = examples/demo \
            examples/01_language/hello examples/01_language/types examples/01_language/operators \
            examples/01_language/casts examples/01_language/control examples/01_language/bitwise \
-           examples/01_language/args examples/01_language/arrays \
+           examples/01_language/args examples/01_language/arrays examples/01_language/int128 \
            examples/02_functions/generics examples/02_functions/overload examples/02_functions/recursion \
            examples/02_functions/funcptr examples/02_functions/defaults \
            examples/03_structs/structs examples/03_structs/methods examples/03_structs/pointers \

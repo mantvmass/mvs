@@ -22,10 +22,10 @@ func main() -> i8 {
     let j: usize = 4096;
     io.out("u8={} u16={} u32={} u64={} usize={}", f, g, h, i, j);
 
-    // ---- 128-bit: stored/passed as 16 bytes (math still 64-bit, keep values small) ----
+    // ---- 128-bit: full arithmetic beyond 64 bits (see 01_language/int128.mvs) ----
     let k: i128 = 0 - 5;
-    let l: u128 = 12345;
-    io.out("i128={} u128={}", k, l);
+    let l: u128 = ((1 as u128) << 100) + 12345;
+    io.out("i128={} u128={}", k, l);    // -5 and 2^100 + 12345
 
     // ---- floating point ----
     let m: f32 = 1.5;              // single precision (4 bytes)

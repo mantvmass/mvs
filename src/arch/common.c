@@ -295,6 +295,8 @@ static void buf_append(char **out, size_t *len, size_t *cap, const char *s) {
 
 /* Pick a printf specifier by type (pointer=address, str=%s, char=%c, float=%f, unsigned=%llu, others=%lld) */
 static const char *spec_for(DataType base, int ptr, const char *user) {
+    /* 128-bit values are converted to decimal text at run time (mvs_i128_str), even for {:x} */
+    if (ptr == 0 && (base == TYPE_I128 || base == TYPE_U128)) return "%s";
     if (user && (strcmp(user, "x") == 0 || strcmp(user, ":x") == 0)) return "%llx";
     if (ptr > 0) return "%llu";                 /* pointer = address */
     if (base == TYPE_STR) return "%s";
@@ -485,8 +487,19 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
     if (!n) return;
     if (n->kind == ND_CALL) {
         ExprType rt = type_of(g, n);
-        if (rt.base == TYPE_STRUCT && rt.ptr == 0)
+        if ((rt.base == TYPE_STRUCT || is_i128(rt.base, rt.ptr)) && rt.ptr == 0)
             n->int_val = add_local(g, "$tmp", TYPE_STRUCT, 0, 0, rt.sname, NULL, frame);
+    } else if (n->kind == ND_BINARY) {
+        /* 128-bit binary ops need scratch: result + both operands (3 x 16 bytes) */
+        ExprType lt = type_of(g, n->lhs), rt2 = type_of(g, n->rhs);
+        if (is_i128(lt.base, lt.ptr) || is_i128(rt2.base, rt2.ptr))
+            n->int_val = add_local(g, "$i128b", TYPE_I128, 0, 3, NULL, NULL, frame);
+    } else if (n->kind == ND_UNARY && (n->op == TK_MINUS || n->op == TK_TILDE)) {
+        ExprType ot = type_of(g, n->operand);
+        if (is_i128(ot.base, ot.ptr))
+            n->int_val = add_local(g, "$i128u", TYPE_I128, 0, 2, NULL, NULL, frame);
+    } else if (n->kind == ND_CAST && is_i128(n->type, n->ptr)) {
+        n->int_val = add_local(g, "$i128c", TYPE_I128, 0, 1, NULL, NULL, frame);
     }
     collect_struct_temps(g, n->lhs, frame);   collect_struct_temps(g, n->rhs, frame);
     collect_struct_temps(g, n->operand, frame); collect_struct_temps(g, n->cond, frame);

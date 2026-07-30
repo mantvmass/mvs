@@ -89,6 +89,7 @@ typedef struct {
     const char *cur_ns;     /* namespace used to resolve unqualified calls inside the current function */
     int cur_ret_float;      /* 1 if the function being generated returns a float (must return via xmm0) */
     int cur_ret_f32c;       /* 1 if an exported function returns f32 (must convert double -> single for C) */
+    int cur_ret_i128;       /* 1 if the function returns i128/u128 (goes through the hidden sret pointer) */
     int io_imported;        /* 1 if the io module was imported (gates the built-in io.out function) */
 
     /* String pool: stores string bytes to be declared in the .data section */
@@ -98,8 +99,16 @@ typedef struct {
     struct { int brk; int cont; } loops[MAX_LOOP]; int nloops;
 
     int label_id;           /* counter for unique labels */
+    int need_i128;          /* 1 = emit the 128-bit divmod/print helper routines at the end */
     int had_error;
 } Gen;
+
+/* Is this a full 128-bit integer VALUE (not a pointer to one)?
+ * These use the address-as-value convention (like structs): rax holds the
+ * address of a 16-byte blob, and arithmetic goes through pair-wise qword ops. */
+static inline int is_i128(DataType base, int ptr) {
+    return ptr == 0 && (base == TYPE_I128 || base == TYPE_U128);
+}
 
 /* --- label counter and symbol naming (rules shared by all backends) --- */
 int   new_label(Gen *g);

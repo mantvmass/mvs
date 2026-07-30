@@ -1,0 +1,7 @@
+//~ ERROR: cannot be used directly as a condition
+// a bare i128 in a condition would test its address; require an explicit compare
+func main() -> i8 {
+    let x: i128 = 5 as i128;
+    if (x) { return 1; }
+    return 0;
+}

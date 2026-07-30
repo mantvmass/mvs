@@ -1,0 +1,7 @@
+//~ ERROR: cannot cast between floating point and 128-bit
+// float <-> i128 has no direct conversion path; go through i64
+func main() -> i8 {
+    let x: f64 = 1.5;
+    let y: i128 = x as i128;
+    return 0;
+}

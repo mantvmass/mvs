@@ -32,6 +32,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `control.mvs` | if/elseif/else, while, for, do-while, switch/case |
 | `args.mvs` | command-line args via `main(argc, argv)` |
 | `arrays.mvs` | `[T; N]` arrays: literals, indexing, `.len`, structs, decay to `*T` |
+| `int128.mvs` | full 128-bit arithmetic: mul/div/mod past 64 bits, u128 max, shifts |
 
 ## 02_functions: functions / generics / overloading
 

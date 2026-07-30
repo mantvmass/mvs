@@ -740,8 +740,14 @@ static void tc_name(CType t, char *buf) {
     strcpy(p, b);
 }
 
+static int tc_is128(CType t) { return t.ptr == 0 && (t.base == TYPE_I128 || t.base == TYPE_U128); }
+
 /* Check whether a value (s) can be assigned to a target (d) */
 static int tc_assignable(CType d, CType s) {
+    /* 128-bit rules: narrowing out of i128 must be explicit ('as'), and floats never
+     * convert to/from i128 implicitly (no 128-bit float path in codegen) */
+    if (tc_is128(s) && !tc_is128(d)) return 0;
+    if (tc_is128(d) && s.ptr == 0 && (s.base == TYPE_F32 || s.base == TYPE_F64)) return 0;
     if (d.arr > 0 || s.arr > 0) {
         /* whole arrays never assign; a [T; N] value decays to a pointer when the target is one */
         if (d.arr > 0) return 0;                        /* array targets are handled at the declaration */
@@ -864,6 +870,18 @@ static Bind *tc_find(TcCtx *c, const char *name) {
     return NULL;
 }
 
+/* A bare i128 in a boolean context would test its ADDRESS (always true); require != 0 */
+static void tc_check_cond128(TcCtx *c, Node *cond) {
+    if (!cond) return;
+    CType t = infer(c->prog, cond, c->map, *c->nmap);
+    if (t.ptr == 0 && (t.base == TYPE_I128 || t.base == TYPE_U128)) {
+        diag_print(cond->file, cond->line, cond->col, "error",
+                   "a 128-bit integer cannot be used directly as a condition");
+        diag_help("compare it explicitly: write 'x != 0'");
+        (*c->errc)++;
+    }
+}
+
 /* If an assignment/increment target is (a field of) a const variable, report it.
  * Walks member chains (p.x.y) down to the base identifier; writes through a
  * dereferenced pointer are allowed (the pointer may point at mutable memory) */
@@ -947,17 +965,20 @@ static void tc_check(TcCtx *c, Node *n) {
         case ND_FOR: {                         /* variables in for-init are scoped to the loop */
             int save = *c->nmap;
             tc_check(c, n->init); tc_check(c, n->cond); tc_check(c, n->step); tc_check(c, n->body);
+            tc_check_cond128(c, n->cond);
             tc_pop(c, save);
             return;
         }
         case ND_IF: {
             tc_check(c, n->cond);
+            tc_check_cond128(c, n->cond);
             int s1 = *c->nmap; tc_check(c, n->then_branch); tc_pop(c, s1);
             int s2 = *c->nmap; tc_check(c, n->else_branch); tc_pop(c, s2);
             return;
         }
         case ND_WHILE: case ND_DOWHILE: {
             tc_check(c, n->cond);
+            tc_check_cond128(c, n->cond);
             int save = *c->nmap; tc_check(c, n->body); tc_pop(c, save);
             return;
         }
@@ -965,11 +986,11 @@ static void tc_check(TcCtx *c, Node *n) {
             tc_check(c, n->cond);
             /* switch compares as integers (je): the value must be integer/char/bool or it silently misbehaves */
             CType ct = infer(c->prog, n->cond, c->map, *c->nmap);
-            if (!tc_integer(ct)) {
+            if (!tc_integer(ct) || tc_is128(ct)) {
                 char tn[128]; tc_name(ct, tn);
                 diag_print(n->file, n->line, n->col, "error",
-                           "switch requires an integer/char/bool value, got '%s'", tn);
-                diag_help("switch compares with integer equality; use if/elseif for floating-point values");
+                           "switch requires an integer/char/bool value (64-bit or less), got '%s'", tn);
+                diag_help("switch compares with integer equality; use if/elseif chains for '%s'", tn);
                 (*c->errc)++;
             }
             int save = *c->nmap;
@@ -1064,13 +1085,39 @@ static void tc_check(TcCtx *c, Node *n) {
             diag_print(n->file, n->line, n->col, "error", "whole-array assignment is not supported");
             diag_help("copy element by element instead");
             (*c->errc)++;
+        } else if (tc_is128(lt) && n->op != TK_ASSIGN) {
+            diag_print(n->file, n->line, n->col, "error",
+                       "compound assignment is not supported on 128-bit integers");
+            diag_help("write it out: x = x + y");
+            (*c->errc)++;
         } else if (!tc_assignable(lt, rt)) tc_err(c, n, "cannot assign value of type", rt, lt); /* "... rt to lt" */
         tc_check_const_target(c, n->lhs, n);                       /* const is read-only */
     } else if (n->kind == ND_UNARY && (n->op == TK_PLUSPLUS || n->op == TK_MINUSMINUS)) {
         tc_check_const_target(c, n->operand, n);                   /* x++ / x-- also writes x */
+        {
+            CType ot = infer(c->prog, n->operand, c->map, *c->nmap);
+            if (tc_is128(ot)) {
+                diag_print(n->file, n->line, n->col, "error",
+                           "'++'/'--' is not supported on 128-bit integers");
+                diag_help("write it out: x = x + 1");
+                (*c->errc)++;
+            }
+        }
     } else if (n->kind == ND_RETURN && n->operand) {
         CType vt = infer(c->prog, n->operand, c->map, *c->nmap);
         if (!tc_assignable(c->ret, vt)) tc_err(c, n, "return type mismatch between", c->ret, vt);
+    } else if (n->kind == ND_CAST) {
+        /* floats never convert to/from 128-bit integers (no such codegen path) */
+        CType st = infer(c->prog, n->operand, c->map, *c->nmap);
+        CType dt = { n->type, n->ptr, n->type_name, NULL, 0 };
+        int sf = st.ptr == 0 && (st.base == TYPE_F32 || st.base == TYPE_F64);
+        int df = dt.ptr == 0 && (dt.base == TYPE_F32 || dt.base == TYPE_F64);
+        if ((tc_is128(st) && df) || (sf && tc_is128(dt))) {
+            diag_print(n->file, n->line, n->col, "error",
+                       "cannot cast between floating point and 128-bit integers directly");
+            diag_help("go through a 64-bit integer: (x as i64) as f64, or (x as i64) as i128");
+            (*c->errc)++;
+        }
     } else if (n->kind == ND_INDEX) {
         /* a[i]: the base must be indexable, the index an integer, and a constant
          * index into a [T; N] must be inside the bounds (checked at compile time) */
@@ -1142,6 +1189,15 @@ static void tc_check(TcCtx *c, Node *n) {
                     Node *pp = fn->items[i + argoff];
                     CType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 };
                     CType at = infer(c->prog, n->items[i], c->map, *c->nmap);
+                    if (tc_is128(pt) && !tc_is128(at)) {
+                        /* the callee copies 16 bytes from an address; a 64-bit value has none */
+                        Node *arg = n->items[i];
+                        diag_print(arg->file, arg->line, arg->col, "error",
+                                   "argument %d to '%s' must be a 128-bit value", i + 1, fn->name);
+                        diag_help("cast it explicitly: pass 'x as %s'", datatype_name(pp->type));
+                        (*c->errc)++;
+                        continue;
+                    }
                     if (!tc_assignable(pt, at)) {
                         char an[128], pn[128]; tc_name(at, an); tc_name(pt, pn);
                         Node *arg = n->items[i];
