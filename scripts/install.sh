@@ -2,26 +2,32 @@
 # ============================================================
 #  MVS installer (Linux)
 #  Usage: sh scripts/install.sh
+#         curl -fsSL https://raw.githubusercontent.com/mantvmass/mvs/main/scripts/install.sh | sh
 #
-#  Builds the compiler (if needed), copies mvs + std/ to ~/.mvs,
-#  and appends PATH + MVS_STD exports to ~/.profile (idempotent).
+#  Downloads the prebuilt release binary (mvs-linux-x86_64.tar.gz from the
+#  latest GitHub Release), unpacks it to ~/.mvs, and appends PATH + MVS_STD
+#  exports to ~/.profile (idempotent).
+#  (Releases are produced by .github/workflows/release.yml on v* tags.)
 # ============================================================
 set -e
-cd "$(dirname "$0")/.."
 
-if [ ! -x ./mvs ]; then
-    echo "building mvs ..."
-    ${CC:-cc} -Wall -Wextra -Isrc \
-        src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c \
-        src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c \
-        -o mvs
+repo="mantvmass/mvs"
+asset="mvs-linux-x86_64.tar.gz"
+url="https://github.com/$repo/releases/latest/download/$asset"
+dest="$HOME/.mvs"
+tmp="/tmp/$asset"
+
+echo "downloading $url ..."
+if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$tmp" || { echo "error: download failed. Is there a published release yet?"; exit 1; }
+else
+    wget -q "$url" -O "$tmp" || { echo "error: download failed. Is there a published release yet?"; exit 1; }
 fi
 
-dest="$HOME/.mvs"
 mkdir -p "$dest"
-cp ./mvs "$dest/"
-rm -rf "$dest/std"
-cp -r ./std "$dest/std"
+tar xzf "$tmp" -C "$dest"
+rm -f "$tmp"
+chmod +x "$dest/mvs"
 
 profile="$HOME/.profile"
 marker="# mvs-install"

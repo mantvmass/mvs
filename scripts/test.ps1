@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  MVS compiler test suite
 #
 #  Usage:
@@ -255,7 +255,7 @@ foreach ($ex in $elfTests) {
 }
 
 Write-Host "=== compile-fail (expected errors) ===" -ForegroundColor Cyan
-$failDir = Join-Path $root "testsmpile_fail"
+$failDir = Join-Path $root "tests/compile_fail"
 if (Test-Path $failDir) {
     foreach ($f in (Get-ChildItem $failDir -Filter *.mvs | Sort-Object Name)) {
         $first = (Get-Content $f.FullName -TotalCount 1)
