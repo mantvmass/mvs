@@ -1,16 +1,50 @@
-name: MVS Compiler CI
+name: CI
+
+# GitHub CI is the PRIMARY verification platform for MVS: not every OS/arch can
+# run locally, so every push must prove the compiler builds warning-free and the
+# full golden test suites pass on every supported target.
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
 
 jobs:
-  # Linux: build the compiler natively with gcc, then compile every runnable example
-  # with --target elf64 (SysV ABI), link with gcc, RUN it, and diff stdout against
-  # the same goldens the Windows job uses (proves both backends behave identically)
-  test-elf-linux:
+  # Windows host, win64 target: build with clang, run the complete suite
+  # (golden run-pass diffs, compile-only, C interop linked with clang,
+  # elf64 cross-assembly, compile-fail expected errors)
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install NASM
+        run: choco install nasm -y
+
+      - name: Add NASM to PATH
+        run: echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build compiler (clang, warnings are errors)
+        run: clang -Wall -Wextra -Werror -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c -o mvs.exe
+
+      - name: Run test suite
+        run: powershell -ExecutionPolicy Bypass -File tests/run.ps1
+
+      - name: Upload Windows binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mvs-windows-x86_64
+          path: |
+            mvs.exe
+            std/
+
+  # Linux host, elf64 target: build natively with gcc, then compile, link, RUN
+  # every runnable example and diff stdout against the same goldens the Windows
+  # job uses; also proves --nostd objects are self-contained and ld-linkable
+  test-linux:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -19,33 +53,16 @@ jobs:
       - name: Install NASM
         run: sudo apt-get update && sudo apt-get install -y nasm
 
-      - name: Build compiler (native Linux)
+      - name: Build compiler (gcc, warnings are errors)
         run: gcc -Wall -Wextra -Werror -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c -o mvs
 
-      - name: Run ELF64 test suite (compile, link, run, diff goldens)
+      - name: Run ELF64 test suite (compile, link, run, diff goldens; incl. freestanding)
         run: sh tests/run_elf_ci.sh
 
-  build:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # install nasm (the assembler); clang/llvm is already provided on the windows runner
-      - name: Install NASM
-        run: choco install nasm -y
-
-      - name: Add NASM to PATH
-        run: echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      # build the compiler with clang (source list matches the Makefile:
-      # includes generic.c + arch/common.c + arch/x86_64/win.c)
-      - name: Build compiler
-        run: clang -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c -o mvs.exe
-
-      # run the full test suite: golden output diffs, compile-only, C interop (both
-      # directions, linked with clang and diffed), and compile-fail (expected-error)
-      # tests; see tests/run.ps1
-      - name: Run test suite
-        run: powershell -ExecutionPolicy Bypass -File tests/run.ps1
-
+      - name: Upload Linux binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mvs-linux-x86_64
+          path: |
+            mvs
+            std/

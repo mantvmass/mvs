@@ -1,0 +1,57 @@
+name: Release
+
+# Tag a version (e.g. `git tag v0.5.0 && git push --tags`) to build release
+# binaries for every supported host and attach them to a GitHub Release.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install NASM
+        run: choco install nasm -y
+      - name: Build
+        run: clang -Wall -Wextra -Werror -O2 -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c -o mvs.exe
+      - name: Package
+        run: Compress-Archive -Path mvs.exe, std, docs, README.md, LICENSE-MIT, LICENSE-APACHE -DestinationPath mvs-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: mvs-windows-x86_64.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install NASM
+        run: sudo apt-get update && sudo apt-get install -y nasm
+      - name: Build
+        run: gcc -Wall -Wextra -Werror -O2 -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c -o mvs
+      - name: Package
+        run: tar czf mvs-linux-x86_64.tar.gz mvs std docs README.md LICENSE-MIT LICENSE-APACHE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: mvs-linux-x86_64.tar.gz
+
+  publish:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            mvs-windows-x86_64.zip
+            mvs-linux-x86_64.tar.gz
+          generate_release_notes: true
