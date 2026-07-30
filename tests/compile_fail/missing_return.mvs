@@ -1,0 +1,11 @@
+//~ ERROR: without returning a value
+// a non-void function must return on every path (here the n <= 0 path falls off the end)
+func classify(n: i32) -> i32 {
+    if (n > 0) {
+        return 1;
+    }
+}
+func main() -> i8 {
+    classify(5);
+    return 0;
+}

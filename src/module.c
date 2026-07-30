@@ -12,6 +12,7 @@
 #include <string.h>
 #include "module.h"
 #include "parser.h"
+#include "diag.h"
 
 #define MAX_LOADED 256
 
@@ -280,9 +281,11 @@ static void load_module(Loader *L, const char *path, const char *ns) {
         return;
     }
 
+    /* diag keeps the source text for error excerpts; the returned name pointer is
+     * stable, so AST nodes can carry it for later passes (typecheck etc.) */
+    const char *fname = diag_register_source(path, src);
     int err = 0;
-    Node *prog = parse_program(src, path, &err);
-    free(src);
+    Node *prog = parse_program(src, fname, &err);
     if (err) { L->had_error = 1; free(L->loading[--L->nloading]); return; }
 
     char *mod_defs = collect_defs(prog); /* record this module's top-level symbols for import checks */

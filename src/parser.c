@@ -14,12 +14,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include "parser.h"
+#include "diag.h"
+
+#define MAX_PARSE_ERRORS 20  /* stop reporting after this many; the file is likely mangled */
 
 /* ---------- Basic parser helper functions ---------- */
 
 /* Move to the next token, replacing the current one (do not free the lexeme; the AST may still reference it) */
 static void advance(Parser *p) {
     p->cur = lexer_next(p->lx);
+    ast_set_col(p->cur.col);   /* nodes created from here on point at this column */
 }
 
 /* Check whether the current token is of the given kind */
@@ -33,12 +37,57 @@ static int match(Parser *p, TokenType t) {
     return 0;
 }
 
-/* Report a syntax error with its location */
+/* Report a syntax error with its location. Sets panic mode: further errors are
+ * suppressed until synchronize() finds a safe point to resume from, so one real
+ * mistake does not cascade into a wall of noise. */
 static void error(Parser *p, const char *msg) {
-    if (p->had_error) return; /* report only the first error to reduce noise */
-    fprintf(stderr, "%s:%d:%d: syntax error: %s (near '%s')\n",
-            p->lx->filename, p->cur.line, p->cur.col, msg, p->cur.lexeme);
     p->had_error = 1;
+    if (p->panic || p->fatal) return;      /* one report per bad region */
+    p->panic = 1;
+    if (++p->nerrors >= MAX_PARSE_ERRORS) {
+        fprintf(stderr, "%s: too many syntax errors; giving up on this file\n", p->lx->filename);
+        p->fatal = 1;
+        return;
+    }
+    diag_print(p->lx->filename, p->cur.line, p->cur.col, "syntax error",
+               "%s (near '%s')", msg, p->cur.lexeme);
+}
+
+/* Skip ahead to a point where parsing can safely continue: just past a ';',
+ * in front of a '}', or at a token that clearly starts a new statement/declaration */
+static void synchronize(Parser *p) {
+    p->panic = 0;
+    for (;;) {
+        switch (p->cur.type) {
+            case TK_EOF: case TK_RBRACE:
+                return;
+            case TK_SEMICOLON:
+                advance(p); return;
+            case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT:
+            case TK_IMPORT: case TK_EXTERN: case TK_EXPORT:
+            case TK_LET: case TK_CONST: case TK_IF: case TK_WHILE: case TK_FOR:
+            case TK_DO: case TK_SWITCH: case TK_RETURN: case TK_BREAK: case TK_CONTINUE:
+                return;
+            default:
+                advance(p);
+        }
+    }
+}
+
+/* Top-level recovery: skip to the next token that can start a top-level declaration */
+static void synchronize_top(Parser *p) {
+    p->panic = 0;
+    for (;;) {
+        switch (p->cur.type) {
+            case TK_EOF:
+            case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT:
+            case TK_IMPORT: case TK_EXTERN: case TK_EXPORT:
+            case TK_LET: case TK_CONST:
+                return;
+            default:
+                advance(p);
+        }
+    }
 }
 
 /* Require that the current token is of the given kind, otherwise error */
@@ -564,7 +613,7 @@ static Node *parse_switch(Parser *p) {
     n->cond = parse_expr(p);
     expect(p, TK_RPAREN, "expected ')' after switch value");
     expect(p, TK_LBRACE, "expected '{' after switch");
-    while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->had_error) {
+    while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
         Node *c = node_new(ND_CASE, p->cur.line);
         if (match(p, TK_CASE)) {
             c->operand = parse_expr(p);
@@ -576,10 +625,12 @@ static Node *parse_switch(Parser *p) {
             error(p, "expected 'case' or 'default' in switch");
             break;
         }
+        if (p->panic) synchronize(p);
         /* Statements of this case: read until the next case/default/} */
         while (!check(p, TK_CASE) && !check(p, TK_DEFAULT) &&
-               !check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->had_error) {
+               !check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
             node_add_item(c, parse_stmt(p));
+            if (p->panic) synchronize(p);
         }
         node_add_item(n, c);
     }
@@ -596,8 +647,9 @@ static Node *parse_block(Parser *p) {
         return n;
     }
     expect(p, TK_LBRACE, "expected '{'");
-    while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->had_error) {
+    while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
         node_add_item(n, parse_stmt(p));
+        if (p->panic) synchronize(p);   /* recover so later statements still get checked */
     }
     expect(p, TK_RBRACE, "expected '}'");
     p->depth--;
@@ -732,11 +784,12 @@ static Node *parse_impl(Parser *p) {
         sname = first;
     }
     expect(p, TK_LBRACE, "expected '{' after impl type");
-    while (check(p, TK_FUNC) && !p->had_error) {
+    while (check(p, TK_FUNC) && !p->fatal) {
         Node *m = parse_func_decl(p, 0);
         m->ns = sname ? strdup(sname) : NULL; /* method/associated fn lives in the type's namespace */
         m->is_method = 1;
         node_add_item(n, m);
+        if (p->panic) synchronize(p);
     }
     expect(p, TK_RBRACE, "expected '}' to close impl block");
     /* If this is a trait impl, leave a marker for the checker (which type impls which trait) */
@@ -758,10 +811,11 @@ static Node *parse_trait(Parser *p) {
     if (!check(p, TK_IDENT)) error(p, "expected trait name");
     else { n->name = strdup(p->cur.lexeme); advance(p); }
     expect(p, TK_LBRACE, "expected '{' after trait name");
-    while (check(p, TK_FUNC) && !p->had_error) {
+    while (check(p, TK_FUNC) && !p->fatal) {
         /* Method in a trait: ends with ';' = pure signature, or has { } = default method */
         Node *sig = parse_func_decl(p, 0);
         node_add_item(n, sig);
+        if (p->panic) synchronize(p);
     }
     expect(p, TK_RBRACE, "expected '}' to close trait block");
     return n;
@@ -806,7 +860,7 @@ static Node *parse_struct(Parser *p) {
     n->name = strdup(p->cur.lexeme);
     advance(p);
     expect(p, TK_LBRACE, "expected '{' after struct name");
-    while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->had_error) {
+    while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
         Node *f = node_new(ND_PARAM, p->cur.line);
         if (!check(p, TK_IDENT)) { error(p, "expected field name"); break; }
         f->name = strdup(p->cur.lexeme);
@@ -828,11 +882,15 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
     Parser p;
     p.lx = &lx;
     p.had_error = 0;
+    p.nerrors = 0;
+    p.panic = 0;
+    p.fatal = 0;
     p.depth = 0;
+    ast_set_file(filename);  /* nodes made during this parse belong to this file */
     advance(&p); /* load the first token */
 
     Node *prog = node_new(ND_PROGRAM, 1);
-    while (!check(&p, TK_EOF) && !p.had_error) {
+    while (!check(&p, TK_EOF) && !p.fatal) {
         if (check(&p, TK_IMPORT)) {
             node_add_item(prog, parse_import(&p));
         } else if (check(&p, TK_FUNC)) {
@@ -861,6 +919,7 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
         } else {
             error(&p, "expected an import, function, or global declaration");
         }
+        if (p.panic) synchronize_top(&p);   /* recover and keep checking the rest of the file */
     }
 
     *had_error = p.had_error || lx.had_error;

@@ -68,6 +68,8 @@ typedef enum {
 typedef struct Node {
     NodeKind kind;        /* node kind */
     int      line;        /* source line, used in error reports */
+    int      col;         /* source column of the token the node was created at (0 = unknown) */
+    const char *file;     /* source file name (a stable pointer from diag_register_source) */
 
     DataType type;        /* data type of the node (for exprs) or return type (for funcs) */
     int      ptr;         /* pointer depth (0 = not a pointer, 1 = *T, 2 = **T) */
@@ -116,6 +118,10 @@ typedef struct Node {
 
 /* --- node construction helpers --- */
 Node *node_new(NodeKind kind, int line);
+/* Source position for nodes created from here on (set by the parser per file / per token);
+ * node_new stamps these into every new node so diagnostics can point at real source */
+void  ast_set_file(const char *file);
+void  ast_set_col(int col);
 /* Append a child node to items[] (grows the array automatically) */
 void  node_add_item(Node *parent, Node *child);
 /* Deep-copy an AST tree (used when instantiating a generic function) */

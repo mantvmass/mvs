@@ -1,0 +1,8 @@
+//~ ERROR: expected a type
+// the FIRST error is 'expected expression'; this test asserts the SECOND error is
+// also reported, proving the parser recovers and keeps checking instead of stopping
+func main() -> i8 {
+    let a: i32 = ;
+    let c: = 2;
+    return 0;
+}

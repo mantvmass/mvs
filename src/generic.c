@@ -12,13 +12,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include "generic.h"
+#include "diag.h"
 
 /* Inferred concrete type (base + pointer depth + struct name + signature if it is a function pointer) */
 typedef struct { DataType base; int ptr; char *sname; Node *sig; } CType;
 
 /* Mapping entry, name -> type (used as the per-function var-type map and the generic-param map).
- * is_const marks let/const so the type checker can reject writes to constants */
-typedef struct { char *name; CType t; int is_const; } Bind;
+ * is_const marks let/const so the type checker can reject writes to constants;
+ * decl/used back the unused-variable warning (decl = the ND_VAR_DECL/ND_PARAM node) */
+typedef struct { char *name; CType t; int is_const; Node *decl; int used; } Bind;
 
 /* ---------- program lookup helpers ---------- */
 
@@ -58,15 +60,16 @@ static void check_trait_impls(Node *prog) {
         if (d->kind != ND_TRAIT_IMPL) continue;
         Node *tr = find_trait(prog, d->name);
         if (!tr) {
-            fprintf(stderr, "type error: unknown trait '%s' in impl for '%s'\n", d->name, d->type_name);
+            diag_print(d->file, d->line, d->col, "error", "unknown trait '%s' in impl for '%s'", d->name, d->type_name);
             mono_err++; continue;
         }
         for (int j = 0; j < tr->nitems; j++) {
             Node *sig = tr->items[j];
             if (sig->kind != ND_FUNC) continue;
             if (!type_has_method(prog, d->type_name, sig->name)) {
-                fprintf(stderr, "type error: type '%s' is missing method '%s' required by trait '%s'\n",
-                        d->type_name, sig->name, d->name);
+                diag_print(d->file, d->line, d->col, "error",
+                           "type '%s' is missing method '%s' required by trait '%s'",
+                           d->type_name, sig->name, d->name);
                 mono_err++;
             }
         }
@@ -219,6 +222,8 @@ static void add_bind(Bind *map, int *nmap, Node *d) {
     map[*nmap].name = d->name;
     map[*nmap].t.base = d->type; map[*nmap].t.ptr = d->ptr; map[*nmap].t.sname = d->type_name; map[*nmap].t.sig = d->sig;
     map[*nmap].is_const = (d->kind == ND_VAR_DECL) ? d->is_const : 0;
+    map[*nmap].decl = d;
+    map[*nmap].used = 0;
     (*nmap)++;
 }
 
@@ -328,8 +333,13 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                 CType ct = gmap[gi].t;
                 if (!(ct.base == TYPE_STRUCT && ct.sname && type_impls_trait(prog, ct.sname, tmpl->gen_bound[gi]))) {
                     const char *tn = (ct.base == TYPE_STRUCT && ct.sname) ? ct.sname : datatype_name(ct.base);
-                    fprintf(stderr, "type error: type '%s' does not implement trait '%s' (required by %s<%s: %s>)\n",
-                            tn, tmpl->gen_bound[gi], tmpl->name, tmpl->gen[gi], tmpl->gen_bound[gi]);
+                    diag_print(n->file, n->line, n->col, "error",
+                               "type '%s' does not implement trait '%s' (required by %s<%s: %s>)",
+                               tn, tmpl->gen_bound[gi], tmpl->name, tmpl->gen[gi], tmpl->gen_bound[gi]);
+                    if (ct.base == TYPE_STRUCT && ct.sname)
+                        diag_help("add 'impl %s for %s { ... }' to satisfy the bound", tmpl->gen_bound[gi], tn);
+                    else
+                        diag_help("traits can only be implemented for structs; '%s' cannot satisfy the bound", tn);
                     mono_err++;
                 }
             }
@@ -479,12 +489,18 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
                     if (strcmp(sets[s].catsig[d], wc) == 0) { cnt++; cd = d; }
                 if (cnt == 1) found = cd;
                 else if (cnt > 1) {
-                    fprintf(stderr, "codegen error: ambiguous call to '%s' with argument types (%s): multiple width overloads match; use 'as' to disambiguate\n", sets[s].orig, wx);
+                    diag_print(n->file, n->line, n->col, "error",
+                               "ambiguous call to '%s' with argument types (%s): multiple width overloads match",
+                               sets[s].orig, wx);
+                    diag_help("disambiguate with an explicit cast, e.g. f(x as i32)");
                     break;
                 }
             }
             if (found >= 0) { free(n->operand->name); n->operand->name = strdup(sets[s].defs[found]->name); }
-            else fprintf(stderr, "codegen error: no overload of '%s' matches argument types (%s)\n", sets[s].orig, wx);
+            else {
+                diag_print(n->file, n->line, n->col, "error",
+                           "no overload of '%s' matches argument types (%s)", sets[s].orig, wx);
+            }
             break;
         }
     }
@@ -508,18 +524,21 @@ int check_duplicates(Node *prog) {
             Node *b = prog->items[j];
             if (a->kind != b->kind || !a->name || !b->name || strcmp(a->name, b->name) != 0) continue;
             if (a->kind == ND_STRUCT_DECL) {
-                fprintf(stderr, "error: duplicate struct '%s'\n", a->name); errc++;
+                diag_print(a->file, a->line, a->col, "error", "duplicate struct '%s'", a->name); errc++;
             } else if (a->kind == ND_TRAIT) {
-                fprintf(stderr, "error: duplicate trait '%s'\n", a->name); errc++;
+                diag_print(a->file, a->line, a->col, "error", "duplicate trait '%s'", a->name); errc++;
             } else { /* ND_FUNC */
                 if (a->is_extern || b->is_extern || a->ngen > 0 || b->ngen > 0) continue;
                 if (!ns_eq(a->ns, b->ns)) continue;
                 char sa[SIGCAP], sb[SIGCAP]; sig_func(a, sa, 1); sig_func(b, sb, 1);
                 if (strcmp(sa, sb) != 0) continue; /* different signature = overload, not a duplicate */
                 if (a->ns && a->ns[0])
-                    fprintf(stderr, "error: duplicate function '%s.%s' with the same parameter types (%s)\n", a->ns, a->name, sa);
+                    diag_print(a->file, a->line, a->col, "error",
+                               "duplicate function '%s.%s' with the same parameter types (%s)", a->ns, a->name, sa);
                 else
-                    fprintf(stderr, "error: duplicate function '%s' with the same parameter types (%s)\n", a->name, sa);
+                    diag_print(a->file, a->line, a->col, "error",
+                               "duplicate function '%s' with the same parameter types (%s)", a->name, sa);
+                diag_help("overloads must differ in parameter types; rename one of the definitions otherwise");
                 errc++;
             }
         }
@@ -715,13 +734,74 @@ static int tc_assignable(CType d, CType s) {
     return 1;                                           /* void etc.: not strict */
 }
 
+/* ---------- control-flow helpers (missing-return and unreachable-code checks) ---------- */
+
+/* Does this subtree contain a `break` that binds to the ENCLOSING loop?
+ * Nested loops and switches keep their breaks to themselves, so recursion stops there. */
+static int has_break(Node *n) {
+    if (!n) return 0;
+    switch (n->kind) {
+        case ND_BREAK: return 1;
+        case ND_WHILE: case ND_DOWHILE: case ND_FOR: case ND_SWITCH: return 0;
+        default: break;
+    }
+    if (has_break(n->lhs) || has_break(n->rhs) || has_break(n->operand) || has_break(n->cond) ||
+        has_break(n->then_branch) || has_break(n->else_branch) || has_break(n->init) ||
+        has_break(n->step) || has_break(n->body)) return 1;
+    for (int i = 0; i < n->nitems; i++) if (has_break(n->items[i])) return 1;
+    return 0;
+}
+
+/* Conservative "this statement guarantees a return" analysis. When unsure it answers no,
+ * which surfaces as a missing-return error the programmer can silence with an explicit
+ * return; it never silently accepts a function that could fall off the end. */
+static int always_returns(Node *n) {
+    if (!n) return 0;
+    switch (n->kind) {
+        case ND_RETURN: return 1;
+        case ND_BLOCK:
+            /* sequential: if some statement guarantees a return, the block does */
+            for (int i = 0; i < n->nitems; i++) if (always_returns(n->items[i])) return 1;
+            return 0;
+        case ND_IF:
+            return n->else_branch != NULL && always_returns(n->then_branch) && always_returns(n->else_branch);
+        case ND_SWITCH: {
+            int has_default = 0;
+            for (int i = 0; i < n->nitems; i++) {
+                Node *cs = n->items[i];
+                if (!cs->operand) has_default = 1;
+                int r = 0;
+                for (int j = 0; j < cs->nitems; j++) if (always_returns(cs->items[j])) { r = 1; break; }
+                if (!r) return 0;   /* a case may fall through and then out of the switch */
+            }
+            return has_default;
+        }
+        case ND_DOWHILE:
+            return always_returns(n->body);   /* the body runs at least once */
+        case ND_WHILE:
+            /* while (true) without a break can only leave through a return */
+            return n->cond && n->cond->kind == ND_BOOL && n->cond->int_val == 1 && !has_break(n->body);
+        case ND_FOR:
+            return n->cond == NULL && !has_break(n->body);   /* for (;;) likewise */
+        default: return 0;
+    }
+}
+
+/* A statement after which the rest of the block cannot run */
+static int stmt_terminates(Node *n) {
+    return n && (n->kind == ND_BREAK || n->kind == ND_CONTINUE || always_returns(n));
+}
+
 /* Context of the function being checked. map/nmap is a scope stack that grows with declarations
  * (push/pop per block) so variable types infer correctly under shadowing (nearest in-scope declaration wins) */
 typedef struct { Node *prog; Bind *map; int *nmap; CType ret; int *errc; } TcCtx;
 
 static void tc_err(TcCtx *c, Node *n, const char *msg, CType a, CType b) {
     char an[128], bn[128]; tc_name(a, an); tc_name(b, bn);
-    fprintf(stderr, "type error (line %d): %s '%s' and '%s'\n", n->line, msg, an, bn);
+    diag_print(n->file, n->line, n->col, "error", "%s '%s' and '%s'", msg, an, bn);
+    /* the most common confusion: strings never convert to numbers implicitly */
+    if ((tc_isstr(a) && tc_numeric(b)) || (tc_numeric(a) && tc_isstr(b)))
+        diag_help("MVS never converts between strings and numbers implicitly; use extern atoi/strtod");
     (*c->errc)++;
 }
 
@@ -734,7 +814,24 @@ static void tc_add(TcCtx *c, Node *d) {
     c->map[*c->nmap].t.sname = d->type_name;
     c->map[*c->nmap].t.sig = d->sig;
     c->map[*c->nmap].is_const = (d->kind == ND_VAR_DECL) ? d->is_const : 0;
+    c->map[*c->nmap].decl = d;
+    c->map[*c->nmap].used = 0;
     (*c->nmap)++;
+}
+
+/* Close a scope: warn about local variables that were never mentioned, then pop.
+ * Warnings fire only for the entry file (imported modules stay quiet) and skip
+ * names starting with '_' (the conventional way to keep something intentionally) */
+static void tc_pop(TcCtx *c, int save) {
+    for (int i = save; i < *c->nmap; i++) {
+        Bind *b = &c->map[i];
+        if (b->used || !b->decl || b->decl->kind != ND_VAR_DECL) continue;
+        if (!b->name || b->name[0] == '_') continue;
+        if (!diag_is_primary(b->decl->file)) continue;
+        diag_print(b->decl->file, b->decl->line, b->decl->col, "warning", "unused variable '%s'", b->name);
+        diag_help("prefix it with an underscore ('_%s') to silence this warning", b->name);
+    }
+    *c->nmap = save;
 }
 
 /* Find the nearest in-scope binding for a name (shadowing: most recent wins), NULL if not found */
@@ -754,8 +851,9 @@ static void tc_check_const_target(TcCtx *c, Node *target, Node *site) {
     if (!base || base->kind != ND_IDENT) return;
     Bind *b = tc_find(c, base->name);
     if (b && b->is_const) {
-        fprintf(stderr, "type error (line %d): cannot assign to constant '%s' (declared with 'const')\n",
-                site->line, base->name);
+        diag_print(site->file, site->line, site->col, "error",
+                   "cannot assign to constant '%s' (declared with 'const')", base->name);
+        diag_help("declare '%s' with 'let' to make it mutable", base->name);
         (*c->errc)++;
     }
 }
@@ -763,10 +861,27 @@ static void tc_check_const_target(TcCtx *c, Node *target, Node *site) {
 static void tc_check(TcCtx *c, Node *n) {
     if (!n) return;
     switch (n->kind) {
+        case ND_IDENT: {                       /* mark the nearest binding as used (unused-var warning) */
+            Bind *b = tc_find(c, n->name);
+            if (b) b->used = 1;
+            return;
+        }
         case ND_BLOCK: {                       /* open a new scope: block variables vanish at its end */
             int save = *c->nmap;
-            for (int i = 0; i < n->nitems; i++) tc_check(c, n->items[i]);
-            *c->nmap = save;
+            int dead_reported = 0;
+            for (int i = 0; i < n->nitems; i++) {
+                tc_check(c, n->items[i]);
+                /* anything after a guaranteed return/break/continue can never run */
+                if (!dead_reported && i + 1 < n->nitems && stmt_terminates(n->items[i])) {
+                    Node *next = n->items[i + 1];
+                    if (diag_is_primary(next->file)) {
+                        diag_print(next->file, next->line, next->col, "warning", "unreachable code");
+                        diag_help("the statement above always returns or jumps away");
+                    }
+                    dead_reported = 1;
+                }
+            }
+            tc_pop(c, save);
             return;
         }
         case ND_VAR_DECL: {                    /* check the initializer in the current scope, then add the var */
@@ -782,18 +897,18 @@ static void tc_check(TcCtx *c, Node *n) {
         case ND_FOR: {                         /* variables in for-init are scoped to the loop */
             int save = *c->nmap;
             tc_check(c, n->init); tc_check(c, n->cond); tc_check(c, n->step); tc_check(c, n->body);
-            *c->nmap = save;
+            tc_pop(c, save);
             return;
         }
         case ND_IF: {
             tc_check(c, n->cond);
-            int s1 = *c->nmap; tc_check(c, n->then_branch); *c->nmap = s1;
-            int s2 = *c->nmap; tc_check(c, n->else_branch); *c->nmap = s2;
+            int s1 = *c->nmap; tc_check(c, n->then_branch); tc_pop(c, s1);
+            int s2 = *c->nmap; tc_check(c, n->else_branch); tc_pop(c, s2);
             return;
         }
         case ND_WHILE: case ND_DOWHILE: {
             tc_check(c, n->cond);
-            int save = *c->nmap; tc_check(c, n->body); *c->nmap = save;
+            int save = *c->nmap; tc_check(c, n->body); tc_pop(c, save);
             return;
         }
         case ND_SWITCH: {
@@ -802,19 +917,21 @@ static void tc_check(TcCtx *c, Node *n) {
             CType ct = infer(c->prog, n->cond, c->map, *c->nmap);
             if (!tc_integer(ct)) {
                 char tn[128]; tc_name(ct, tn);
-                fprintf(stderr, "type error (line %d): switch requires an integer/char/bool value, got '%s'\n", n->line, tn);
+                diag_print(n->file, n->line, n->col, "error",
+                           "switch requires an integer/char/bool value, got '%s'", tn);
+                diag_help("switch compares with integer equality; use if/elseif for floating-point values");
                 (*c->errc)++;
             }
             int save = *c->nmap;
             for (int i = 0; i < n->nitems; i++) tc_check(c, n->items[i]);
-            *c->nmap = save;
+            tc_pop(c, save);
             return;
         }
         case ND_CASE: {
             tc_check(c, n->operand);
             int save = *c->nmap;
             for (int i = 0; i < n->nitems; i++) tc_check(c, n->items[i]);
-            *c->nmap = save;
+            tc_pop(c, save);
             return;
         }
         case ND_STRUCT_LIT: {
@@ -884,7 +1001,9 @@ static void tc_check(TcCtx *c, Node *n) {
         CType ot = infer(c->prog, n->operand, c->map, *c->nmap);
         if (ot.ptr == 0) {
             char on[128]; tc_name(ot, on);
-            fprintf(stderr, "type error (line %d): cannot dereference non-pointer value of type '%s'\n", n->line, on);
+            diag_print(n->file, n->line, n->col, "error",
+                       "cannot dereference non-pointer value of type '%s'", on);
+            diag_help("only pointer values (*T) can be dereferenced");
             (*c->errc)++;
         }
     } else if (n->kind == ND_CALL && n->operand) {
@@ -914,11 +1033,11 @@ static void tc_check(TcCtx *c, Node *n) {
             if (n->nitems != total) {
                 /* defaults are filled before this pass; a count mismatch here is a real error */
                 if (min != total)
-                    fprintf(stderr, "type error (line %d): %s '%s' expects between %d and %d arguments but got %d\n",
-                            n->line, argoff ? "method" : "function", fn->name, min, total, n->nitems);
+                    diag_print(n->file, n->line, n->col, "error", "%s '%s' expects between %d and %d arguments but got %d",
+                               argoff ? "method" : "function", fn->name, min, total, n->nitems);
                 else
-                    fprintf(stderr, "type error (line %d): %s '%s' expects %d argument(s) but got %d\n",
-                            n->line, argoff ? "method" : "function", fn->name, total, n->nitems);
+                    diag_print(n->file, n->line, n->col, "error", "%s '%s' expects %d argument(s) but got %d",
+                               argoff ? "method" : "function", fn->name, total, n->nitems);
                 (*c->errc)++;
             } else {
                 for (int i = 0; i < n->nitems; i++) {
@@ -927,8 +1046,12 @@ static void tc_check(TcCtx *c, Node *n) {
                     CType at = infer(c->prog, n->items[i], c->map, *c->nmap);
                     if (!tc_assignable(pt, at)) {
                         char an[128], pn[128]; tc_name(at, an); tc_name(pt, pn);
-                        fprintf(stderr, "type error (line %d): argument %d to '%s': cannot pass '%s' where '%s' is expected\n",
-                                n->line, i + 1, fn->name, an, pn);
+                        Node *arg = n->items[i];
+                        diag_print(arg->file, arg->line, arg->col, "error",
+                                   "argument %d to '%s': cannot pass '%s' where '%s' is expected",
+                                   i + 1, fn->name, an, pn);
+                        if ((tc_isstr(at) && tc_numeric(pt)) || (tc_numeric(at) && tc_isstr(pt)))
+                            diag_help("MVS never converts between strings and numbers implicitly; use extern atoi/strtod");
                         (*c->errc)++;
                     }
                 }
@@ -947,9 +1070,28 @@ int typecheck(Node *prog) {
             CType ret = { f->type, f->ptr, f->type_name, NULL };
             TcCtx c = { prog, map, &nmap, ret, &errc };
             seed_globals(prog, map, &nmap);            /* globals live in the base scope */
+            int param_base = nmap;
             for (int j = 0; j < f->nitems; j++)        /* parameters may shadow globals */
                 if (f->items[j]->kind == ND_PARAM) tc_add(&c, f->items[j]);
             tc_check(&c, f->body);
+            /* unused parameters (entry file only; self and '_'-prefixed names are exempt) */
+            for (int j = param_base; j < nmap; j++) {
+                Bind *b = &map[j];
+                if (b->used || !b->decl || b->decl->kind != ND_PARAM) continue;
+                if (!b->name || b->name[0] == '_' || strcmp(b->name, "self") == 0) continue;
+                if (!diag_is_primary(b->decl->file)) continue;
+                diag_print(b->decl->file, b->decl->line, b->decl->col, "warning",
+                           "unused parameter '%s' in '%s'", b->name, f->name);
+                diag_help("prefix it with an underscore ('_%s') to silence this warning", b->name);
+            }
+            /* a non-void function must return a value on every path; falling off the end
+             * would silently return whatever is in rax */
+            if (!(f->type == TYPE_VOID && f->ptr == 0) && !always_returns(f->body)) {
+                diag_print(f->file, f->line, f->col, "error",
+                           "function '%s' can reach the end of its body without returning a value", f->name);
+                diag_help("add a 'return' on every path, or change the return type to 'void'");
+                errc++;
+            }
         } else if (f->kind == ND_VAR_DECL && f->operand) {  /* also check global initializers */
             Bind map[512]; int nmap = 0;
             CType ret = { TYPE_VOID, 0, NULL, NULL };

@@ -24,8 +24,8 @@ parser are hand-written.
 # build the compiler
 make
 #   equivalent to: clang -Wall -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc `
-#                  src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/codegen.c `
-#                  src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
+#                  src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c `
+#                  src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
 
 # run the test suite (golden output + compile-only + compile-fail)
 make test
@@ -53,6 +53,7 @@ make test
 | `src/ast.{h,c}` | AST (one `Node` tagged by `kind`) + helpers |
 | `src/parser.{h,c}` | recursive-descent parser |
 | `src/module.{h,c}` | module system: resolve `import` across files + std package |
+| `src/diag.{h,c}` | Rust-style diagnostics: source excerpts + carets + help notes + warnings |
 | `src/codegen.{h,c}` | driver: picks the backend by `TargetArch` (not arch-bound) |
 | `src/arch/common.{h,c}` | shared backend (arch-independent): types, structs, symtab, tree-shaking |
 | `src/arch/x86_64/win.c` | x86-64 win64 backend (emits NASM, stack machine) |
@@ -89,7 +90,8 @@ trait + associated function (`Type::new`) + `<T: Trait>` + default method · `St
 `String::from`/`from_int` · float xmm across the C boundary both ways (f32 single↔double) ·
 function pointer (`func(...) -> T` as a value + indirect `call rax`) · const enforcement ·
 default parameter values · single-eval compound assignment · math-style `**` precedence ·
-golden test suite (`make test`).
+golden test suite (`make test`) · Rust-style diagnostics (multi-error recovery, source excerpt +
+caret + help, missing-return check, unused/unreachable warnings).
 
 **Remaining:** full 128-bit i128/u128 math · dynamic dispatch (`dyn`/vtable) + multi-condition `where` ·
 a real array type · io.out as a library (variadic + reflection) · ARM64/Linux backends.

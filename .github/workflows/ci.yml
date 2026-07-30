@@ -23,7 +23,7 @@ jobs:
       # build the compiler with clang (source list matches the Makefile:
       # includes generic.c + arch/common.c + arch/x86_64/win.c)
       - name: Build compiler
-        run: clang -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
+        run: clang -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
 
       # run the full test suite: golden output diffs, compile-only, C interop (both
       # directions, linked with clang and diffed), and compile-fail (expected-error)

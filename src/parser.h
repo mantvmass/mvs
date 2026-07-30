@@ -15,6 +15,9 @@ typedef struct {
     Lexer *lx;          /* the lexer in use */
     Token  cur;         /* current token under consideration */
     int    had_error;   /* flag: whether a syntax error was found */
+    int    nerrors;     /* number of syntax errors reported so far */
+    int    panic;       /* 1 = inside a bad region; suppress errors until synchronize() */
+    int    fatal;       /* 1 = too many errors, stop parsing */
     int    depth;       /* current recursion depth (guards against stack overflow from deeply nested input) */
 } Parser;
 

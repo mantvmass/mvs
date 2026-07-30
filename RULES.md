@@ -279,4 +279,7 @@ src/arch/
 
 - Follow the surrounding files: 4-space indent, opening brace on the same line.
 - Backend state lives in a single `Gen` struct (the compiler works one file at a time).
-- Report errors via `fprintf(stderr, ...)` in English, with location (file:line:column).
+- Report front-end errors through `diag_print()` (diag.h): file:line:col, the quoted source
+  line with a caret, and a `diag_help()` note when there is an obvious fix. Warnings must be
+  gated on `diag_is_primary()` so imported modules stay quiet. Codegen-internal errors may
+  still use plain `fprintf(stderr, ...)`; all messages are English.

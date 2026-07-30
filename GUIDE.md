@@ -74,6 +74,7 @@ src/
   ast.{h,c}          AST node (one Node tagged by kind)
   parser.{h,c}       recursive-descent parser (no bison)
   module.{h,c}       module system: resolve imports across files + std package
+  diag.{h,c}         Rust-style diagnostics: source excerpts, carets, help notes
   codegen.{h,c}      driver: picks the backend by TargetArch
   arch/
     common.{h,c}     arch-independent: type system, struct layout, symbol table,
@@ -931,7 +932,7 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 
 ### Compiler
 
-- **Stops at the first error** (no full error recovery yet).
+- Compilation stops between phases (all syntax errors report together, then all type errors), like Rust.
 - Method reachability is over-approximate (may keep a few same-named methods beyond what's strictly used).
 
 ---
@@ -969,6 +970,12 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
   slots 5+, for extern C calls, C callers of exports, and MVS callers of its own exports.
 - Golden test suite (`make test`): run-pass output diffs, compile-only, and compile-fail
   (expected-error) tests in `tests/`, run by CI.
+- Rust-style diagnostics (`src/diag.c`): every error shows `file:line:col`, the offending
+  source line with a caret, and a `help:` note; the parser recovers at `;`/`}` and reports
+  many errors per run (capped at 20); non-void functions must return on every path
+  (conservative control-flow analysis incl. `while (true)` without `break`); warnings for
+  unused variables/parameters (prefix `_` to silence) and unreachable code, emitted for the
+  entry file only so imported modules stay quiet.
 
 Verified by running, not just compiling: the net server echoes real HTTP from curl; C calls
 `mvs_square`/`mvs_sum_to` through a `.obj`; the freestanding `.obj` has no undefined symbols.

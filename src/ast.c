@@ -6,11 +6,19 @@
 #include <string.h>
 #include "ast.h"
 
+/* Source position the parser is currently at; stamped into every new node */
+static const char *g_cur_file = NULL;
+static int g_cur_col = 0;
+void ast_set_file(const char *file) { g_cur_file = file; }
+void ast_set_col(int col) { g_cur_col = col; }
+
 /* Create a new node; every field starts zeroed/NULL */
 Node *node_new(NodeKind kind, int line) {
     Node *n = (Node *)calloc(1, sizeof(Node));
     n->kind = kind;
     n->line = line;
+    n->col = g_cur_col;
+    n->file = g_cur_file;
     n->type = TYPE_UNKNOWN;
     return n;
 }

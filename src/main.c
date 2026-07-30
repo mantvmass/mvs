@@ -20,6 +20,7 @@
 #include "module.h"
 #include "generic.h"
 #include "codegen.h"
+#include "diag.h"
 
 #define PATHBUF 1024
 
@@ -110,6 +111,7 @@ int main(int argc, char **argv) {
     }
 
     /* 1+2. load the entry file + resolve all imports, then parse into one merged AST */
+    diag_set_primary(input);   /* warnings are only emitted for the entry file's own code */
     int had_error = 0;
     Node *program = module_load(input, stddir, nostd, &had_error);
     if (had_error) { fprintf(stderr, "compilation failed (parse/import errors)\n"); return 1; }
