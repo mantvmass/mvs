@@ -64,6 +64,8 @@ Build modes:
 | `mvs file.mvs -S` | `.asm` | inspect the generated assembly |
 | `mvs file.mvs -c` | `.obj` | link against a C program |
 | `mvs file.mvs --nostd` | `.obj` (freestanding) | OS / bare-metal |
+| `mvs file.mvs --target elf64` | `.o` (ELF64, SysV ABI) | link and run on Linux (`gcc file.o`) |
+| `mvs file.mvs --nostd --target elf64` | `.o` (freestanding ELF) | GNU ld / GRUB multiboot OS dev |
 
 ## 3. Compiler layout
 
@@ -79,7 +81,8 @@ src/
   arch/
     common.{h,c}     arch-independent: type system, struct layout, symbol table,
                      variable allocation, reachability, format strings
-    x86_64/win.c     x86-64 win64 only: real instructions + ABI
+    x86_64/win.c     x86-64 Windows (win64 ABI): real instructions + calling convention
+    x86_64/sysv.c    x86-64 Linux/ELF (SysV ABI): 6 GPR args + separate xmm class, no shadow space
   main.c             CLI driving the pipeline
 std/                 standard library written in MVS (io, fs, net, string, fmt)
 ```
@@ -981,8 +984,9 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 ### Target / output format
 
 - Only **x86-64 + win64** + **COFF/PE** (`nasm -f win64`).
-- **No ELF / SysV ABI yet**: GNU ld/ELF OS dev (GRUB multiboot) waits on a new backend (roadmap).
-- Needs `nasm` + `clang` (linked via `-llegacy_stdio_definitions -lws2_32`).
+- `--target elf64` (SysV ABI) covers Linux and GNU ld/GRUB OS dev; linking happens on the Linux
+  side (`gcc file.o -o file`, add `-lm` for C math, `-no-pie` for the absolute vtable relocs).
+- On Windows: needs `nasm` + `clang` (linked via `-llegacy_stdio_definitions -lws2_32`).
 
 ### Compiler
 
@@ -1024,6 +1028,11 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
   slots 5+, for extern C calls, C callers of exports, and MVS callers of its own exports.
 - Golden test suite (`make test`): run-pass output diffs, compile-only, and compile-fail
   (expected-error) tests in `tests/`, run by CI.
+- ELF/SysV backend (`--target elf64`): `src/arch/x86_64/sysv.c` reusing `common.c`, with the
+  System V calling convention (6 GPR args + a separate xmm class, no shadow space, AL for
+  variadic calls), `nasm -f elf64` output, and a `.note.GNU-stack` section. The test suite
+  links and RUNS the ELF binaries inside WSL, diffing against the same goldens as win64;
+  `--nostd --target elf64` yields a freestanding ELF that GNU ld links directly (GRUB path).
 - `dyn Trait` trait objects: 16-byte fat pointers {data, vtable}, per-(Type, Trait) vtables
   emitted in `.data`, run-time dispatch through the vtable, dyn variables/parameters/returns/
   array elements, plus multi-bound generics (`<T: A + B>` and `where` clauses).
@@ -1056,9 +1065,6 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
      in turn needs impl-on-primitive support; today `impl` only binds to structs).
   The existing library path is `fmt.println(x)` / `fmt.print(x)` for single values you `impl Display` on, so
   `io.out` stays an intrinsic for now (like Rust's `println!`).
-- **ELF + SysV ABI backend** (for ELF/GNU OS dev): a new `src/arch/x86_64/sysv.c` reusing `common.c`, changing
-  only the calling convention (args in rdi, rsi, rdx, rcx, r8, r9; no shadow space), `nasm -f elf64`, a new
-  `ARCH_X86_64_SYSV` + `--target elf64`.
 - **ARM64 backend** (`src/arch/arm64/<os>.c` + `ARCH_ARM64`); selectable object format / entry point for flat
   binaries / multiboot kernel images.
 
@@ -1069,10 +1075,10 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
   (all mangle to `func`); assignment to a func-ptr variable is type-checked leniently; pointing a func-ptr at a C
   `extern` taking/returning `f32` won't narrow double↔single (func pointers are meant for MVS functions).
 
-About `--nostd` for OS dev: it currently produces self-contained x86-64 with no undefined symbols and no CRT/OS
-dependency (runnable on bare metal), **but** the object is COFF/PE (`nasm -f win64`) using the win64 calling
-convention, suited to the LLVM/lld side. GNU ld + ELF (e.g. GRUB multiboot) can't link COFF; that waits on the
-ELF/SysV backend above.
+About `--nostd` for OS dev: it produces self-contained x86-64 with no undefined symbols and no CRT/OS
+dependency (runnable on bare metal). Combine it with `--target elf64` to get a freestanding ELF object
+that plain GNU ld links directly (verified: `ld file.o` produces a static ELF executable), which is the
+GRUB multiboot path; without `--target` the object is COFF/PE for the LLVM/lld side.
 
 ### Where to edit when adding a feature
 

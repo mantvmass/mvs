@@ -203,6 +203,52 @@ foreach ($t in $interopTests) {
     }
 }
 
+# ELF64 cross-target: compile with --target elf64 (assembles with nasm -f elf64), then
+# link with gcc and RUN inside WSL when it is available; output diffs against the SAME
+# goldens as win64, proving both backends behave identically.
+$wslOk = $false
+cmd /c "wsl -e true >nul 2>&1"
+if ($LASTEXITCODE -eq 0) { $wslOk = $true }
+$elfTests = @(
+    "examples/demo",
+    "examples/01_language/arrays",
+    "examples/01_language/int128",
+    "examples/02_functions/defaults",
+    "examples/03_structs/methods",
+    "examples/04_traits/dynamic",
+    "examples/05_strings/strings",
+    "examples/08_stdlib/floats"
+)
+Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan
+foreach ($ex in $elfTests) {
+    $name = FlatName $ex
+    $src = "$ex.mvs" -replace "/", "\"
+    cmd /c "`"$mvs`" `"$src`" --target elf64 >nul 2>&1"
+    if ($LASTEXITCODE -ne 0) {
+        $fail++; $failures += "elf64 compile $ex (exit $LASTEXITCODE)"
+        Write-Host "  FAIL  elf64 $name (compile)" -ForegroundColor Red
+        continue
+    }
+    if (-not $wslOk) { $pass++; Write-Host "  ok    elf64 $name (assembled)"; continue }
+    $out = cmd /c "wsl -e sh tests/run_elf.sh $ex 2>&1" | Out-String
+    $lines = ($out -replace "`r`n", "`n") -split "`n"
+    $rc = "?"
+    if ($lines.Count -gt 0 -and $lines[0] -match "rc=(\S+)") { $rc = $Matches[1] }
+    $body = ($lines | Select-Object -Skip 1) -join "`n"
+    $goldFile = Join-Path $expectedDir "$name.txt"
+    $want = if (Test-Path $goldFile) { Normalize ([IO.File]::ReadAllText($goldFile)) } else { "" }
+    if ($rc -ne "0" -or (Normalize $body) -ne $want) {
+        $fail++; $failures += "elf64 run mismatch in $ex (rc=$rc)"
+        Write-Host "  FAIL  elf64 $name (rc=$rc)" -ForegroundColor Red
+        Write-Host "    --- expected ---"; Write-Host $want
+        Write-Host "    --- got ---"; Write-Host (Normalize $body)
+    } else {
+        $pass++
+        Write-Host "  ok    elf64 $name"
+    }
+    Remove-Item ("$ex.o" -replace "/", "\") -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host "=== compile-fail (expected errors) ===" -ForegroundColor Cyan
 $failDir = Join-Path $PSScriptRoot "compile_fail"
 if (Test-Path $failDir) {

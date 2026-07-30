@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include "codegen.h"
 #include "arch/x86_64/win.h"
+#include "arch/x86_64/sysv.h"
 
 int codegen_generate(Node *program, const char *asm_path, TargetArch arch) {
     /* open the file for writing assembly */
@@ -21,6 +22,9 @@ int codegen_generate(Node *program, const char *asm_path, TargetArch arch) {
     switch (arch) {
         case ARCH_X86_64_WIN:
             rc = x86_64_win_generate(program, out);
+            break;
+        case ARCH_X86_64_SYSV:
+            rc = x86_64_sysv_generate(program, out);
             break;
         default:
             fprintf(stderr, "error: unsupported target architecture\n");

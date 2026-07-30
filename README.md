@@ -55,6 +55,7 @@ Useful flags:
 | `-S` | emit only the `.asm` and stop (handy for reading the generated assembly) |
 | `-c` / `--emit-obj` | emit a `.obj` and stop (to link against C) |
 | `--nostd` | freestanding: no std/CRT/OS dependency (emits a `.obj`) |
+| `--target elf64` | Linux/ELF (SysV ABI): emits a `.o` to link on Linux (`gcc file.o`) |
 | `--keep` | keep intermediate files (`.asm`, `.obj`) |
 
 ## Where to look next

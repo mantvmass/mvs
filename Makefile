@@ -25,10 +25,11 @@ SRC = src/main.c \
       src/diag.c \
       src/codegen.c \
       src/arch/common.c \
-      src/arch/x86_64/win.c
+      src/arch/x86_64/win.c \
+      src/arch/x86_64/sysv.c
 
 HDR = src/token.h src/lexer.h src/ast.h src/parser.h src/module.h src/generic.h src/diag.h \
-      src/codegen.h src/arch/common.h src/arch/x86_64/win.h
+      src/codegen.h src/arch/common.h src/arch/x86_64/win.h src/arch/x86_64/sysv.h
 
 # examples that compile to .exe (organized into groups 01_language .. 08_stdlib)
 EXAMPLES = examples/demo \

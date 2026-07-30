@@ -69,6 +69,7 @@ int main(int argc, char **argv) {
             "  -S            emit assembly (.asm) only, then stop\n"
             "  -c            emit an object file (.obj) only (for linking with C)\n"
             "  --nostd       freestanding mode: no std/C runtime/OS (emits .obj) - for OS dev\n"
+            "  --target <t>  target ABI: win64 (default) or elf64 (Linux/SysV; emits a .o to link on Linux)\n"
             "  --keep        keep intermediate files (.asm, .obj)\n", argv[0]);
         return 1;
     }
@@ -80,22 +81,32 @@ int main(int argc, char **argv) {
     int emit_obj = 0;  /* -c / --emit-obj : stop at the .obj file */
     int nostd = 0;     /* --nostd : freestanding (no std/CRT dependency) */
     int keep = 0;      /* --keep */
+    TargetArch arch = ARCH_X86_64_WIN;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-S") == 0) only_asm = 1;
         else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--emit-obj") == 0) emit_obj = 1;
         else if (strcmp(argv[i], "--nostd") == 0) { nostd = 1; emit_obj = 1; } /* freestanding -> produce .obj */
         else if (strcmp(argv[i], "--keep") == 0) keep = 1;
+        else if (strcmp(argv[i], "--target") == 0 && i + 1 < argc) {
+            const char *t = argv[++i];
+            if (strcmp(t, "win64") == 0) arch = ARCH_X86_64_WIN;
+            else if (strcmp(t, "elf64") == 0) arch = ARCH_X86_64_SYSV;
+            else { fprintf(stderr, "error: unknown target '%s' (supported: win64, elf64)\n", t); return 1; }
+        }
         else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) output = argv[++i];
         else if (argv[i][0] != '-') input = argv[i];
     }
     if (!input) { fprintf(stderr, "error: no input file\n"); return 1; }
+    /* elf64 objects cannot be linked into a Windows exe here: stop at the .o
+     * (link on a Linux system, e.g. `gcc file.o -o file`) */
+    if (arch == ARCH_X86_64_SYSV) emit_obj = 1;
 
     /* derive the various output file names from the base name */
     char base[PATHBUF];
     if (!base_name(input, base)) return 1;
     char asm_path[PATHBUF + 8], obj_path[PATHBUF + 8], exe_path[PATHBUF + 8];
     snprintf(asm_path, sizeof(asm_path), "%s.asm", base);
-    snprintf(obj_path, sizeof(obj_path), "%s.obj", base);
+    snprintf(obj_path, sizeof(obj_path), arch == ARCH_X86_64_SYSV ? "%s.o" : "%s.obj", base);
     if (output) snprintf(exe_path, sizeof(exe_path), "%s", output);
     else        snprintf(exe_path, sizeof(exe_path), "%s.exe", base);
 
@@ -136,7 +147,7 @@ int main(int argc, char **argv) {
     }
 
     /* 3. codegen -> .asm */
-    if (codegen_generate(program, asm_path, ARCH_X86_64_WIN) != 0) {
+    if (codegen_generate(program, asm_path, arch) != 0) {
         fprintf(stderr, "compilation failed (codegen errors)\n");
         return 1;
     }
@@ -151,13 +162,16 @@ int main(int argc, char **argv) {
         return 1;
     }
     printf("[mvs] using %s\n", ver);
-    snprintf(cmd, sizeof(cmd), "nasm -f win64 \"%s\" -o \"%s\"", asm_path, obj_path);
+    snprintf(cmd, sizeof(cmd), "nasm -f %s \"%s\" -o \"%s\"",
+             arch == ARCH_X86_64_SYSV ? "elf64" : "win64", asm_path, obj_path);
     printf("[mvs] %s\n", cmd);
     if (system(cmd) != 0) { fprintf(stderr, "error: nasm failed\n"); return 1; }
 
-    /* -c / --nostd mode: stop at the .obj file (for linking with C yourself or embedding in a kernel) */
+    /* -c / --nostd / elf64 mode: stop at the object file */
     if (emit_obj || nostd) {
-        printf("[mvs] produced object file %s%s\n", obj_path, nostd ? " (freestanding, no std/CRT)" : "");
+        printf("[mvs] produced object file %s%s\n", obj_path,
+               nostd ? " (freestanding, no std/CRT)" :
+               arch == ARCH_X86_64_SYSV ? " (ELF64; link on Linux, e.g. gcc file.o -o file)" : "");
         if (!keep) remove(asm_path);
         return 0;
     }

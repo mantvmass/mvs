@@ -27,10 +27,10 @@ an OS, a bootloader, firmware, or bare-metal code with it.
   the OS, reach it through `extern` from inside `std/*.mvs`.
 
 A note on object format for OS authors: `--nostd` produces self-contained x86-64 (provable
-with `llvm-nm`, no undefined symbols), but the output is currently **COFF/PE + win64**
-(`nasm -f win64`). That links fine with LLVM/lld. If you target GNU ld + ELF (GRUB multiboot)
-you need the ELF/SysV backend that is still on the roadmap. "win" here means the calling
-convention, not a dependency on Windows.
+with `llvm-nm`, no undefined symbols). By default the object is **COFF/PE + win64** (`nasm -f
+win64`, links with LLVM/lld); add `--target elf64` for a freestanding **ELF + SysV** object
+that plain GNU ld links directly, which is the GRUB multiboot path. "win" in the default
+backend's name means the calling convention, not a dependency on Windows.
 
 ## 0.5 C interop
 
@@ -253,8 +253,9 @@ The backend splits into a shared part and an arch-specific part:
 src/arch/
   common.h / common.c       shared (arch-independent): type system, struct layout,
                             symbol table, variable allocation, reachability, build_c_format
-  x86_64/win.c              x86-64 Windows only: instruction emission + win64 ABI
-  (future) x86_64/linux.c   different ABI (args rdi,rsi,rdx,rcx,r8,r9, no shadow space)
+  x86_64/win.c              x86-64 Windows: instruction emission + win64 ABI
+  x86_64/sysv.c             x86-64 Linux/ELF: SysV ABI (args rdi,rsi,rdx,rcx,r8,r9 plus a
+                            separate xmm class, no shadow space, AL count for variadic C)
   (future) arm64/linux.c    new register/instruction set
 ```
 

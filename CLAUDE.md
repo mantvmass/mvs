@@ -57,6 +57,7 @@ make test
 | `src/codegen.{h,c}` | driver: picks the backend by `TargetArch` (not arch-bound) |
 | `src/arch/common.{h,c}` | shared backend (arch-independent): types, structs, symtab, tree-shaking |
 | `src/arch/x86_64/win.c` | x86-64 win64 backend (emits NASM, stack machine) |
+| `src/arch/x86_64/sysv.c` | x86-64 Linux/ELF backend (SysV ABI, `--target elf64`) |
 | `src/main.c` | CLI driving the whole pipeline |
 | `std/*.mvs` | standard library written in MVS (`io`/`string`/`fmt`/`fs`/`net`) |
 
@@ -95,9 +96,10 @@ caret + help, missing-return check, unused/unreachable warnings) · real `[T; N]
 (literals, indexing, `a.len`, const-index bounds check, arrays in structs, decay to `*T`) ·
 full 128-bit `i128`/`u128` arithmetic (software divmod helpers + decimal io.out) ·
 `dyn Trait` trait objects (fat pointer + vtable dispatch) · multi-bound generics
-(`<T: A + B>`, `where` clauses).
+(`<T: A + B>`, `where` clauses) · ELF/SysV backend (`--target elf64`, run-tested in WSL;
+freestanding ELF links with GNU ld for GRUB OS dev).
 
-**Remaining:** io.out as a library (variadic + reflection) · ARM64/Linux backends.
+**Remaining:** io.out as a library (variadic + reflection) · ARM64 backend.
 
 ## Project-specific cautions (full list in RULES.md)
 
