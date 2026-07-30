@@ -1,0 +1,7 @@
+plain text
+int=7 float=2.500000 str=hi char=A bool=1
+hex: ff
+literal braces: {}
+many args: 1 2 3 4 5 6
+struct: Point { x: 3, y: 4 }
+no newline ... continued

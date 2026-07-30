@@ -1,0 +1,7 @@
+//~ ERROR: expects
+// calling with the wrong number of arguments must be rejected
+func f(a: i32) -> i32 { return a; }
+func main() -> i8 {
+    f(1, 2);
+    return 0;
+}

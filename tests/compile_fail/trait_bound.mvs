@@ -1,0 +1,12 @@
+//~ ERROR: does not implement trait
+// a generic bound <X: T> must reject a type that does not impl T
+struct A { x: i32; }
+struct B { y: i32; }
+trait T { func f(self: *Self) -> i32; }
+impl T for A { func f(self: *A) -> i32 { return 1; } }
+func g<X: T>(v: X) -> i32 { return v.f(); }
+func main() -> i8 {
+    let b: B = B { y: 1 };
+    g(b);
+    return 0;
+}

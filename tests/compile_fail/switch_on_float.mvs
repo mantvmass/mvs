@@ -1,0 +1,10 @@
+//~ ERROR: switch
+// switch compares with integer equality; a float scrutinee must be rejected
+func main() -> i8 {
+    let f: f64 = 1.0;
+    switch (f) {
+        case 1: break;
+        default: break;
+    }
+    return 0;
+}

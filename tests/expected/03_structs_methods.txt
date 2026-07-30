@@ -1,0 +1,3 @@
+area = 12
+perimeter = 14
+scaled area = 192

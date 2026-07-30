@@ -1,0 +1,4 @@
+n = 100
+n via **pp = 7
+arr[3] = (3, 30)
+last - arr = 4

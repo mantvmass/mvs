@@ -1,0 +1,2 @@
+point area  = 12
+circle area = 75

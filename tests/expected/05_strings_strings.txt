@@ -1,0 +1,3 @@
+s = hello (len 5)
+joined = hello, world! (len 13)
+year = 2026

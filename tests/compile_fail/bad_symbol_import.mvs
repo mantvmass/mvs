@@ -1,0 +1,4 @@
+//~ ERROR: no exported symbol
+// importing a name that the module does not define must be rejected
+import { DefinitelyNotThere } from "std/string";
+func main() -> i8 { return 0; }

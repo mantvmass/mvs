@@ -1,0 +1,5 @@
+//~ ERROR: duplicate
+// two functions with the same name and signature must be rejected
+func f(a: i32) -> i32 { return a; }
+func f(a: i32) -> i32 { return a + 1; }
+func main() -> i8 { return 0; }

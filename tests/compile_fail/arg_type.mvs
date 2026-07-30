@@ -1,0 +1,7 @@
+//~ ERROR: cannot pass
+// passing a str where an i32 parameter is declared must be rejected
+func f(a: i32) -> i32 { return a; }
+func main() -> i8 {
+    f("hello");
+    return 0;
+}

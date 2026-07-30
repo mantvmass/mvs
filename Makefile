@@ -6,6 +6,7 @@
 # Common targets:
 #   make            - build the compiler as mvs.exe
 #   make examples   - compile all examples in examples/ (every group)
+#   make test       - run the full test suite (golden output + compile-fail)
 #   make clean      - remove generated files
 
 CC      = clang
@@ -57,6 +58,10 @@ examples: $(TARGET)
 	./$(TARGET) examples/07_c_interop/freestanding.mvs --nostd
 	@echo "All examples compiled"
 
+# run the test suite: golden output tests + compile-only + compile-fail (expected errors)
+test: $(TARGET)
+	powershell -ExecutionPolicy Bypass -File tests/run.ps1
+
 # remove all generated files (including subfolders of examples)
 clean:
 	rm -f $(TARGET) *.asm *.obj *.exe
@@ -64,4 +69,4 @@ clean:
 	rm -f examples/*/*.asm examples/*/*.obj examples/*/*.exe
 	@echo "Cleaned"
 
-.PHONY: examples clean
+.PHONY: examples test clean

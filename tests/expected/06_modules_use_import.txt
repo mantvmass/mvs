@@ -1,0 +1,2 @@
+square(9) = 81
+factorial(6) = 720

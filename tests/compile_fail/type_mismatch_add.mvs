@@ -1,0 +1,6 @@
+//~ ERROR: cannot apply
+// adding an int and a string literal must be rejected
+func main() -> i8 {
+    let x: i32 = 50 + "50";
+    return 0;
+}

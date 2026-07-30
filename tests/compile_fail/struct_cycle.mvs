@@ -1,0 +1,4 @@
+//~ ERROR: contains itself by value
+// a struct containing itself by value has infinite size
+struct P { n: P; }
+func main() -> i8 { return 0; }

@@ -1,0 +1,6 @@
+//~ ERROR: modulo
+// % works on integers only (floats need fmod)
+func main() -> i8 {
+    let x: f64 = 5.0 % 2.0;
+    return 0;
+}
