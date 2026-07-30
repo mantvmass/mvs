@@ -67,7 +67,7 @@ Build modes:
 | `mvs file.mvs --target elf64` | `.o` (ELF64, SysV ABI) | link and run on Linux (`gcc file.o`) |
 | `mvs file.mvs --target arm64` | `.o` (AArch64) | link with the cross gcc, run under qemu |
 | `mvs file.mvs --nostd --target elf64` | `.o` (freestanding ELF) | GNU ld / GRUB multiboot OS dev |
-| `mvs file.mvs -O` | same, fewer instructions | peephole cleanup of the assembly (x86 targets) |
+| `mvs file.mvs -O` | same, fewer instructions | peephole cleanup of the assembly (all targets) |
 | `mvs test` | test report | run the golden suite from the repo root (no PowerShell needed) |
 | `mvs --version` | version string | |
 

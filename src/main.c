@@ -168,6 +168,89 @@ static void peephole_x86(const char *path) {
     free(lines);
 }
 
+/* The same pass for the AArch64 backend (GNU as syntax, x-registers):
+ *   P1: mov xR, x0 ; mov x0, xR              -> drop the second (no-op)
+ *   P2: mov x0, #N ; mov xR, x0 ; <redef x0> -> mov xR, #N */
+static const char *peep_a64_mov_from_x0(const char *line, char *reg, size_t rn) {
+    if (strncmp(line, "    mov ", 8) != 0) return NULL;
+    const char *comma = strstr(line + 8, ", x0");
+    if (!comma || comma[4] != '\n' || comma[5] != '\0') return NULL;
+    size_t len = (size_t)(comma - (line + 8));
+    if (len < 2 || len + 1 > rn || line[8] != 'x') return NULL;
+    memcpy(reg, line + 8, len); reg[len] = '\0';
+    for (size_t i = 1; i < len; i++)
+        if (reg[i] < '0' || reg[i] > '9') return NULL;   /* only x1..x30 style names */
+    return strcmp(reg, "x0") == 0 ? NULL : reg;
+}
+
+static const char *peep_a64_x0_imm(const char *line) {
+    /* the backend loads integer constants as "ldr x0, =N" (literal pool) */
+    if (strncmp(line, "    ldr x0, =", 13) != 0) return NULL;
+    const char *v = line + 13;
+    if (*v == '-') v++;
+    if (*v < '0' || *v > '9') return NULL;
+    while (*v >= '0' && *v <= '9') v++;
+    return (*v == '\n' && v[1] == '\0') ? line + 13 : NULL;
+}
+
+static int peep_a64_redefines_x0(const char *line) {
+    return strncmp(line, "    mov x0, ", 12) == 0 ||
+           (strncmp(line, "    ldr x0, ", 12) == 0 && !strstr(line, "x0]")) ||
+           strncmp(line, "    adrp x0, ", 13) == 0 ||
+           strncmp(line, "    sub x0, x29, ", 17) == 0;   /* addr_local: reads only the frame pointer */
+}
+
+static void peephole_a64(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    size_t cap = 1024, n = 0;
+    char **lines = (char **)malloc(cap * sizeof(char *));
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), f)) {
+        size_t bl = strlen(buf);
+        if (bl >= 2 && buf[bl - 2] == '\r' && buf[bl - 1] == '\n') { buf[bl - 2] = '\n'; buf[bl - 1] = '\0'; }
+        if (n + 1 >= cap) { cap *= 2; lines = (char **)realloc(lines, cap * sizeof(char *)); }
+        lines[n++] = strdup(buf);
+    }
+    fclose(f);
+
+    int removed = 0;
+    for (size_t i = 0; i + 1 < n; i++) {
+        char reg[8];
+        const char *imm = peep_a64_x0_imm(lines[i]);
+        if (imm && i + 2 < n && peep_a64_mov_from_x0(lines[i + 1], reg, sizeof(reg)) &&
+            peep_a64_redefines_x0(lines[i + 2])) {
+            char merged[64];
+            snprintf(merged, sizeof(merged), "    ldr %s, =%s", reg, imm); /* imm keeps its \n */
+            free(lines[i]); lines[i] = strdup(merged);
+            free(lines[i + 1]);
+            memmove(&lines[i + 1], &lines[i + 2], (n - i - 2) * sizeof(char *));
+            n--; removed++;
+            continue;
+        }
+        if (peep_a64_mov_from_x0(lines[i], reg, sizeof(reg))) {
+            char back[64];
+            snprintf(back, sizeof(back), "    mov x0, %s\n", reg);
+            if (strcmp(lines[i + 1], back) == 0) {
+                free(lines[i + 1]);
+                memmove(&lines[i + 1], &lines[i + 2], (n - i - 2) * sizeof(char *));
+                n--; removed++;
+            }
+        }
+    }
+
+    if (removed) {
+        f = fopen(path, "wb");
+        if (f) {
+            for (size_t i = 0; i < n; i++) fputs(lines[i], f);
+            fclose(f);
+        }
+        printf("[mvs] -O removed %d redundant instruction(s)\n", removed);
+    }
+    for (size_t i = 0; i < n; i++) free(lines[i]);
+    free(lines);
+}
+
 /* ---------- --test-main: synthesize main() for a test file ----------
  *
  * A test file (somefile.test.mvs) defines functions named test_* and no main.
@@ -569,7 +652,7 @@ int main(int argc, char **argv) {
             "  -o <file>     set the output file name\n"
             "  -S            emit assembly (.asm) only, then stop\n"
             "  -c            emit an object file (.obj) only (for linking with C)\n"
-            "  -O            peephole-optimize the generated assembly (x86 targets)\n"
+            "  -O            peephole-optimize the generated assembly\n"
             "  --nostd       freestanding mode: no std/C runtime/OS (emits .obj) - for OS dev\n"
             "  --target <t>  target: win64 (default), elf64 (x86-64 Linux), arm64 (AArch64 Linux)\n"
             "  --test-main   generate main() from the file's test_* functions (used by `mvs test`)\n"
@@ -672,10 +755,8 @@ int main(int argc, char **argv) {
     }
     printf("[mvs] generated %s\n", asm_path);
     if (optimize) {
-        if (arch == ARCH_ARM64_LINUX)
-            printf("[mvs] note: -O currently covers the x86 targets only; arm64 output is unchanged\n");
-        else
-            peephole_x86(asm_path);
+        if (arch == ARCH_ARM64_LINUX) peephole_a64(asm_path);
+        else                          peephole_x86(asm_path);
     }
     if (only_asm) return 0; /* -S: stop at the assembly file */
 

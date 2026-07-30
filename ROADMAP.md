@@ -72,8 +72,8 @@ generic call arguments (`none<i64>()`), `Option<T>`/`Result<T, E>` in std,
 
 ## Tooling
 
-- Growing the `-O` peephole (today: safe two/three-line NASM patterns on the x86
-  targets; ARM64 and register-liveness-aware rules are open).
+- Growing the `-O` peephole (today: safe two/three-line patterns on all three
+  backends; register-liveness-aware rules are open).
 - Editor support: a tree-sitter grammar for highlighting.
 
 Done from earlier revisions of this list: `mvs test` (the built-in runner for
