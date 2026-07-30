@@ -655,6 +655,7 @@ int main(int argc, char **argv) {
             "  -c            emit an object file (.obj) only (for linking with C)\n"
             "  -O            peephole-optimize the generated assembly\n"
             "  --no-check    drop the runtime bounds checks on [T; N] indexing\n"
+            "  -g            emit debug line info (step through .mvs in gdb/lldb; keeps the .asm)\n"
             "  --nostd       freestanding mode: no std/C runtime/OS (emits .obj) - for OS dev\n"
             "  --target <t>  target: win64 (default), elf64 (x86-64 Linux), arm64 (AArch64 Linux)\n"
             "  --test-main   generate main() from the file's test_* functions (used by `mvs test`)\n"
@@ -678,6 +679,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--emit-obj") == 0) emit_obj = 1;
         else if (strcmp(argv[i], "-O") == 0) optimize = 1;
         else if (strcmp(argv[i], "--no-check") == 0) mvs_bounds_checks = 0;
+        else if (strcmp(argv[i], "-g") == 0) { mvs_debug_lines = 1; keep = 1; }
         else if (strcmp(argv[i], "--test-main") == 0) test_main = 1;
         else if (strcmp(argv[i], "--nostd") == 0) { nostd = 1; emit_obj = 1; } /* freestanding -> produce .obj */
         else if (strcmp(argv[i], "--keep") == 0) keep = 1;
@@ -781,7 +783,8 @@ int main(int argc, char **argv) {
             return 1;
         }
         printf("[mvs] using %s\n", ver);
-        snprintf(cmd, sizeof(cmd), "%s \"%s\" -o \"%s\"", as_tool, asm_path, obj_path);
+        snprintf(cmd, sizeof(cmd), "%s%s \"%s\" -o \"%s\"",
+                 as_tool, mvs_debug_lines ? " -g" : "", asm_path, obj_path);
         printf("[mvs] %s\n", cmd);
         if (system(cmd) != 0) { fprintf(stderr, "error: assembler failed\n"); return 1; }
     } else {
@@ -791,8 +794,12 @@ int main(int argc, char **argv) {
             return 1;
         }
         printf("[mvs] using %s\n", ver);
-        snprintf(cmd, sizeof(cmd), "nasm -f %s \"%s\" -o \"%s\"",
-                 arch == ARCH_X86_64_SYSV ? "elf64" : "win64", asm_path, obj_path);
+        /* -g -F dwarf: nasm builds a DWARF line table from the %line directives,
+         * so a debugger shows .mvs source instead of the generated assembly */
+        snprintf(cmd, sizeof(cmd), "nasm -f %s%s \"%s\" -o \"%s\"",
+                 arch == ARCH_X86_64_SYSV ? "elf64" : "win64",
+                 mvs_debug_lines ? (arch == ARCH_X86_64_SYSV ? " -g -F dwarf" : " -g -F cv8") : "",
+                 asm_path, obj_path);
         printf("[mvs] %s\n", cmd);
         if (system(cmd) != 0) { fprintf(stderr, "error: nasm failed\n"); return 1; }
     }

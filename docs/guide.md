@@ -69,6 +69,7 @@ Build modes:
 | `mvs file.mvs --nostd --target elf64` | `.o` (freestanding ELF) | GNU ld / GRUB multiboot OS dev |
 | `mvs file.mvs -O` | same, fewer instructions | peephole cleanup of the assembly (all targets) |
 | `mvs file.mvs --no-check` | same, no bounds checks | trust every array index (see section 4.2) |
+| `mvs file.mvs -g` | same + DWARF line info | step through the `.mvs` source in gdb/lldb (keeps the .asm) |
 | `mvs test` | test report | run the golden suite from the repo root (no PowerShell needed) |
 | `mvs --version` | version string | |
 
@@ -841,6 +842,17 @@ match (a) { Just(v) => { ... } Nothing => { ... } }
 This is the heart of a low-level language: MVS manages memory by hand, exactly like C. No garbage
 collector, no reference counting, no destructors/RAII. Memory has three regions.
 
+**Memory management is the programmer's job, by design.** Nothing allocates
+behind your back: `Vec`, `HashMap`, and `String` call the allocator only in
+code you can read, and each hands you a `drop()` to call when you are done.
+Leaks, double frees and dangling pointers are programmer errors here, as they
+are in C, because every automatic scheme needs a runtime and a runtime is what
+the freestanding core must not have. The compiler does check the one case it
+can do for free: a non-constant index into a `[T; N]`, which carries its length
+(section 4.2). Pointers carry no length and are never checked. The reasoning
+and the library conventions that follow from it are in
+[rules.md](rules.md) section 0.2.
+
 ### 5.1 Stack: automatic (locals)
 
 Every local lives on the function's stack frame, automatically:
@@ -1077,6 +1089,22 @@ reached are never emitted, shrinking the output.
 ## 7. Recipes
 
 Common tasks, copy-and-adjust.
+
+### Debug an MVS program in gdb or lldb
+
+```sh
+mvs prog.mvs -g --target elf64      # emits %line/.loc; the assembler builds DWARF
+gcc prog.o -o prog -no-pie -lm
+gdb ./prog
+(gdb) break prog.mvs:42             # break on an MVS line, not an assembly line
+(gdb) run
+(gdb) info line                     # confirms the .mvs file and line
+```
+
+`-g` gives LINE information: breakpoints, stepping, and backtraces land on the
+`.mvs` source. Variable names are not in the DWARF yet, so inspect values with
+`info registers` or `x/` for now (see ROADMAP). `-g` also keeps the generated
+assembly next to the object so the two can be read side by side.
 
 ### Allocate and free heap memory
 

@@ -96,6 +96,17 @@ else
 fi
 rm -f examples/09_no_std/kernel.o
 
+# debug info: -g must produce a DWARF line table that names the .mvs source,
+# and it must survive linking (this is what lets gdb/lldb step through MVS)
+if "$MVS" examples/03_structs/methods.mvs -g --target elf64 >/dev/null 2>&1 &&
+   gcc examples/03_structs/methods.o -o /tmp/mvs_dbg -no-pie -lm 2>/dev/null &&
+   [ "$(objdump --dwarf=decodedline /tmp/mvs_dbg 2>/dev/null | grep -c 'methods\.mvs')" -gt 0 ]; then
+    pass=$((pass+1)); echo "ok    debug_lines (-g maps back to methods.mvs)"
+else
+    fail=$((fail+1)); echo "FAIL  debug_lines (-g produced no .mvs line table)"
+fi
+rm -f examples/03_structs/methods.o examples/03_structs/methods.asm
+
 echo
 if [ "$fail" -gt 0 ]; then echo "FAILED: $fail failure(s), $pass passed"; exit 1; fi
 echo "ALL PASS: $pass test(s)"

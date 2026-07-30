@@ -18,6 +18,10 @@ No LLVM, no flex, no bison: the output is real assembly you can read.
 > **For education.** This project exists to show how a real compiler works end to
 > end (lexer, parser, type checker, and three code generators, all hand-written).
 > It is a learning subset, not a production toolchain.
+>
+> **Memory is managed by hand, on purpose.** No GC, no reference counting, no
+> destructors: you allocate, you free, exactly like C. See
+> [docs/rules.md](docs/rules.md) section 0.2 for the reasoning.
 
 ```txt
 import { io, math } from "std";

@@ -32,6 +32,45 @@ win64`, links with LLVM/lld); add `--target elf64` for a freestanding **ELF + Sy
 that plain GNU ld links directly, which is the GRUB multiboot path. "win" in the default
 backend's name means the calling convention, not a dependency on Windows.
 
+## 0.2 Design philosophy: memory management belongs to the programmer
+
+This is a deliberate choice, not a missing feature, and it will not change.
+
+MVS manages memory exactly like C: **no garbage collector, no reference
+counting, no destructors, no RAII, no ownership or borrow checker, no hidden
+allocation anywhere**. A value lives on the stack, in `.data`/`.bss`, or in a
+block you asked an allocator for and must hand back yourself. Nothing in the
+language allocates behind your back: `Vec`, `HashMap`, and `String` call
+`malloc`/`realloc` only because their code does so visibly, and each of them
+gives you a `drop()` to call when you are done.
+
+Why: the point of MVS is to be a readable language at C's level that can build
+an OS, a bootloader, or bare-metal firmware. Every automatic memory scheme
+needs a runtime, and a runtime is precisely what must not exist in the core
+(see §0). A `Vec` that frees itself would need destructors, destructors need
+unwinding decisions, and that machinery would have to live somewhere the
+freestanding target cannot afford.
+
+What that means for you, and what the compiler does and does not promise:
+
+- Every `malloc` is yours to `free`. Leaks, double frees, dangling pointers,
+  and use-after-free are programmer errors, exactly as in C. The compiler
+  neither detects nor prevents them.
+- A pointer carries no length, so `p[i]` is never bounds-checked. A `[T; N]`
+  array does carry its length, so a non-constant index into one IS checked at
+  run time (see the guide, section 4.2); `--no-check` turns that off.
+- Sharing memory between threads is unchecked: `std/sync` gives you a `Mutex`,
+  and using it is your discipline. There is no `Send`/`Sync` analysis.
+- The library convention is explicit ownership in the type's own API: whoever
+  creates calls `drop`, containers do not free the elements they hold, and any
+  function that returns memory says so in its comment.
+- `core/mem` and `core/ptr` are the freestanding tools for this work (pure MVS,
+  no CRT); `std/mem` is the hosted wrapper around the C allocator.
+
+When you need automatic cleanup, write it: an arena that frees in one call, a
+bump allocator (see `examples/09_no_std/bump_alloc.mvs`), or a `drop` at the
+end of the scope that owns the value.
+
 ## 0.5 C interop
 
 - **MVS calling C:** `extern func name(...) -> T;` uses the raw symbol name, matching C.

@@ -1,0 +1,58 @@
+// Differential test: string and buffer work, the same in MVS and strings.c
+import { io } from "std";
+import { cstr, mem, bits } from "core";
+
+extern func malloc(n: usize) -> *u8;
+
+func fnv1a(s: str) -> u64 {
+    let p: *u8 = s as *u8;
+    let h: u64 = 0xCBF29CE484222325;
+    let i: usize = 0;
+    while (p[i] != 0) {
+        h = (h ^ p[i]) * 0x100000001B3;
+        i = i + 1;
+    }
+    return h;
+}
+
+func reverse_into(dst: *u8, s: str) -> void {
+    let n: usize = cstr.len(s);
+    let p: *u8 = s as *u8;
+    let i: usize = 0;
+    while (i < n) {
+        dst[i] = p[n - 1 - i];
+        i = i + 1;
+    }
+    dst[n] = 0;
+}
+
+func main() -> i8 {
+    let words: [str; 5] = ["compiler", "mvs", "", "a", "differential"];
+    let i: i64 = 0;
+    while (i < 5) {
+        let w: str = words[i];
+        io.out("{} len={} hash={}", w, cstr.len(w), fnv1a(w));
+        i = i + 1;
+    }
+
+    // comparisons and searching
+    io.out("cmp {} {} {}", cstr.cmp("abc", "abd"), cstr.cmp("b", "a"), cstr.cmp("x", "x"));
+    io.out("find {} {} {}", cstr.find("kernel", 'e'), cstr.find("kernel", 'l'), cstr.find("kernel", 'z'));
+    io.out("prefix {} {}", cstr.starts_with("multiboot", "multi"), cstr.starts_with("multi", "multiboot"));
+
+    // buffer manipulation
+    let buf: *u8 = malloc(64);
+    reverse_into(buf, "differential");
+    io.out("reversed {}", buf as str);
+    let copy: *u8 = malloc(64);
+    mem.copy(copy, buf, cstr.len(buf as str) + 1);
+    io.out("copy eq {}", mem.eq(buf, copy, 13));
+    mem.set(copy, 65, 4);
+    io.out("after set {} eq {}", copy as str, mem.eq(buf, copy, 13));
+
+    // bit twiddling on the hash values
+    let h: u64 = fnv1a("mvs");
+    io.out("bits {} {} {} {}", bits.popcount(h), bits.clz64(h), bits.ctz64(h), bits.bswap64(h));
+    io.out("rot {} {}", bits.rotl64(h, 13), bits.rotr64(h, 7));
+    return 0;
+}

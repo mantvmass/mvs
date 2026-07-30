@@ -66,6 +66,13 @@ jobs:
       - name: Run the built-in runner (mvs test)
         run: ./mvs test
 
+      # Differential testing: the same program in MVS and in C must print
+      # byte-identical output. gcc is the reference implementation, so a
+      # mismatch means MVS generated WRONG code (goldens only prove nothing
+      # changed; this proves the result is right).
+      - name: Differential test against the C reference
+        run: sh scripts/difftest.sh elf64
+
       - name: Upload Linux binary
         uses: actions/upload-artifact@v4
         with:
@@ -118,3 +125,8 @@ jobs:
 
       - name: Run ARM64 test suite (compile, cross-link, run under qemu, diff goldens)
         run: sh scripts/test_arm64_ci.sh
+
+      # the same differential check on AArch64: both sides cross-compiled,
+      # both run under qemu, output must match the C reference exactly
+      - name: Differential test against the C reference (AArch64)
+        run: sh scripts/difftest.sh arm64

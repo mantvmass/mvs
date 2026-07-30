@@ -1,0 +1,71 @@
+// Differential test: the SAME algorithm in MVS and in C (arith.c) must print
+// byte-identical output. This checks the generated code, not just the compiler.
+import { io } from "std";
+
+func collatz_len(start: i64) -> i64 {
+    let n: i64 = start;
+    let steps: i64 = 0;
+    while (n != 1) {
+        if (n % 2 == 0) { n = n / 2; }
+        else { n = 3 * n + 1; }
+        steps = steps + 1;
+    }
+    return steps;
+}
+
+func gcd(a: i64, b: i64) -> i64 {
+    let x: i64 = a;
+    let y: i64 = b;
+    while (y != 0) {
+        let t: i64 = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+}
+
+func main() -> i8 {
+    // signed and unsigned division, modulo, and their truncation rules
+    let i: i64 = 0 - 20;
+    while (i <= 20) {
+        if (i != 0) {
+            io.out("{} {} {}", i, 7 / i, 7 % i);
+            io.out("{} {} {}", i, i / 3, i % 3);
+        }
+        i = i + 3;
+    }
+
+    // real integer widths and wrapping
+    let u8v: u8 = 200;
+    u8v = u8v + 100;
+    let i8v: i8 = 100;
+    i8v = i8v + 100;
+    let u16v: u16 = 65000;
+    u16v = u16v + 1000;
+    let i32v: i32 = 2147483000;
+    i32v = i32v + 1000;
+    io.out("wrap {} {} {} {}", u8v, i8v, u16v, i32v);
+
+    // shifts, including the sign-propagating right shift
+    let s: i64 = 0 - 1024;
+    io.out("shifts {} {} {}", s >> 3, s << 2, (s as u64) >> 3);
+
+    // bit operations
+    let m: u64 = 0xF0F0F0F0F0F0F0F0;
+    io.out("bits {} {} {} {}", m & 0xFF00FF00FF00FF00, m | 0x0F0F, m ^ 0xFFFF, ~m);
+
+    // floating point: printing, comparison, and int conversion in both directions
+    let f: f64 = 3.0;
+    let g: f64 = 7.0;
+    io.out("float {} {} {} {}", f / g, g / f, f * g, g - f);
+    io.out("cast {} {} {}", (g / f) as i64, (0 - 7) as f64 / 2.0, 42 as f64);
+
+    // 128-bit arithmetic past the 64-bit boundary
+    let big: i128 = (1 as i128) << 100;
+    io.out("i128 {} {} {}", big, big / 1000000, big % 1000000);
+
+    // algorithms
+    io.out("collatz {} {} {}", collatz_len(27), collatz_len(97), collatz_len(871));
+    io.out("gcd {} {} {}", gcd(1071, 462), gcd(270, 192), gcd(17, 5));
+    return 0;
+}

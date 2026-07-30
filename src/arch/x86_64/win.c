@@ -1050,6 +1050,7 @@ static void gen_expr(Gen *g, Node *n) {
 /* Gen a statement */
 static void gen_stmt(Gen *g, Node *n) {
     if (!n) return;
+    emit_line_directive(g->out, n, 0);   /* -g: map this statement back to its .mvs line */
     switch (n->kind) {
         case ND_VAR_DECL: {
             Sym *s = &g->locals[n->int_val]; /* the slot reserved in the pre-pass (this exact one, not a shadow) */

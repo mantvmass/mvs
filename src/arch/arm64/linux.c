@@ -1209,6 +1209,7 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
 
 static void gen_stmt(Gen *g, Node *n) {
     if (!n) return;
+    emit_line_directive(g->out, n, 1);   /* -g: .loc so the assembler builds a line table */
     switch (n->kind) {
         case ND_VAR_DECL: {
             Sym *s = &g->locals[n->int_val];

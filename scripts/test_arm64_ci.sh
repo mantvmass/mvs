@@ -77,6 +77,16 @@ for t in $tests; do
     pass=$((pass+1)); echo "ok    $name"
 done
 
+# debug info: -g must produce a DWARF line table naming the .mvs source
+if "$MVS" examples/03_structs/methods.mvs -g --target arm64 >/dev/null 2>&1 &&
+   "$CROSS" examples/03_structs/methods.o -o /tmp/mvs_a64_dbg -static -lm 2>/dev/null &&
+   [ "$(objdump --dwarf=decodedline /tmp/mvs_a64_dbg 2>/dev/null | grep -c 'methods\.mvs')" -gt 0 ]; then
+    pass=$((pass+1)); echo "ok    debug_lines (-g maps back to methods.mvs)"
+else
+    fail=$((fail+1)); echo "FAIL  debug_lines (-g produced no .mvs line table)"
+fi
+rm -f examples/03_structs/methods.o examples/03_structs/methods.s
+
 echo
 if [ "$fail" -gt 0 ]; then echo "FAILED: $fail failure(s), $pass passed"; exit 1; fi
 echo "ALL PASS: $pass test(s)"

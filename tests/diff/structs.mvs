@@ -1,0 +1,90 @@
+// Differential test: structs by value, arrays, sorting, recursion, function
+// pointers, and formatting widths. Must match structs.c exactly.
+import { io } from "std";
+
+struct Vec3 { x: f64; y: f64; z: f64; }
+struct Item { key: i64; weight: i64; }
+struct Nested { head: Item; tail: Vec3; count: i64; }
+
+func dot(a: Vec3, b: Vec3) -> f64 {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+func scale(v: Vec3, k: f64) -> Vec3 {
+    return Vec3 { x: v.x * k, y: v.y * k, z: v.z * k };
+}
+
+func fib(n: i64) -> i64 {
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+func ack(m: i64, n: i64) -> i64 {
+    if (m == 0) { return n + 1; }
+    if (n == 0) { return ack(m - 1, 1); }
+    return ack(m - 1, ack(m, n - 1));
+}
+
+func add(a: i64, b: i64) -> i64 { return a + b; }
+func mul(a: i64, b: i64) -> i64 { return a * b; }
+
+func apply(f: func(i64, i64) -> i64, a: i64, b: i64) -> i64 {
+    return f(a, b);
+}
+
+func main() -> i8 {
+    // structs passed and returned by value
+    let a: Vec3 = Vec3 { x: 1.5, y: 2.5, z: 3.5 };
+    let b: Vec3 = Vec3 { x: 0.5, y: 4.0, z: 2.0 };
+    io.out("dot {}", dot(a, b));
+    let s: Vec3 = scale(a, 2.0);
+    io.out("scale {} {} {}", s.x, s.y, s.z);
+
+    // nested struct fields
+    let n: Nested = Nested { head: Item { key: 7, weight: 3 }, tail: b, count: 2 };
+    io.out("nested {} {} {} {}", n.head.key, n.head.weight, n.tail.y, n.count);
+
+    // array sorting (insertion sort over a fixed array)
+    let arr: [i64; 10] = [42, 7, 19, 3, 88, 1, 55, 23, 9, 70];
+    let i: i64 = 1;
+    while (i < 10) {
+        let key: i64 = arr[i];
+        let j: i64 = i - 1;
+        while (j >= 0 && arr[j] > key) {
+            arr[j + 1] = arr[j];
+            j = j - 1;
+        }
+        arr[j + 1] = key;
+        i = i + 1;
+    }
+    io.out("sorted {}", arr);
+
+    // binary search on the sorted array
+    let targets: [i64; 4] = [19, 88, 4, 1];
+    let t: i64 = 0;
+    while (t < 4) {
+        let lo: i64 = 0;
+        let hi: i64 = 9;
+        let found: i64 = 0 - 1;
+        while (lo <= hi) {
+            let mid: i64 = (lo + hi) / 2;
+            if (arr[mid] == targets[t]) { found = mid; lo = hi + 1; }
+            elseif (arr[mid] < targets[t]) { lo = mid + 1; }
+            else { hi = mid - 1; }
+        }
+        io.out("search {} -> {}", targets[t], found);
+        t = t + 1;
+    }
+
+    // recursion
+    io.out("fib {} {} {}", fib(10), fib(20), fib(25));
+    io.out("ack {} {} {}", ack(1, 3), ack(2, 3), ack(3, 3));
+
+    // function pointers
+    let fp: func(i64, i64) -> i64 = add;
+    io.out("fp {} {}", apply(fp, 3, 4), apply(mul, 3, 4));
+
+    // formatting widths and precision
+    io.out("[{:8.3}] [{:08}] [{:6}] [{:04x}]", 2.718281828, 1234, "hi", 255);
+    return 0;
+}

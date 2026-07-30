@@ -83,18 +83,32 @@ generic call arguments (`none<i64>()`), `Option<T>`/`Result<T, E>` in std,
 
 ## Hardening (the road to production use)
 
-Done: runtime bounds checks on `[T; N]` indexing (trap on out-of-range,
-`--no-check` to opt out), a compiler fuzzer (`scripts/fuzz.sh`: mutated real
-sources, token soup, deep-nesting stress) and an ASan/UBSan CI job running both
-the suite and the fuzzer.
+Done:
+
+- runtime bounds checks on `[T; N]` indexing (trap on out-of-range,
+  `--no-check` to opt out)
+- a compiler fuzzer (`scripts/fuzz.sh`: mutated real sources, token soup,
+  deep-nesting stress) plus an ASan/UBSan CI job running both the suite and the
+  fuzzer
+- debug line info (`-g`): `%line` for the NASM targets, `.file`/`.loc` for the
+  GNU-as target, so a DWARF line table maps back to `.mvs` and gdb/lldb step
+  through MVS source. CI asserts the table survives linking on elf64 and arm64
+- differential testing (`scripts/difftest.sh`): paired `tests/diff/*.mvs` and
+  `*.c` programs must print byte-identical output, with gcc as the reference
+  implementation, on both x86-64 and AArch64. This is the only check that
+  proves the generated code is RIGHT rather than merely unchanged
 
 Still open, roughly in order of value:
 
-- Debug info: DWARF line tables so a crash maps back to `.mvs` lines.
-- Integer overflow checks behind a flag (trap on signed overflow).
 - A larger real-program corpus written IN MVS (the strongest bug finder).
+- More differential pairs, ideally generated rather than hand-written.
+- Integer overflow checks behind a flag (trap on signed overflow).
+- DWARF variable info (today only line info), so a debugger can print locals.
 - Register allocation to replace the stack machine (performance).
 - Deterministic release builds and a signed-artifact story.
+
+Memory management stays manual by design; see
+[docs/rules.md](docs/rules.md) section 0.2.
 
 ## Tooling
 

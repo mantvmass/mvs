@@ -142,6 +142,16 @@ int   intern_string(Gen *g, const char *data, int len);
  * hosted and under --nostd with no runtime dependency at all. */
 extern int mvs_bounds_checks;
 
+/* Debug line information (`-g`). When set, every statement is preceded by a
+ * line directive naming the .mvs file and line, so the assembler builds a
+ * DWARF line table and a debugger steps through MVS source, not assembly.
+ * NASM targets use `%line`, the GNU-as target uses `.loc`. */
+extern int mvs_debug_lines;
+
+/* Emit the line directive for a node (no-op when -g is off or the node has no
+ * position). Backend-specific syntax lives in each backend's emit_line. */
+void emit_line_directive(FILE *out, const Node *n, int gnu_as);
+
 /* --- type system and struct layout --- */
 StructInfo *find_struct(Gen *g, const char *name);
 int   type_size(Gen *g, DataType base, int ptr, const char *sname);

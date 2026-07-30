@@ -467,6 +467,32 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
 /* runtime bounds checking (see common.h); main.c flips it off for --no-check */
 int mvs_bounds_checks = 1;
 
+/* debug line information (see common.h); main.c turns it on for -g */
+int mvs_debug_lines = 0;
+
+/* One line directive per statement. The assembler turns these into a DWARF
+ * line table, which is what lets gdb/lldb show .mvs source. Repeats of the
+ * same file+line are skipped so the table stays small. */
+void emit_line_directive(FILE *out, const Node *n, int gnu_as) {
+    static const char *last_file = NULL;
+    static int last_line = -1;
+    static int file_index = 0;
+    if (!mvs_debug_lines || !n || n->line <= 0 || !n->file) return;
+    if (n->file == last_file && n->line == last_line) return;
+    if (gnu_as) {
+        if (n->file != last_file) {
+            file_index++;
+            fprintf(out, "    .file %d \"%s\"\n", file_index, n->file);
+        }
+        fprintf(out, "    .loc %d %d %d\n", file_index, n->line, n->col > 0 ? n->col : 0);
+    } else {
+        /* NASM: %line <line>+<inc> <file> retargets the reported position */
+        fprintf(out, "%%line %d+0 %s\n", n->line, n->file);
+    }
+    last_file = n->file;
+    last_line = n->line;
+}
+
 /* ---------- reserving variable space on the stack ---------- */
 
 /* Add a local variable and assign its offset (slot rounded up to a multiple of 8 bytes); returns the offset.
