@@ -1,0 +1,104 @@
+/*
+ * core/arch.mvs - CPU instruction intrinsics (pure MVS + inline asm; --nostd safe)
+ *
+ *     import { arch } from "core";
+ *     arch.pause();                       // spin-wait hint
+ *     let t: u64 = arch.timestamp();      // cycle/tick counter
+ *     arch.fence();                       // full memory barrier
+ *
+ * Everything here is a tiny LEAF function wrapping one instruction through the
+ * `asm("...")` intrinsic, selected per target with @compile(target_arch).
+ * asm() emits its string verbatim: the compiler tracks no clobbers and makes no
+ * assumptions, so keep the instructions inside wrappers like these and never
+ * touch a register the surrounding code may hold. Returning a value works
+ * because MVS returns in rax (x86-64) / x0 (AArch64), which is exactly what the
+ * instructions below leave there.
+ */
+
+// --- spin-wait / idle hints ---
+
+// tell the CPU this is a spin-wait iteration (saves power, helps hyperthreads)
+@compile(target_arch = "x86_64")
+func pause() -> void { asm("pause"); }
+@compile(target_arch = "aarch64")
+func pause() -> void { asm("yield"); }
+
+// do nothing for one instruction (alignment, patch points, timing loops)
+@compile(target_arch = "x86_64")
+func nop() -> void { asm("nop"); }
+@compile(target_arch = "aarch64")
+func nop() -> void { asm("nop"); }
+
+// --- memory ordering ---
+
+// full barrier: no load or store may cross this point
+@compile(target_arch = "x86_64")
+func fence() -> void { asm("mfence"); }
+@compile(target_arch = "aarch64")
+func fence() -> void { asm("dmb ish"); }
+
+// loads may not cross (acquire side)
+@compile(target_arch = "x86_64")
+func fence_load() -> void { asm("lfence"); }
+@compile(target_arch = "aarch64")
+func fence_load() -> void { asm("dmb ishld"); }
+
+// stores may not cross (release side)
+@compile(target_arch = "x86_64")
+func fence_store() -> void { asm("sfence"); }
+@compile(target_arch = "aarch64")
+func fence_store() -> void { asm("dmb ishst"); }
+
+// flush the instruction pipeline (after patching code, changing system state)
+@compile(target_arch = "x86_64")
+func sync_instructions() -> void { asm("cpuid"); }
+@compile(target_arch = "aarch64")
+func sync_instructions() -> void { asm("isb"); }
+
+// --- counters ---
+
+// a monotonically increasing hardware counter (x86: TSC, ARM: virtual counter).
+// Only DIFFERENCES are meaningful; the tick rate is not defined here.
+// asm() is also an EXPRESSION: its value is whatever the instructions leave in
+// the result register (rax on x86-64, x0 on AArch64), so it can be returned.
+@compile(target_arch = "x86_64")
+func timestamp() -> u64 {
+    return asm("rdtsc",           // edx:eax = counter
+               "shl rdx, 32",
+               "or rax, rdx");    // rax = the full 64-bit value
+}
+@compile(target_arch = "aarch64")
+func timestamp() -> u64 {
+    return asm("mrs x0, cntvct_el0");   // x0 = the virtual counter
+}
+
+// --- privileged / bare-metal (OS development; faults in user mode) ---
+
+// halt the CPU until the next interrupt
+@compile(target_arch = "x86_64")
+func halt() -> void { asm("hlt"); }
+@compile(target_arch = "aarch64")
+func halt() -> void { asm("wfi"); }
+
+// wait for an event (AArch64) / pause (x86 has no direct equivalent)
+@compile(target_arch = "x86_64")
+func wait_event() -> void { asm("pause"); }
+@compile(target_arch = "aarch64")
+func wait_event() -> void { asm("wfe"); }
+
+// disable / enable interrupts
+@compile(target_arch = "x86_64")
+func interrupts_off() -> void { asm("cli"); }
+@compile(target_arch = "aarch64")
+func interrupts_off() -> void { asm("msr daifset, #2"); }
+@compile(target_arch = "x86_64")
+func interrupts_on() -> void { asm("sti"); }
+@compile(target_arch = "aarch64")
+func interrupts_on() -> void { asm("msr daifclr, #2"); }
+
+// spin the CPU forever (a panic/park loop for freestanding code)
+func park() -> void {
+    while (true) {
+        halt();
+    }
+}

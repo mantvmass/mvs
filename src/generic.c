@@ -159,6 +159,12 @@ static Node *find_template(Node *prog, const char *name) {
  * type: the enclosing module's function wins, then a global (ns "") one. Functions in a
  * foreign namespace are skipped; they are only callable as ns.func(...). */
 static int func_ret_type(Node *prog, const char *name, CType *out) {
+    /* the inline-assembly intrinsic: its value is whatever the instructions left
+     * in the result register, so it types as a plain 64-bit integer */
+    if (strcmp(name, "asm") == 0) {
+        out->base = TYPE_I64; out->ptr = 0; out->sname = NULL; out->sig = NULL; out->arr = 0;
+        return 1;
+    }
     Node *best = NULL;
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
@@ -1624,6 +1630,13 @@ int check_duplicates(Node *prog) {
     int errc = 0;
     for (int i = 0; i < prog->nitems; i++) {
         Node *a = prog->items[i];
+        /* 'asm' is the inline-assembly intrinsic: a user function by that name
+         * would be silently shadowed by the emitter, so reject it outright */
+        if (a->kind == ND_FUNC && a->name && !a->is_method && strcmp(a->name, "asm") == 0) {
+            diag_print(a->file, a->line, a->col, "error",
+                       "'asm' is a reserved intrinsic (inline assembly) and cannot be declared");
+            errc++;
+        }
         if (a->kind != ND_STRUCT_DECL && a->kind != ND_TRAIT && a->kind != ND_FUNC) continue;
         for (int j = 0; j < i; j++) {
             Node *b = prog->items[j];

@@ -1,0 +1,5 @@
+//~ ERROR: 'asm' is a reserved intrinsic
+// asm() is the inline-assembly intrinsic; a user function would be shadowed
+func asm(x: i64) -> i64 { return x; }
+
+func main() -> i8 { return 0; }

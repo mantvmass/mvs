@@ -71,6 +71,7 @@ examples: $(TARGET)
 	./$(TARGET) examples/09_no_std/kernel.mvs --nostd
 	./$(TARGET) examples/09_no_std/bump_alloc.mvs --nostd
 	./$(TARGET) examples/09_no_std/use_core.mvs --nostd
+	./$(TARGET) examples/09_no_std/intrinsics.mvs --nostd
 	@echo "All examples compiled"
 
 # run the test suite: golden output tests + compile-only + compile-fail (expected errors)

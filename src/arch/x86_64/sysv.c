@@ -903,6 +903,24 @@ static void gen_expr(Gen *g, Node *n) {
         case ND_CALL: {
             Node *callee = n->operand;
 
+            /* inline assembly intrinsic: asm("instruction") emits the text verbatim.
+             * The compiler assumes NOTHING about it (no clobber tracking), so it
+             * belongs in tiny leaf helpers like the ones in core/arch. */
+            if (callee->kind == ND_IDENT && strcmp(callee->name, "asm") == 0) {
+                if (n->nitems < 1) {
+                    fprintf(stderr, "codegen error: asm() needs at least one string literal\n");
+                    g->had_error = 1; break;
+                }
+                for (int i = 0; i < n->nitems; i++) {
+                    if (n->items[i]->kind != ND_STR) {
+                        fprintf(stderr, "codegen error: asm(): every argument must be a string literal\n");
+                        g->had_error = 1; break;
+                    }
+                    fprintf(g->out, "    %s\n", n->items[i]->str_val);
+                }
+                break;
+            }
+
             /* built-in format function: io.out("...{}...", args...) (Rust style)
              * it is a compiler intrinsic because the format string must be parsed at compile time
              * and a specifier picked per argument type, much like Rust's println! being a macro */

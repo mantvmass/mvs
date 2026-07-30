@@ -75,7 +75,7 @@ for t in $tests; do
 done
 # freestanding (--nostd) ELF objects: must have ZERO undefined symbols and the
 # kernel skeleton must link with plain GNU ld (the GRUB multiboot path)
-for t in examples/07_c_interop/freestanding examples/09_no_std/kernel examples/09_no_std/bump_alloc examples/09_no_std/use_core; do
+for t in examples/07_c_interop/freestanding examples/09_no_std/kernel examples/09_no_std/bump_alloc examples/09_no_std/use_core examples/09_no_std/intrinsics; do
     name=$(echo "$t" | sed 's|^examples/||; s|/|_|g')
     if ! "$MVS" "$t.mvs" --nostd --target elf64 >/dev/null 2>&1; then
         echo "FAIL  nostd_$name (mvs compile)"; fail=$((fail+1)); continue

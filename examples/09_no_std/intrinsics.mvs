@@ -1,0 +1,28 @@
+// core/arch: CPU instructions through the asm() intrinsic, pure --nostd code.
+// build: mvs.exe examples/09_no_std/intrinsics.mvs --nostd
+// Every helper is a leaf wrapper around one instruction, chosen per target with
+// @compile(target_arch), so the same source builds for x86-64 and AArch64.
+import { arch, bits } from "core";
+
+export func kmain() -> i64 {
+    // hints and barriers: no observable effect, but they must assemble and run
+    arch.pause();
+    arch.nop();
+    arch.fence();
+    arch.fence_load();
+    arch.fence_store();
+
+    // the hardware counter must advance across a spin
+    let t1: u64 = arch.timestamp();
+    let i: i64 = 0;
+    while (i < 5000) {
+        arch.pause();
+        i = i + 1;
+    }
+    let t2: u64 = arch.timestamp();
+    if (t2 <= t1) { return 1; }
+
+    // intrinsics mix with the rest of core
+    if (bits.popcount(t2 - t1) < 1) { return 3; }
+    return 0;
+}

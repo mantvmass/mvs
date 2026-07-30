@@ -562,6 +562,31 @@ it stays importable under `--nostd` (freestanding):
 | `core/cstr` | C-string ops: `len`, `eq`, `cmp`, `find`, `starts_with`, bounded `copy` (named cstr because `str` is a keyword) |
 | `core/slice` | `Slice<T>` {ptr, len} view: `get`/`set` (unchecked) + `in_bounds`, `sub`, `len` |
 | `core/bits` | `rotl64`/`rotr64`, `popcount`, `clz64`/`ctz64`, `bswap64`, `bit` |
+| `core/arch` | CPU instructions: `pause`/`nop`, `fence`/`fence_load`/`fence_store`, `sync_instructions`, `timestamp()`, and the bare-metal `halt`/`wait_event`/`interrupts_off`/`interrupts_on`/`park` |
+
+#### Inline assembly: the `asm` intrinsic
+
+`asm("...")` emits its string verbatim at that point in the output, one argument
+per line. It is how `core/arch` is written:
+
+```txt
+func pause() -> void { asm("pause"); }               // statement form
+
+func timestamp() -> u64 {                            // expression form
+    return asm("rdtsc", "shl rdx, 32", "or rax, rdx");
+}
+```
+
+- As an EXPRESSION its value is whatever the instructions leave in the result
+  register (`rax` on x86-64, `x0` on AArch64), which is exactly MVS's own return
+  convention.
+- Arguments must be string literals; the text is NOT checked (the assembler
+  reports its own errors) and is target-specific, so gate wrappers with
+  `@compile(target_arch = ...)` like `core/arch` does.
+- The compiler tracks NO clobbers and makes no assumptions: keep `asm` inside
+  tiny leaf functions and never touch a register the surrounding code may hold.
+- `asm` is a reserved name; declaring a function called `asm` is an error.
+- It works under `--nostd` (nothing but instructions are emitted).
 
 ```txt
 import { mem, cmp, ptr, cstr, bits } from "core";   // works even with --nostd

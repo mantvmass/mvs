@@ -1,0 +1,7 @@
+//~ ERROR: asm(): every argument must be a string literal
+// the instruction text must be known at compile time
+func main() -> i8 {
+    let s: str = "nop";
+    asm(s);
+    return 0;
+}

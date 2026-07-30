@@ -89,6 +89,7 @@ $compileOnly = @(
     @{ src = "examples/09_no_std/kernel.mvs";          flags = "--nostd" },
     @{ src = "examples/09_no_std/bump_alloc.mvs";      flags = "--nostd" },
     @{ src = "examples/09_no_std/use_core.mvs";        flags = "--nostd" },
+    @{ src = "examples/09_no_std/intrinsics.mvs";      flags = "--nostd" },
     @{ src = "examples/08_stdlib/files.mvs";           flags = "" },
     @{ src = "examples/08_stdlib/net_client.mvs";      flags = "" },
     @{ src = "examples/08_stdlib/net_server.mvs";      flags = "" }

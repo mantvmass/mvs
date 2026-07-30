@@ -50,12 +50,13 @@ Today `std/` is CRT-backed: `io`, `fs`, `net` (cross-platform via `@compile`),
 
 The `core` package EXISTS now and covers most of the table: `core/mem`,
 `core/cmp`, `core/ptr`, `core/cstr` (str is a keyword), `core/slice`
-(`Slice<T>`), and `core/bits`, all pure MVS importing under `--nostd` with zero
-undefined symbols. std carries the CRT/OS-backed layers (`mem`, `math`,
-`option`, `result`, `vec`, `thread`, `sync`). Still open: `core/option` (needs
-a story for the name clash with std/option), `cell`, `sync::atomic` and
-`core::arch` (both need compiler intrinsics, not just MVS), `ffi`, `panic`
-(needs a freestanding abort hook).
+(`Slice<T>`), `core/bits`, and `core/arch` (CPU instructions through the new
+`asm()` intrinsic), all pure MVS importing under `--nostd` with zero undefined
+symbols. std carries the CRT/OS-backed layers (`mem`, `math`, `option`,
+`result`, `vec`, `map`, `thread`, `sync`). Still open: `core/option` (needs a
+story for the name clash with std/option), `cell`, `sync::atomic` (needs
+compare-exchange intrinsics on top of `asm`), `ffi`, `panic` (needs a
+freestanding abort hook).
 
 ## Language
 

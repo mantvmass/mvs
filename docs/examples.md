@@ -117,3 +117,4 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `kernel.mvs` | OS-style skeleton: VGA text writer + exported `kmain` entry (links with GNU ld) |
 | `bump_alloc.mvs` | a freestanding bump allocator (no malloc, state in a caller-owned struct) |
 | `use_core.mvs` | the `core` package under `--nostd`: mem/cmp/ptr/cstr/bits/slice, zero undefined symbols |
+| `intrinsics.mvs` | `core/arch` + the `asm()` intrinsic: hints, barriers, hardware counter, all freestanding |
