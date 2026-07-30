@@ -1,0 +1,14 @@
+// hex (0x) and binary (0b) integer literals, round-tripped through {:x}
+import { io } from "std";
+
+func main() -> i8 {
+    let color: u32 = 0xFF8800;
+    let mask: u8 = 0b10100101 & 0xFF;
+    io.out("color = {}", color);             // 16746496
+    io.out("color hex = {:x}", color);       // ff8800
+    io.out("flags = {}", 0b1011);            // 11
+    io.out("byte = {:x}", 0x7F + 1);         // 80
+    io.out("big hex = {}", 0xFFFFFFFFFFFFFFFF as u64);   // 18446744073709551615
+    io.out("mask = {}", mask);
+    return 0;
+}

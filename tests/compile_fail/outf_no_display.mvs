@@ -1,0 +1,11 @@
+//~ ERROR: type 'P' does not implement trait 'Display'
+// variadic ...dyn Display arguments are trait-checked through the namespace call
+import { fmt } from "std";
+
+struct P { x: i64; }
+
+func main() -> i8 {
+    let p: P = P { x: 1 };
+    fmt.outf("{}", p);
+    return 0;
+}

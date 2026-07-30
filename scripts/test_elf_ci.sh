@@ -18,6 +18,7 @@ examples/01_language/arrays
 examples/01_language/int128
 examples/01_language/shadow
 examples/01_language/compile_attr
+examples/01_language/hexbin
 examples/02_functions/generics
 examples/02_functions/overload
 examples/02_functions/recursion
@@ -27,11 +28,13 @@ examples/03_structs/structs
 examples/03_structs/methods
 examples/03_structs/pointers
 examples/03_structs/compound
+examples/03_structs/blob_fields
 examples/04_traits/traits
 examples/04_traits/display
 examples/04_traits/dynamic
 examples/05_strings/strings
 examples/06_modules/use_import
+examples/06_modules/shadow_std
 examples/08_stdlib/io_demo
 examples/08_stdlib/floats
 examples/08_stdlib/lib_out

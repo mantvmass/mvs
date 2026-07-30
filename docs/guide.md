@@ -164,6 +164,18 @@ compile error; the literal length must match N exactly; parameters cannot be arr
 the array decays); whole-array assignment (`a = b`) is rejected, copy element by element.
 For dynamically-sized buffers use `malloc` + pointer arithmetic as before.
 
+Integer literals may be written in decimal, hex, or binary; all are plain `TK_INT`
+tokens with the same 64-bit value:
+
+```rust
+let color: u32 = 0xFF8800;    // hex
+let mask: u8 = 0b10100101;    // binary
+io.out("{:x}", color);        // prints back as hex: ff8800
+```
+
+A literal that does not fit in 64 bits is a compile error (128-bit values are built
+with arithmetic, e.g. `(1 as i128) << 100`).
+
 ### 4.3 Variables
 
 ```rust

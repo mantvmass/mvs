@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 #include "lexer.h"
 
 /* Table mapping keywords to token kinds, looked up after an identifier is read */
@@ -134,6 +135,33 @@ static Token read_number(Lexer *lx) {
     int line = lx->line, col = lx->col;
     size_t start = lx->pos;
     int is_float = 0;
+
+    /* hex (0x1F) and binary (0b1010) literals */
+    if (peek(lx) == '0' && (peek_next(lx) == 'x' || peek_next(lx) == 'X' ||
+                            peek_next(lx) == 'b' || peek_next(lx) == 'B')) {
+        int base = (peek_next(lx) == 'x' || peek_next(lx) == 'X') ? 16 : 2;
+        advance(lx); advance(lx);   /* consume "0x" / "0b" */
+        size_t dstart = lx->pos;
+        if (base == 16) while (isxdigit((unsigned char)peek(lx))) advance(lx);
+        else            while (peek(lx) == '0' || peek(lx) == '1') advance(lx);
+        Token t = make_token(lx, TK_INT, start, lx->pos, line, col);
+        if (lx->pos == dstart) {
+            lx->had_error = 1;
+            fprintf(stderr, "%s:%d:%d: error: %s literal needs at least one digit after '%s'\n",
+                    lx->filename, line, col, base == 16 ? "hex" : "binary", base == 16 ? "0x" : "0b");
+            return t;
+        }
+        errno = 0;
+        t.int_val = (long long)strtoull(t.lexeme + 2, NULL, base);
+        if (errno == ERANGE) {
+            lx->had_error = 1;
+            fprintf(stderr, "%s:%d:%d: error: integer literal '%s' does not fit in 64 bits\n",
+                    lx->filename, line, col, t.lexeme);
+            fprintf(stderr, "help: build 128-bit values with arithmetic, e.g. (1 as i128) << 100\n");
+        }
+        return t;
+    }
+
     while (isdigit((unsigned char)peek(lx))) advance(lx);
     /* Detect a decimal point; it must be followed by a digit so it does not clash with
      * member access (a.b) */
@@ -144,9 +172,19 @@ static Token read_number(Lexer *lx) {
     }
     Token t = make_token(lx, is_float ? TK_FLOAT : TK_INT, start, lx->pos, line, col);
     if (is_float) t.float_val = atof(t.lexeme);
-    /* Use strtoull to support unsigned integers across the full 64-bit range (e.g. u64 > 2^63).
-     * Stored as a bit-pattern in int_val (signed); the bits stay correct when moved into rax */
-    else          t.int_val = (long long)strtoull(t.lexeme, NULL, 10);
+    else {
+        /* Use strtoull to support unsigned integers across the full 64-bit range (e.g. u64 > 2^63).
+         * Stored as a bit-pattern in int_val (signed); the bits stay correct when moved into rax.
+         * A literal past 2^64-1 would silently saturate, so it is a hard error instead. */
+        errno = 0;
+        t.int_val = (long long)strtoull(t.lexeme, NULL, 10);
+        if (errno == ERANGE) {
+            lx->had_error = 1;
+            fprintf(stderr, "%s:%d:%d: error: integer literal '%s' does not fit in 64 bits\n",
+                    lx->filename, line, col, t.lexeme);
+            fprintf(stderr, "help: build 128-bit values with arithmetic, e.g. (1 as i128) << 100\n");
+        }
+    }
     return t;
 }
 

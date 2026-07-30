@@ -1,0 +1,8 @@
+//~ ERROR: function 'read' expects 1 argument(s) but got 2
+// argument counts are checked through a module namespace too
+import { fs } from "std";
+
+func main() -> i8 {
+    fs.read("a", "b");
+    return 0;
+}

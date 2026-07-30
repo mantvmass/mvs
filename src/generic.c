@@ -91,24 +91,44 @@ static void check_trait_impls(Node *prog) {
     }
 }
 
-/* Find a generic template by name (ngen > 0) */
+/* Module namespace of the function whose body the current pass is walking ("" = entry file).
+ * Unqualified name lookups must mirror codegen's resolution order: functions of the
+ * enclosing module win, then global (ns "") ones. A function that belongs to ANOTHER
+ * module's namespace is not reachable without ns.func(...), so name-only matching
+ * would bind to the wrong definition (e.g. a user 'read' vs fs.read). */
+static const char *g_cur_mod = "";
+
+/* Find a generic template by name (ngen > 0); prefers the enclosing module's template,
+ * then a global one, then any (ns.f generic calls are rewritten to the instance name,
+ * which keeps the template's namespace, so codegen still resolves them correctly) */
 static Node *find_template(Node *prog, const char *name) {
+    Node *global = NULL, *any = NULL;
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
-        if (d->kind == ND_FUNC && d->ngen > 0 && strcmp(d->name, name) == 0) return d;
+        if (d->kind != ND_FUNC || d->ngen == 0 || strcmp(d->name, name) != 0) continue;
+        const char *ns = d->ns ? d->ns : "";
+        if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) return d;
+        if (!ns[0] && !global) global = d;
+        if (!any) any = d;
     }
-    return NULL;
+    return global ? global : any;
 }
 
-/* Find an ND_FUNC by name (generic or not) and return its return type */
+/* Find an ND_FUNC reachable by unqualified name (generic or not) and return its return
+ * type: the enclosing module's function wins, then a global (ns "") one. Functions in a
+ * foreign namespace are skipped; they are only callable as ns.func(...). */
 static int func_ret_type(Node *prog, const char *name, CType *out) {
+    Node *best = NULL;
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
-        if (d->kind == ND_FUNC && strcmp(d->name, name) == 0) {
-            out->base = d->type; out->ptr = d->ptr; out->sname = d->type_name; out->sig = NULL; return 1;
-        }
+        if (d->kind != ND_FUNC || strcmp(d->name, name) != 0) continue;
+        const char *ns = d->ns ? d->ns : "";
+        if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) { best = d; break; }
+        if (!ns[0] && !best) best = d;
     }
-    return 0;
+    if (!best) return 0;
+    out->base = best->type; out->ptr = best->ptr; out->sname = best->type_name; out->sig = NULL;
+    return 1;
 }
 
 /* Find the type of a struct field (used to infer a.b) */
@@ -523,9 +543,8 @@ static int ov_find(OvSet *sets, int nsets, const char *ns, const char *name) {
     return -1;
 }
 
-/* Module namespace of the function whose body is being scanned (for unqualified calls:
- * inside std/math, abs(x) must see math's overload set before the global one) */
-static const char *ov_cur_mod = "";
+/* (unqualified overload calls use g_cur_mod: inside std/math, abs(x) must see
+ * math's overload set before the global one) */
 
 /* Scan for calls to overloaded functions and rename them to match the argument signature (scope-aware) */
 static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int nsets) {
@@ -554,7 +573,7 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
         int s = -1;
         if (callee->kind == ND_IDENT) {
             /* unqualified call: the enclosing module's overload set wins, then the global one */
-            s = ov_find(sets, nsets, ov_cur_mod, callee->name);
+            s = ov_find(sets, nsets, g_cur_mod, callee->name);
             if (s < 0) s = ov_find(sets, nsets, "", callee->name);
         } else if (callee->kind == ND_MEMBER && callee->operand &&
                    callee->operand->kind == ND_IDENT && callee->name) {
@@ -665,9 +684,9 @@ void resolve_overloads(Node *prog) {
             Bind map[512]; int nmap = 0;
             seed_globals(prog, map, &nmap);
             for (int j = 0; j < f->nitems; j++) if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
-            ov_cur_mod = f->mod ? f->mod : "";   /* unqualified calls inside a module see its sets first */
+            g_cur_mod = f->mod ? f->mod : "";   /* unqualified calls inside a module see its sets first */
             scan_ov(prog, f->body, map, &nmap, sets, nsets);
-            ov_cur_mod = "";
+            g_cur_mod = "";
         } else if (f->kind == ND_VAR_DECL && f->operand) {
             Bind map[512]; int nmap = 0;   /* use a real map (avoids NULL deref if the init has a block/decl) */
             seed_globals(prog, map, &nmap);
@@ -686,17 +705,23 @@ void resolve_overloads(Node *prog) {
  *   - method call obj.m(...): the method found by (struct name, m)
  * Overloaded names are left alone (mixing defaults into overload resolution would be ambiguous). */
 
-/* The single non-extern function with this name, or NULL if none/overloaded */
+/* The single non-extern function reachable by this unqualified name, or NULL if
+ * none/overloaded. Mirrors codegen resolution: the enclosing module's functions
+ * win over global ones; foreign-namespace functions are not candidates at all. */
 static Node *df_find_unique(Node *prog, const char *name) {
-    Node *found = NULL;
+    Node *modf = NULL, *globf = NULL;
+    int nmod = 0, nglob = 0;
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
         if (f->kind != ND_FUNC || f->is_extern || f->is_method || !f->name) continue;
         if (strcmp(f->name, name) != 0) continue;
-        if (found) return NULL;                      /* overloaded: leave the call alone */
-        found = f;
+        const char *ns = f->ns ? f->ns : "";
+        if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) { modf = f; nmod++; }
+        else if (!ns[0]) { globf = f; nglob++; }
     }
-    return found;
+    if (nmod == 1) return modf;                      /* module-local match wins */
+    if (nmod == 0 && nglob == 1) return globf;       /* else the sole global one */
+    return NULL;                                     /* none or overloaded: leave the call alone */
 }
 
 /* Count of leading parameters without a default (the minimum a caller must pass) */
@@ -720,6 +745,22 @@ static void df_fill_call(Node *prog, Node *call, Bind *map, int nmap) {
                 Node *d = prog->items[i];
                 if (d->kind == ND_FUNC && d->is_method && d->ns && callee->name &&
                     strcmp(d->ns, bt.sname) == 0 && strcmp(d->name, callee->name) == 0) { fn = d; argoff = 1; break; }
+            }
+        } else if (callee->operand->kind == ND_IDENT && callee->name) {
+            /* ns.f(...): fill defaults for a module function too, but only when the base
+             * is really a namespace (not a variable) and exactly one candidate exists */
+            int bound = 0;
+            for (int i = nmap - 1; i >= 0; i--)
+                if (strcmp(map[i].name, callee->operand->name) == 0) { bound = 1; break; }
+            if (!bound) {
+                int cnt = 0;
+                for (int i = 0; i < prog->nitems; i++) {
+                    Node *d = prog->items[i];
+                    if (d->kind == ND_FUNC && !d->is_extern && !d->is_method &&
+                        d->ns && strcmp(d->ns, callee->operand->name) == 0 &&
+                        d->name && strcmp(d->name, callee->name) == 0) { fn = d; cnt++; }
+                }
+                if (cnt != 1) fn = NULL;             /* overloaded: leave the call alone */
             }
         }
     }
@@ -760,7 +801,9 @@ void fill_default_args(Node *prog) {
             Bind map[512]; int nmap = 0;
             seed_globals(prog, map, &nmap);
             for (int j = 0; j < f->nitems; j++) if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
+            g_cur_mod = f->mod ? f->mod : "";
             df_walk(prog, f->body, map, &nmap);
+            g_cur_mod = "";
         } else if (f->kind == ND_VAR_DECL && f->operand) {
             Bind map[512]; int nmap = 0;
             seed_globals(prog, map, &nmap);
@@ -1256,10 +1299,15 @@ static void tc_check(TcCtx *c, Node *n) {
         Node *callee = n->operand, *fn = NULL;
         int argoff = 0;
         if (callee->kind == ND_IDENT) {
+            /* unqualified call: enclosing module's function wins, then a global one
+             * (a foreign module's ns function is NOT what this call site will run) */
             for (int i = 0; i < c->prog->nitems; i++) {
                 Node *d = c->prog->items[i];
-                if (d->kind == ND_FUNC && !d->is_extern && d->ngen == 0 && !d->is_method &&
-                    d->name && strcmp(d->name, callee->name) == 0) { fn = d; break; }
+                if (d->kind != ND_FUNC || d->is_extern || d->ngen != 0 || d->is_method ||
+                    !d->name || strcmp(d->name, callee->name) != 0) continue;
+                const char *ns = d->ns ? d->ns : "";
+                if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) { fn = d; break; }
+                if (!ns[0] && !fn) fn = d;
             }
         } else if (callee->kind == ND_MEMBER) {
             CType bt = infer(c->prog, callee->operand, c->map, *c->nmap);
@@ -1291,6 +1339,18 @@ static void tc_check(TcCtx *c, Node *n) {
                                    "trait '%s' has no method '%s'", bt.sname, callee->name);
                         (*c->errc)++;
                     }
+                }
+            } else if (callee->operand->kind == ND_IDENT && callee->name &&
+                       !tc_find(c, callee->operand->name)) {
+                /* ns.f(...): a module function called through its namespace. Externs are
+                 * skipped on purpose (their C signatures may be variadic or shortened,
+                 * e.g. printf declared with one parameter) and intrinsics like io.out
+                 * simply have no ND_FUNC to match. */
+                for (int i = 0; i < c->prog->nitems; i++) {
+                    Node *d = c->prog->items[i];
+                    if (d->kind == ND_FUNC && !d->is_extern && !d->is_method && d->ngen == 0 &&
+                        d->ns && strcmp(d->ns, callee->operand->name) == 0 &&
+                        d->name && strcmp(d->name, callee->name) == 0) { fn = d; break; }
                 }
             }
         }
@@ -1395,7 +1455,9 @@ int typecheck(Node *prog) {
             int param_base = nmap;
             for (int j = 0; j < f->nitems; j++)        /* parameters may shadow globals */
                 if (f->items[j]->kind == ND_PARAM) tc_add(&c, f->items[j]);
+            g_cur_mod = f->mod ? f->mod : "";          /* unqualified lookups resolve module-first */
             tc_check(&c, f->body);
+            g_cur_mod = "";
             /* unused parameters (entry file only; self and '_'-prefixed names are exempt) */
             for (int j = param_base; j < nmap; j++) {
                 Bind *b = &map[j];
@@ -1498,7 +1560,9 @@ int monomorphize(Node *prog) {
                 Bind map[512]; int nmap = 0;
                 seed_globals(prog, map, &nmap);
                 for (int j = 0; j < f->nitems; j++) if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
+                g_cur_mod = f->mod ? f->mod : "";
                 scan_calls(prog, f->body, map, &nmap, &made);
+                g_cur_mod = "";
             } else if (f->kind == ND_VAR_DECL && f->operand) {   /* generic calls in global initializers */
                 Bind map[512]; int nmap = 0;
                 seed_globals(prog, map, &nmap);

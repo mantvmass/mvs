@@ -107,7 +107,12 @@ qemu-aarch64 in CI with the same goldens as x86) · conditional compilation
 `@compile(target_os/target_arch)` (filtered in the module loader) · cross-platform
 `std/net` (Winsock vs POSIX selected with `@compile`) · `std/math` + `std/mem` ·
 namespace-aware overloading (`math.abs` i64 vs f64) + `ns.func` reaching a
-module's externs (`math.fmod` -> libm).
+module's externs (`math.fmod` -> libm) · namespace-aware name resolution in EVERY
+front-end pass (typecheck/defaults/monomorphize match codegen: user functions may
+shadow std names) · argument checking for `ns.func(...)` calls (count, types,
+variadic trait bounds) · hex/binary literals (`0xFF`, `0b1010`) + hard error on
+literals past 64 bits · struct-literal stores fixed for 16-byte fields (i128/dyn
+widen/copy) and int-to-float field init on all three backends.
 
 **Remaining:** see [ROADMAP.md](ROADMAP.md) (generic structs -> `Option`/`Result`,
 the freestanding `core` library, macOS target).

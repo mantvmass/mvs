@@ -1,0 +1,5 @@
+read = 34
+write = 10
+abs = 995
+math.abs = 5
+math.abs f = 2.500000

@@ -35,6 +35,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `int128.mvs` | full 128-bit arithmetic: mul/div/mod past 64 bits, u128 max, shifts |
 | `shadow.mvs` | scope shadowing: blocks, type-changing shadows, loop variables |
 | `compile_attr.mvs` | conditional compilation: `@compile(target_os/target_arch)` on funcs and globals |
+| `hexbin.mvs` | hex (`0x`) and binary (`0b`) integer literals + `{:x}` output |
 
 ## 02_functions: functions / generics / overloading
 
@@ -54,6 +55,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `methods.mvs` | methods + associated `Type::new` + chaining |
 | `pointers.mvs` | `&`/`*`/`**`, pointer arithmetic, arrays via malloc |
 | `compound.mvs` | compound assignment evaluates its lvalue (incl. calls) exactly once |
+| `blob_fields.mvs` | i128/f64/f32 fields initialized from plain literals (widen/convert) + i128 accumulation |
 
 ## 04_traits: trait / Display
 
@@ -75,6 +77,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 |------|----------|
 | `use_import.mvs` | the three import forms (namespace / symbol / alias) |
 | `mathlib.mvs` | a user-written module (imported by the above) |
+| `shadow_std.mvs` | user functions sharing names with std functions resolve correctly per namespace |
 
 ## 07_c_interop: working with C
 

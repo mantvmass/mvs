@@ -1,0 +1,6 @@
+color = 16746496
+color hex = ff8800
+flags = 11
+byte = 80
+big hex = 18446744073709551615
+mask = 165

@@ -1,0 +1,6 @@
+//~ ERROR: does not fit in 64 bits
+// integer literals wider than 64 bits must be a hard error, not silent saturation
+func main() -> i8 {
+    let x: i128 = 170141183460469231731687303715884105727;
+    return 0;
+}

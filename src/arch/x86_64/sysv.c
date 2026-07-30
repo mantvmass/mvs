@@ -1294,7 +1294,9 @@ static void gen_store_struct(Gen *g, Node *value) {
                         fprintf(g->out, "    mov rcx, rax\n");
                         fprintf(g->out, "    mov rax, [rsp]\n");
                         if (f->offset + j * esz) fprintf(g->out, "    add rax, %d\n", f->offset + j * esz);
-                        gen_store_typed(g, f->ptr > 0 ? TYPE_USIZE : f->type, esz);
+                        if (is_dyn(f->type, f->ptr))       gen_dyn_store(g, vt2, f->sname);
+                        else if (is_i128(f->type, f->ptr)) gen_i128_store(g, vt2);
+                        else gen_store_typed(g, f->ptr > 0 ? TYPE_USIZE : f->type, esz);
                     }
                 }
             } else if (f->type == TYPE_STRUCT && f->ptr == 0) {
@@ -1304,10 +1306,18 @@ static void gen_store_struct(Gen *g, Node *value) {
                 gen_store_struct(g, fi->rhs);
             } else {
                 gen_expr(g, fi->rhs);                   /* rax = value */
+                ExprType vt2 = type_of(g, fi->rhs), dt2 = { f->type, f->ptr, f->sname, f->sig, 0 };
+                gen_coerce_num(g, vt2, dt2);            /* int literal into a float field etc. */
                 fprintf(g->out, "    mov rcx, rax\n");
                 fprintf(g->out, "    mov rax, [rsp]\n"); /* base address of the destination */
                 if (f->offset) fprintf(g->out, "    add rax, %d\n", f->offset);
-                gen_store_typed(g, f->ptr > 0 ? TYPE_USIZE : f->type, f->size);
+                if (is_i128(f->type, f->ptr)) {
+                    gen_i128_store(g, vt2);             /* 16-byte copy; widens a 64-bit rhs */
+                } else if (is_dyn(f->type, f->ptr)) {
+                    gen_dyn_store(g, vt2, f->sname);    /* fat-pointer copy / wrap */
+                } else {
+                    gen_store_typed(g, f->ptr > 0 ? TYPE_USIZE : f->type, f->size);
+                }
             }
         }
     } else if (value->kind == ND_CALL) {

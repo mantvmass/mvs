@@ -234,8 +234,8 @@ See `func_label_of()` and `find_func()` in `arch/common.c` for the source of tru
   - circular import → `Loader.loading[]` (the in-flight stack); `loaded[]` is registered on **completion**
     (so diamonds work).
 - The std folder is found via `MVS_STD` first, else `<dir of mvs.exe>/std`.
-- std is real MVS (`io`/`fs`/`net`/`string`/`fmt`), imported before use, working through `extern` into the
-  C runtime / Winsock.
+- std is real MVS (`io`/`fs`/`net`/`string`/`fmt`/`math`/`mem`), imported before use, working through
+  `extern` into the C runtime / libm / sockets (Winsock or POSIX, selected per target with `@compile`).
 - structs/traits are **not namespaced yet** (always global), so import a type with a symbol import
   (`import { String } from "std/string"`). Alias/namespace only affects **free functions** (methods/associated
   functions are already tied to the struct name).

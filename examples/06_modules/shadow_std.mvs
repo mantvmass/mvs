@@ -1,0 +1,17 @@
+// user functions may share names with std module functions: an unqualified call
+// binds to the user's (global) definition, ns.func still reaches the module's,
+// and overload sets stay separate per namespace.
+import { io, fs, math } from "std";
+
+func read(a: i64, b: i64) -> i64 { return a * 10 + b; }     // vs fs.read(path)
+func write(x: i64) -> i64 { return x + 1; }                 // vs fs.write(path, s)
+func abs(x: i64) -> i64 { return x + 1000; }                // deliberately NOT |x|, vs math.abs
+
+func main() -> i8 {
+    io.out("read = {}", read(3, 4));          // 34: the user's read
+    io.out("write = {}", write(9));           // 10: the user's write
+    io.out("abs = {}", abs(0 - 5));           // 995: the user's abs
+    io.out("math.abs = {}", math.abs(0 - 5)); // 5: the module's abs (i64 overload)
+    io.out("math.abs f = {}", math.abs(0.0 - 2.5));  // 2.500000 (f64 overload)
+    return 0;
+}
