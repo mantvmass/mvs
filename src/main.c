@@ -181,6 +181,14 @@ static int synthesize_test_main(Node *program) {
         if (f->kind == ND_FUNC && f->body && f->name && strcmp(f->name, "main") == 0)
             return 0;                          /* the file brings its own harness */
     }
+    /* is std/test imported? then test.begin(name) exists and failures can be
+     * attributed to the test that raised them */
+    int have_begin = 0;
+    for (int i = 0; i < program->nitems; i++) {
+        Node *f = program->items[i];
+        if (f->kind == ND_FUNC && f->name && f->ns && strcmp(f->ns, "test") == 0 &&
+            strcmp(f->name, "begin") == 0) { have_begin = 1; break; }
+    }
     Node *body = node_new(ND_BLOCK, 0);
     int ntests = 0;
     for (int i = 0; i < program->nitems; i++) {
@@ -188,6 +196,20 @@ static int synthesize_test_main(Node *program) {
         if (f->kind != ND_FUNC || !f->body || f->is_method || f->ngen > 0 || !f->name) continue;
         if (!f->is_test && strncmp(f->name, "test_", 5) != 0) continue; /* @test or test_* naming */
         if (!diag_is_primary(f->file)) continue;   /* only the entry file's own tests */
+        if (have_begin) {
+            /* test.begin("<name>") so a FAIL line names the test it came from */
+            Node *bn = node_new(ND_STR, 0);
+            bn->str_val = strdup(f->name); bn->str_len = (int)strlen(f->name); bn->type = TYPE_STR;
+            Node *bc = node_new(ND_CALL, 0);
+            bc->operand = node_new(ND_MEMBER, 0);
+            bc->operand->operand = node_new(ND_IDENT, 0);
+            bc->operand->operand->name = strdup("test");
+            bc->operand->name = strdup("begin");
+            node_add_item(bc, bn);
+            Node *bs = node_new(ND_EXPR_STMT, 0);
+            bs->operand = bc;
+            node_add_item(body, bs);
+        }
         Node *call = node_new(ND_CALL, 0);
         call->operand = node_new(ND_IDENT, 0);
         call->operand->name = strdup(f->name);

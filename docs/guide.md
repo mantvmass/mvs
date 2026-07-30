@@ -611,9 +611,11 @@ ALL PASS: 1 test file(s)
 
 How it works: `mvs test` compiles each file with `--test-main`, which appends a
 generated `main()` calling every test function in the ENTRY file in order and
-printing `ok <name>` after each returns. A failed assertion prints `FAIL expected
-... but got ...` and exits with 1, so the remaining tests in that file are skipped
-and the file counts as failed. A test file that defines its own `main` is run as is.
+printing `ok <name>` after each returns. A failed assertion prints
+`FAIL <test name>: expected ... but got ...` and exits with 1, so the remaining
+tests in that file are skipped and the file counts as failed (a per-test restart
+needs unwinding, which waits for `Result`; see ROADMAP). A test file that defines
+its own `main` is run as is.
 
 Assertions: `test.ok(cond)` · `test.eq(got, want)` (overloaded for i64/f64/str;
 str compares CONTENT via strcmp) · `test.near(got, want, eps)` for floats ·

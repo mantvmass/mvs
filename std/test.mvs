@@ -5,7 +5,7 @@
  * test_*. `mvs test` discovers the file, generates a main() that calls every
  * test in order (compile with --test-main to do the same by hand), and prints
  * "  ok    <name>" after each one returns. A failed assertion prints
- * "  FAIL  ..." and exits the test binary with 1.
+ * "  FAIL  <name>: ..." and exits the test binary with 1.
  *
  * Example (math.test.mvs):
  *     import { test, math } from "std";
@@ -22,10 +22,30 @@ import { io } from "std";
 
 extern func exit(code: i32) -> void;
 extern func strcmp(a: str, b: str) -> i32;
+extern func strlen(s: str) -> usize;
+extern func printf(fmt: str) -> i32;
+
+// name of the test currently running; the main() that `mvs test` generates
+// calls test.begin(name) before each test so failures can say where they were
+let test_current: str = "";
+
+// record the running test's name (called by the generated main, not by users)
+func begin(name: str) -> void {
+    test_current = name;
+}
+
+// print "  FAIL  <test>: " (just "  FAIL  " outside a named test)
+func prefix() -> void {
+    printf("  FAIL  ");
+    if (strlen(test_current) > 0) {
+        printf("%s: ", test_current);
+    }
+}
 
 // abort the test binary with a message
 func fail(msg: str) -> void {
-    io.out("  FAIL  {}", msg);
+    prefix();
+    io.out("{}", msg);
     exit(1);
 }
 
@@ -37,19 +57,22 @@ func ok(cond: bool) -> void {
 // exact equality (overloaded per type)
 func eq(got: i64, want: i64) -> void {
     if (got != want) {
-        io.out("  FAIL  expected {} but got {}", want, got);
+        prefix();
+        io.out("expected {} but got {}", want, got);
         exit(1);
     }
 }
 func eq(got: f64, want: f64) -> void {
     if (got != want) {
-        io.out("  FAIL  expected {} but got {}", want, got);
+        prefix();
+        io.out("expected {} but got {}", want, got);
         exit(1);
     }
 }
 func eq(got: str, want: str) -> void {
     if (strcmp(got, want) != 0) {
-        io.out("  FAIL  expected {} but got {}", want, got);
+        prefix();
+        io.out("expected {} but got {}", want, got);
         exit(1);
     }
 }
@@ -59,7 +82,8 @@ func near(got: f64, want: f64, eps: f64) -> void {
     let d: f64 = got - want;
     if (d < 0.0) { d = 0.0 - d; }
     if (d > eps) {
-        io.out("  FAIL  expected {} within {} but got {}", want, eps, got);
+        prefix();
+        io.out("expected {} within {} but got {}", want, eps, got);
         exit(1);
     }
 }
