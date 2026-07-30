@@ -1,0 +1,42 @@
+// Vec<T>: the first real collection, built on generic structs.
+// Growable heap buffer + bounds-checked access; element size comes from
+// scaled pointer arithmetic, so one template serves every element type.
+import { io } from "std";
+import { Vec, vec_new } from "std/vec";
+
+struct P { x: i64; y: i64; }
+
+func main() -> i8 {
+    let v: Vec<i64> = vec_new<i64>();
+    let i: i64 = 0;
+    while (i < 10) {
+        v.push(i * i);
+        i = i + 1;
+    }
+    io.out("len = {}", v.len());
+    io.out("v[3] = {} v[9] = {}", v.get(3), v.get(9));
+    v.set(0, 100);
+    io.out("after set: v[0] = {}", v.get(0));
+    io.out("pop = {} pop = {}", v.pop(), v.pop());
+    io.out("len now = {}", v.len());
+    v.drop();
+
+    // element type f64
+    let f: Vec<f64> = vec_new<f64>();
+    f.push(1.5);
+    f.push(2.25);
+    io.out("floats = {} {}", f.get(0), f.get(1));
+    f.drop();
+
+    // element type struct (16-byte elements copied in and out by value)
+    let ps: Vec<P> = vec_new<P>();
+    let p1: P = P { x: 1, y: 2 };
+    let p2: P = P { x: 3, y: 4 };
+    ps.push(p1);
+    ps.push(p2);
+    let p: P = ps.get(1);
+    io.out("struct elem = {} {}", p.x, p.y);
+    io.out("esize = {}", ps.esize());
+    ps.drop();
+    return 0;
+}

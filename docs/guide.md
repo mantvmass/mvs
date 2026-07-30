@@ -531,6 +531,16 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `test` | assertions for `*.test.mvs` files: `ok(cond)`, `eq(got, want)` (i64/f64/str overloads), `near(got, want, eps)`, `fail(msg)`; see section 4.14 |
 | `option` | `Option<T>` + `Some(v)` / `None<T>()` + `is_some`/`is_none`/`unwrap`/`unwrap_or`; see section 4.15 |
 | `result` | `Result<T, E>` + `Ok<T, E>(v)` / `Err<T, E>(e)` + `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` |
+| `vec` | `Vec<T>` growable array: `vec_new<T>()` + `push`/`get`/`set`/`pop`/`len`/`is_empty`/`clear`/`drop`; bounds-checked, any element type incl. structs |
+
+There is also a second package, **`core`**: pure MVS with no CRT/OS dependency, so
+it stays importable under `--nostd` (freestanding). Today: `core/mem` (byte-loop
+`copy`/`set`/`zero`/`eq`/`swap`, overlap-safe) and `core/cmp` (generic
+`min`/`max`/`clamp`/`ordering`).
+
+```txt
+import { mem, cmp } from "core";   // works even with --nostd
+```
 
 Two resolution rules make modules pleasant to use:
 

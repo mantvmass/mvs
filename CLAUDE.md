@@ -127,10 +127,13 @@ patterns, x86 targets) · GENERIC STRUCTS (`struct Pair<T, U>` + `impl Pair<T, U
 methods, monomorphized in the same fixpoint loop as generic functions; canonical
 names like `Vec<i64>` mangle to `Vec__i64`; nested arguments and `>>` handled) ·
 explicit generic call arguments (`none<i64>()`) · `std/option`
-(`Option<T>`/`Some`/`None`) + `std/result` (`Result<T, E>`/`Ok`/`Err`).
+(`Option<T>`/`Some`/`None`) + `std/result` (`Result<T, E>`/`Ok`/`Err`) ·
+`std/vec` (`Vec<T>` growable, bounds-checked, element size via scaled pointer
+arithmetic) · the `core` package (`core/mem`, `core/cmp`: pure MVS, importable
+under `--nostd`, packaged next to std in releases; env override MVS_CORE).
 
-**Remaining:** see [ROADMAP.md](ROADMAP.md) (`match`, collections (`Vec<T>`),
-the freestanding `core` packaging, macOS target).
+**Remaining:** see [ROADMAP.md](ROADMAP.md) (`match`, a hash map, more `core`
+modules, macOS target).
 
 ## Project-specific cautions (full list in docs/rules.md)
 

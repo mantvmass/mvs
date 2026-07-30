@@ -22,7 +22,7 @@ jobs:
       - name: Run test suite (a release must be green)
         run: powershell -ExecutionPolicy Bypass -File scripts/test.ps1
       - name: Package
-        run: Compress-Archive -Path mvs.exe, std, docs, README.md, LICENSE-MIT, LICENSE-APACHE -DestinationPath mvs-windows-x86_64.zip
+        run: Compress-Archive -Path mvs.exe, std, core, docs, README.md, LICENSE-MIT, LICENSE-APACHE -DestinationPath mvs-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -39,7 +39,7 @@ jobs:
       - name: Run test suite (a release must be green)
         run: sh scripts/test_elf_ci.sh
       - name: Package
-        run: tar czf mvs-linux-x86_64.tar.gz mvs std docs README.md LICENSE-MIT LICENSE-APACHE
+        run: tar czf mvs-linux-x86_64.tar.gz mvs std core docs README.md LICENSE-MIT LICENSE-APACHE
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux

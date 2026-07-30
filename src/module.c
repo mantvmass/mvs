@@ -28,8 +28,9 @@ typedef struct {
     int         nns;
     char       *loading[MAX_LOADED]; /* modules currently loading in this call chain; detects circular import */
     int         nloading;
-    const char *stddir;              /* standard library folder */
-    int         nostd;               /* 1 = freestanding mode (package imports like std are forbidden) */
+    const char *stddir;              /* standard library folder ("std" package) */
+    const char *coredir;             /* core library folder ("core" package: pure MVS, --nostd safe) */
+    int         nostd;               /* 1 = freestanding mode ("std" imports forbidden; "core" allowed) */
     const char *target_os;           /* current target OS, matched against @compile(target_os = ...) */
     const char *target_arch;         /* current target arch, matched against @compile(target_arch = ...) */
     int         had_error;
@@ -159,20 +160,29 @@ static void register_ns(Loader *L, const char *name, const char *canon) {
     }
 }
 
+/* Which package does a path belong to? "core"/"core/x" -> coredir, else stddir */
+static const char *package_dir(Loader *L, const char *path) {
+    if (strcmp(path, "core") == 0 || strncmp(path, "core/", 5) == 0) return L->coredir;
+    return L->stddir;
+}
+
 /* Resolve a "module path" (not a bare package) to a real file; returns 1 on success
  *   absolute            -> use as is
  *   ends in .mvs        -> relative file against base_dir (e.g. ./lib.mvs)
- *   otherwise (has '/') -> package submodule, e.g. "std/string" -> <stddir>/string.mvs */
+ *   otherwise (has '/') -> package submodule, e.g. "std/string" -> <stddir>/string.mvs,
+ *                          "core/mem" -> <coredir>/mem.mvs (allowed under --nostd) */
 static int resolve_module_file(Loader *L, const char *path, const char *base_dir, char *out, size_t n) {
     if (is_absolute(path)) { snprintf(out, n, "%s", path); return 1; }
     if (ends_with_mvs(path)) { snprintf(out, n, "%s/%s", base_dir, path); return 1; }
-    if (L->nostd) {
+    const char *pdir = package_dir(L, path);
+    if (L->nostd && pdir != L->coredir) {
         fprintf(stderr, "error: cannot import package module '%s' in --nostd (freestanding) mode\n", path);
+        fprintf(stderr, "help: the \"core\" package is pure MVS and stays available, e.g. import { copy } from \"core/mem\"\n");
         L->had_error = 1; return 0;
     }
     const char *slash = strchr(path, '/');
-    const char *sub = slash ? slash + 1 : path;       /* strip "std/", leaving "string" */
-    snprintf(out, n, "%s/%s.mvs", L->stddir, sub);
+    const char *sub = slash ? slash + 1 : path;       /* strip "std/" or "core/" */
+    snprintf(out, n, "%s/%s.mvs", pdir, sub);
     return 1;
 }
 
@@ -207,15 +217,17 @@ static void handle_import(Loader *L, Node *imp, const char *base_dir) {
 
     if (is_package_path(path)) {
         /* Form A: namespace import of submodules */
-        if (L->nostd) {
+        const char *pdir = package_dir(L, path);
+        if (L->nostd && pdir != L->coredir) {
             fprintf(stderr, "error: cannot import package '%s' in --nostd (freestanding) mode\n", path);
+            fprintf(stderr, "help: the \"core\" package is pure MVS and stays available, e.g. import { mem } from \"core\"\n");
             L->had_error = 1;
             return;
         }
         for (int i = 0; i < imp->nitems; i++) {
             const char *name = imp->items[i]->name;
             char file[1024];
-            snprintf(file, sizeof(file), "%s/%s.mvs", L->stddir, name);
+            snprintf(file, sizeof(file), "%s/%s.mvs", pdir, name);
             if (!read_file_exists(file)) {
                 fprintf(stderr, "error: package '%s' has no module '%s' (looked for %s)\n", path, name, file);
                 L->had_error = 1; continue;
@@ -344,12 +356,13 @@ static void load_module(Loader *L, const char *path, const char *ns) {
     }
 }
 
-Node *module_load(const char *entry_path, const char *stddir, int nostd,
+Node *module_load(const char *entry_path, const char *stddir, const char *coredir, int nostd,
                   const char *target_os, const char *target_arch, int *had_error) {
     Loader L;
     memset(&L, 0, sizeof(L));
     L.result = node_new(ND_PROGRAM, 1);
     L.stddir = stddir;
+    L.coredir = coredir;
     L.nostd = nostd;
     L.target_os = target_os;
     L.target_arch = target_arch;

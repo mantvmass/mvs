@@ -1,0 +1,42 @@
+// unit tests for Vec<T>
+import { test } from "std";
+import { Vec, vec_new } from "std/vec";
+
+@test
+func push_get_len() -> void {
+    let v: Vec<i64> = vec_new<i64>();
+    test.ok(v.is_empty());
+    let i: i64 = 0;
+    while (i < 100) {          // forces several growth steps
+        v.push(i * 3);
+        i = i + 1;
+    }
+    test.eq(v.len() as i64, 100);
+    test.eq(v.get(0), 0);
+    test.eq(v.get(99), 297);
+    v.drop();
+}
+
+@test
+func set_pop_clear() -> void {
+    let v: Vec<i64> = vec_new<i64>();
+    v.push(1);
+    v.push(2);
+    v.push(3);
+    v.set(1, 20);
+    test.eq(v.get(1), 20);
+    test.eq(v.pop(), 3);
+    test.eq(v.len() as i64, 2);
+    v.clear();
+    test.ok(v.is_empty());
+    v.drop();
+}
+
+@test
+func float_elements() -> void {
+    let f: Vec<f64> = vec_new<f64>();
+    f.push(0.5);
+    f.push(0.25);
+    test.near(f.get(0) + f.get(1), 0.75, 0.000001);
+    f.drop();
+}

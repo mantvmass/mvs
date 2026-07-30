@@ -1,0 +1,32 @@
+// the "core" package works under --nostd: pure MVS, zero undefined symbols.
+// build: mvs.exe examples/09_no_std/use_core.mvs --nostd
+import { mem, cmp } from "core";
+
+// a tiny static arena stands in for an allocator (no CRT here)
+let arena: [u8; 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+export func kmain() -> i64 {
+    let a: *u8 = arena;          // decays to *u8
+    let b: *u8 = arena;
+    let bb: *u8 = b + 32;
+
+    mem.set(a, 65, 8);           // "AAAAAAAA"
+    mem.copy(bb, a, 8);
+    if (!mem.eq(a, bb, 8)) { return 1; }
+
+    mem.zero(a, 4);
+    if (a[0] != 0) { return 2; }
+    if (a[4] != 65) { return 3; }
+
+    mem.swap(a, bb, 8);
+    if (a[0] != 65) { return 4; }
+
+    if (cmp.max(3, 9) != 9) { return 5; }
+    if (cmp.min(3, 9) != 3) { return 6; }
+    if (cmp.clamp(15, 0, 10) != 10) { return 7; }
+    if (cmp.ordering(1, 2) != 0 - 1) { return 8; }
+    return 0;                    // all checks passed
+}

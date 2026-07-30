@@ -1,0 +1,8 @@
+len = 10
+v[3] = 9 v[9] = 81
+after set: v[0] = 100
+pop = 81 pop = 64
+len now = 8
+floats = 1.500000 2.250000
+struct elem = 3 4
+esize = 16

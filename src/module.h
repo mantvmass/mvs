@@ -15,14 +15,16 @@
 
 /* Load the entry file and resolve all imports; returns an ND_PROGRAM merging every module.
  *   entry_path  - the initial .mvs file
- *   stddir      - standard library folder (used when importing from a package such as "std")
- *   nostd       - 1 = freestanding mode: package imports (such as "std") are forbidden
+ *   stddir      - standard library folder (used when importing from the "std" package)
+ *   coredir     - core library folder (the "core" package: pure MVS, no CRT/OS,
+ *                 so it stays importable under --nostd)
+ *   nostd       - 1 = freestanding mode: "std" imports are forbidden ("core" is fine)
  *   target_os   - current target OS ("windows" or "linux"); items whose
  *                 @compile(target_os = ...) does not match are dropped here
  *   target_arch - current target arch ("x86_64" or "aarch64"); same filtering
  *   had_error   - set to 1 if an error occurred
  */
-Node *module_load(const char *entry_path, const char *stddir, int nostd,
+Node *module_load(const char *entry_path, const char *stddir, const char *coredir, int nostd,
                   const char *target_os, const char *target_arch, int *had_error);
 
 #endif /* MVS_MODULE_H */

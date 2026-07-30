@@ -51,7 +51,7 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/io_demo examples/08_stdlib/floats examples/08_stdlib/files \
            examples/08_stdlib/lib_out examples/08_stdlib/lib_math examples/08_stdlib/lib_mem \
            examples/08_stdlib/lib_rand examples/08_stdlib/lib_sys examples/08_stdlib/out_width \
-           examples/08_stdlib/option_result \
+           examples/08_stdlib/option_result examples/08_stdlib/lib_vec \
            examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop
 
 # default target: build the compiler
@@ -68,6 +68,7 @@ examples: $(TARGET)
 	./$(TARGET) examples/07_c_interop/freestanding.mvs --nostd
 	./$(TARGET) examples/09_no_std/kernel.mvs --nostd
 	./$(TARGET) examples/09_no_std/bump_alloc.mvs --nostd
+	./$(TARGET) examples/09_no_std/use_core.mvs --nostd
 	@echo "All examples compiled"
 
 # run the test suite: golden output tests + compile-only + compile-fail (expected errors)

@@ -1,0 +1,65 @@
+/*
+ * core/mem.mvs - raw memory operations in pure MVS (no CRT, no OS)
+ *
+ * Unlike std/mem (which wraps the C runtime), everything here is a plain MVS
+ * byte loop, so it works under --nostd for OS/bare-metal code:
+ *
+ *     import { mem } from "core";        // fine even with --nostd
+ *     mem.copy(dst, src, n);
+ *
+ * There is deliberately no alloc here: a freestanding program brings its own
+ * allocator (see examples/09_no_std/bump_alloc.mvs).
+ */
+
+// copy n bytes; handles overlapping ranges (copies backwards when needed)
+func copy(dst: *u8, src: *u8, n: usize) -> void {
+    if (dst == src || n == 0) { return; }
+    if ((dst as usize) < (src as usize)) {
+        let i: usize = 0;
+        while (i < n) {
+            dst[i] = src[i];
+            i = i + 1;
+        }
+    } else {
+        let i: usize = n;
+        while (i > 0) {
+            i = i - 1;
+            dst[i] = src[i];
+        }
+    }
+}
+
+// fill n bytes with the given byte value
+func set(p: *u8, value: u8, n: usize) -> void {
+    let i: usize = 0;
+    while (i < n) {
+        p[i] = value;
+        i = i + 1;
+    }
+}
+
+// fill n bytes with zero
+func zero(p: *u8, n: usize) -> void {
+    set(p, 0, n);
+}
+
+// are two n-byte regions byte-for-byte equal?
+func eq(a: *u8, b: *u8, n: usize) -> bool {
+    let i: usize = 0;
+    while (i < n) {
+        if (a[i] != b[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// exchange the contents of two non-overlapping n-byte regions
+func swap(a: *u8, b: *u8, n: usize) -> void {
+    let i: usize = 0;
+    while (i < n) {
+        let t: u8 = a[i];
+        a[i] = b[i];
+        b[i] = t;
+        i = i + 1;
+    }
+}

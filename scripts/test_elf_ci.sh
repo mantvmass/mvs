@@ -45,6 +45,7 @@ examples/08_stdlib/lib_rand
 examples/08_stdlib/lib_sys
 examples/08_stdlib/out_width
 examples/08_stdlib/option_result
+examples/08_stdlib/lib_vec
 examples/08_stdlib/net_loop"
 
 for t in $tests; do
@@ -71,7 +72,7 @@ for t in $tests; do
 done
 # freestanding (--nostd) ELF objects: must have ZERO undefined symbols and the
 # kernel skeleton must link with plain GNU ld (the GRUB multiboot path)
-for t in examples/07_c_interop/freestanding examples/09_no_std/kernel examples/09_no_std/bump_alloc; do
+for t in examples/07_c_interop/freestanding examples/09_no_std/kernel examples/09_no_std/bump_alloc examples/09_no_std/use_core; do
     name=$(echo "$t" | sed 's|^examples/||; s|/|_|g')
     if ! "$MVS" "$t.mvs" --nostd --target elf64 >/dev/null 2>&1; then
         echo "FAIL  nostd_$name (mvs compile)"; fail=$((fail+1)); continue

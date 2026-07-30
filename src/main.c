@@ -619,16 +619,16 @@ int main(int argc, char **argv) {
     if (output) snprintf(exe_path, sizeof(exe_path), "%s", output);
     else        snprintf(exe_path, sizeof(exe_path), "%s.exe", base);
 
-    /* locate the standard library folder: prefer the MVS_STD env var, else next to mvs.exe */
-    char stddir[PATHBUF + 8];
+    /* locate the library folders: MVS_STD / MVS_CORE env vars win, else next to mvs.exe */
+    char stddir[PATHBUF + 8], coredir[PATHBUF + 8];
     const char *env_std = getenv("MVS_STD");
-    if (env_std) {
-        snprintf(stddir, sizeof(stddir), "%s", env_std);
-    } else {
-        char exedir[1024];
-        dir_name(argv[0], exedir);
-        snprintf(stddir, sizeof(stddir), "%s/std", exedir);
-    }
+    const char *env_core = getenv("MVS_CORE");
+    char exedir[1024];
+    dir_name(argv[0], exedir);
+    if (env_std) snprintf(stddir, sizeof(stddir), "%s", env_std);
+    else         snprintf(stddir, sizeof(stddir), "%s/std", exedir);
+    if (env_core) snprintf(coredir, sizeof(coredir), "%s", env_core);
+    else          snprintf(coredir, sizeof(coredir), "%s/core", exedir);
 
     /* Target identity for @compile(target_os/target_arch) filtering in the loader */
     const char *target_os = (arch == ARCH_X86_64_WIN) ? "windows" : "linux";
@@ -637,7 +637,7 @@ int main(int argc, char **argv) {
     /* 1+2. load the entry file + resolve all imports, then parse into one merged AST */
     diag_set_primary(input);   /* warnings are only emitted for the entry file's own code */
     int had_error = 0;
-    Node *program = module_load(input, stddir, nostd, target_os, target_arch, &had_error);
+    Node *program = module_load(input, stddir, coredir, nostd, target_os, target_arch, &had_error);
     if (had_error) { fprintf(stderr, "compilation failed (parse/import errors)\n"); return 1; }
 
     /* --test-main: a test file has test_* functions instead of a main; generate one */

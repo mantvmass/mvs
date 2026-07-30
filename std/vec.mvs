@@ -1,0 +1,98 @@
+/*
+ * std/vec.mvs - Vec<T>: a growable array (Rust style)
+ *
+ * Usage:
+ *     import { io } from "std";
+ *     import { Vec, vec_new } from "std/vec";
+ *
+ *     let v: Vec<i64> = vec_new<i64>();
+ *     v.push(10);
+ *     v.push(20);
+ *     io.out("{} items, first = {}", v.len(), v.get(0));
+ *     v.drop();                       // manual memory: free it yourself
+ *
+ * Out-of-range get/set/pop abort the program (like Rust's panics).
+ * The element size comes from scaled pointer arithmetic (data + 1 advances
+ * exactly one element), so no sizeof operator is needed.
+ */
+
+extern func realloc(p: *u8, n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func printf(fmt: str) -> i32;
+extern func exit(code: i32) -> void;
+
+struct Vec<T> {
+    data: *T;
+    len: usize;
+    cap: usize;
+}
+
+impl Vec<T> {
+    // number of elements
+    func len(self: *Vec<T>) -> usize { return self.len; }
+
+    // is the vector empty?
+    func is_empty(self: *Vec<T>) -> bool { return self.len == 0; }
+
+    // size of one element in bytes (pointer arithmetic scales by the element type)
+    func esize(self: *Vec<T>) -> usize {
+        return ((self.data + 1) as usize) - (self.data as usize);
+    }
+
+    // append one element (grows the buffer by doubling; realloc(0) acts as malloc)
+    func push(self: *Vec<T>, v: T) -> void {
+        if (self.len == self.cap) {
+            let ncap: usize = self.cap * 2;
+            if (ncap == 0) { ncap = 4; }
+            self.data = realloc(self.data as *u8, ncap * self.esize()) as *T;
+            self.cap = ncap;
+        }
+        self.data[self.len] = v;
+        self.len = self.len + 1;
+    }
+
+    // element at index i; aborts when out of range
+    func get(self: *Vec<T>, i: usize) -> T {
+        if (i >= self.len) {
+            printf("panic: Vec index out of range\n");
+            exit(1);
+        }
+        return self.data[i];
+    }
+
+    // overwrite the element at index i; aborts when out of range
+    func set(self: *Vec<T>, i: usize, v: T) -> void {
+        if (i >= self.len) {
+            printf("panic: Vec index out of range\n");
+            exit(1);
+        }
+        self.data[i] = v;
+    }
+
+    // remove and return the last element; aborts when empty
+    func pop(self: *Vec<T>) -> T {
+        if (self.len == 0) {
+            printf("panic: pop() on an empty Vec\n");
+            exit(1);
+        }
+        self.len = self.len - 1;
+        return self.data[self.len];
+    }
+
+    // drop all elements but keep the buffer
+    func clear(self: *Vec<T>) -> void { self.len = 0; }
+
+    // release the buffer (manual memory management, like everything in MVS)
+    func drop(self: *Vec<T>) -> void {
+        free(self.data as *u8);
+        self.data = 0;
+        self.len = 0;
+        self.cap = 0;
+    }
+}
+
+// an empty vector (give T explicitly: vec_new<i64>())
+func vec_new<T>() -> Vec<T> {
+    let v: Vec<T> = Vec<T> { data: 0, len: 0, cap: 0 };
+    return v;
+}

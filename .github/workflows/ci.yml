@@ -43,6 +43,7 @@ jobs:
           path: |
             mvs.exe
             std/
+            core/
 
   # Linux host, elf64 target: build natively with gcc, then compile, link, RUN
   # every runnable example and diff stdout against the same goldens the Windows
@@ -72,6 +73,7 @@ jobs:
           path: |
             mvs
             std/
+            core/
 
   # AArch64 target: cross-compile every runnable example with --target arm64,
   # link with the cross gcc, RUN under qemu-aarch64, and diff stdout against

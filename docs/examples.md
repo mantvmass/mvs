@@ -105,6 +105,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `lib_sys.mvs` | `std/time` + `std/env` + `std/process` (prints deterministic properties) |
 | `out_width.mvs` | io.out width/precision specs: `{:8.2}` `{:08}` `{:.3}` `{:04x}` |
 | `option_result.mvs` | `Option<T>` / `Result<T, E>`: Some/None/Ok/Err, unwrap and fallbacks |
+| `lib_vec.mvs` | `Vec<T>` growable array: push/get/set/pop over i64, f64, and struct elements |
 
 ## 09_no_std: freestanding (OS / bare-metal, `--nostd`)
 
@@ -112,3 +113,4 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 |------|----------|
 | `kernel.mvs` | OS-style skeleton: VGA text writer + exported `kmain` entry (links with GNU ld) |
 | `bump_alloc.mvs` | a freestanding bump allocator (no malloc, state in a caller-owned struct) |
+| `use_core.mvs` | the `core` package under `--nostd`: `core/mem` + `core/cmp`, zero undefined symbols |

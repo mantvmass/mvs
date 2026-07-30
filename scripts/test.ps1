@@ -70,6 +70,7 @@ $runPass = @(
     "examples/08_stdlib/lib_sys",
     "examples/08_stdlib/out_width",
     "examples/08_stdlib/option_result",
+    "examples/08_stdlib/lib_vec",
     "examples/08_stdlib/net_loop"
 )
 
@@ -84,6 +85,7 @@ $compileOnly = @(
     @{ src = "examples/07_c_interop/freestanding.mvs"; flags = "--nostd" },
     @{ src = "examples/09_no_std/kernel.mvs";          flags = "--nostd" },
     @{ src = "examples/09_no_std/bump_alloc.mvs";      flags = "--nostd" },
+    @{ src = "examples/09_no_std/use_core.mvs";        flags = "--nostd" },
     @{ src = "examples/08_stdlib/files.mvs";           flags = "" },
     @{ src = "examples/08_stdlib/net_client.mvs";      flags = "" },
     @{ src = "examples/08_stdlib/net_server.mvs";      flags = "" }
@@ -246,6 +248,7 @@ $elfTests = @(
     "examples/08_stdlib/lib_sys",
     "examples/08_stdlib/out_width",
     "examples/08_stdlib/option_result",
+    "examples/08_stdlib/lib_vec",
     "examples/08_stdlib/net_loop"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan

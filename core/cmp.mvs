@@ -1,0 +1,31 @@
+/*
+ * core/cmp.mvs - comparisons in pure MVS (no CRT, no OS; --nostd safe)
+ *
+ *     import { cmp } from "core";
+ *     let m: i64 = cmp.max(a, b);        // generic: works for any ordered type
+ */
+
+// the smaller / larger of two values (generic: ints and floats)
+func min<T>(a: T, b: T) -> T {
+    if (a < b) { return a; }
+    return b;
+}
+
+func max<T>(a: T, b: T) -> T {
+    if (a > b) { return a; }
+    return b;
+}
+
+// x clamped into [lo, hi]
+func clamp<T>(x: T, lo: T, hi: T) -> T {
+    if (x < lo) { return lo; }
+    if (x > hi) { return hi; }
+    return x;
+}
+
+// -1, 0, or 1 by comparing a with b
+func ordering<T>(a: T, b: T) -> i64 {
+    if (a < b) { return 0 - 1; }
+    if (a > b) { return 1; }
+    return 0;
+}
