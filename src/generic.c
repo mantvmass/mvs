@@ -447,16 +447,24 @@ static EnumInfo *de_find(const char *name) {
     return NULL;
 }
 
-static Node *de_ident(const char *name, int line) {
-    Node *n = node_new(ND_IDENT, line);
+/* nodes built here must carry the SOURCE location they desugar; node_new's
+ * file default is whatever file parsed last, which is wrong for diagnostics */
+static Node *de_node(NodeKind kind, const Node *src) {
+    Node *n = node_new(kind, src ? src->line : 0);
+    if (src) { n->file = src->file; n->col = src->col; }
+    return n;
+}
+
+static Node *de_ident(const char *name, const Node *src) {
+    Node *n = de_node(ND_IDENT, src);
     n->name = strdup(name);
     n->type = TYPE_UNKNOWN;
     return n;
 }
 
-static Node *de_member(const char *base, const char *field, int line) {
-    Node *m = node_new(ND_MEMBER, line);
-    m->operand = de_ident(base, line);
+static Node *de_member(const char *base, const char *field, const Node *src) {
+    Node *m = de_node(ND_MEMBER, src);
+    m->operand = de_ident(base, src);
     m->name = strdup(field);
     return m;
 }
@@ -534,8 +542,8 @@ static Node *de_match(Node *n) {
 
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "__match%d", de_tmp++);
-    Node *blk = node_new(ND_BLOCK, n->line);
-    Node *decl = node_new(ND_VAR_DECL, n->line);
+    Node *blk = de_node(ND_BLOCK, n);
+    Node *decl = de_node(ND_VAR_DECL, n);
     decl->name = strdup(tmp);
     decl->type = TYPE_STRUCT;
     decl->type_name = strdup(ei->name);
@@ -550,19 +558,19 @@ static Node *de_match(Node *n) {
         for (int v = 0; v < ei->decl->nitems; v++)
             if (strcmp(ei->decl->items[v]->name, arm->name) == 0) { vi = v; break; }
         if (vi < 0) continue;                    /* already reported */
-        Node *iff = node_new(ND_IF, arm->line);
-        Node *cmp = node_new(ND_BINARY, arm->line);
+        Node *iff = de_node(ND_IF, arm);
+        Node *cmp = de_node(ND_BINARY, arm);
         cmp->op = TK_EQ;
-        cmp->lhs = de_member(tmp, "tag", arm->line);
-        cmp->rhs = node_new(ND_INT, arm->line);
+        cmp->lhs = de_member(tmp, "__tag", arm);
+        cmp->rhs = de_node(ND_INT, arm);
         cmp->rhs->int_val = vi;
         cmp->rhs->type = TYPE_I64;
         iff->cond = cmp;
-        Node *tb = node_new(ND_BLOCK, arm->line);
+        Node *tb = de_node(ND_BLOCK, arm);
         Node *variant = ei->decl->items[vi];
         for (int j = 0; j < arm->nitems && j < variant->nitems; j++) {
             Node *pt = variant->items[j];
-            Node *bd = node_new(ND_VAR_DECL, arm->line);
+            Node *bd = de_node(ND_VAR_DECL, arm);
             bd->name = strdup(arm->items[j]->name);
             bd->type = pt->type;
             bd->ptr = pt->ptr;
@@ -570,7 +578,7 @@ static Node *de_match(Node *n) {
             bd->sig = pt->sig ? node_clone(pt->sig) : NULL;
             char f[32];
             snprintf(f, sizeof(f), "v%d_%d", vi, j);
-            bd->operand = de_member(tmp, f, arm->line);
+            bd->operand = de_member(tmp, f, arm);
             node_add_item(tb, bd);
         }
         node_add_item(tb, arm->body);            /* the arm's block runs after the bindings */
@@ -585,16 +593,43 @@ static Node *de_match(Node *n) {
     return blk;
 }
 
-/* walk a subtree bottom-up, replacing every ND_MATCH with its desugared block */
+/* walk a subtree bottom-up, replacing every ND_MATCH with its desugared block
+ * and every BARE unit variant (Signal::Red without parens, Rust style) with a
+ * call to its constructor */
 static Node *de_walk(Node *n) {
     if (!n) return NULL;
+    /* the callee of a call must not be auto-wrapped (Cmd::Go(30) is already a
+     * constructor call); walk only the member's base */
+    if (n->kind == ND_CALL && n->operand && n->operand->kind == ND_MEMBER) {
+        n->operand->operand = de_walk(n->operand->operand);
+    } else {
+        n->operand = de_walk(n->operand);
+    }
     n->lhs = de_walk(n->lhs);   n->rhs = de_walk(n->rhs);
-    n->operand = de_walk(n->operand); n->cond = de_walk(n->cond);
+    n->cond = de_walk(n->cond);
     n->then_branch = de_walk(n->then_branch); n->else_branch = de_walk(n->else_branch);
     n->init = de_walk(n->init); n->step = de_walk(n->step);
     n->body = de_walk(n->body);
     for (int i = 0; i < n->nitems; i++) n->items[i] = de_walk(n->items[i]);
     if (n->kind == ND_MATCH) return de_match(n);
+    if (n->kind == ND_MEMBER && n->operand && n->operand->kind == ND_IDENT && n->name) {
+        EnumInfo *ei = de_find(n->operand->name);
+        if (ei) {
+            for (int v = 0; v < ei->decl->nitems; v++) {
+                if (strcmp(ei->decl->items[v]->name, n->name) != 0) continue;
+                if (ei->decl->items[v]->nitems == 0) {
+                    Node *call = de_node(ND_CALL, n);   /* Signal::Red -> Signal::Red() */
+                    call->operand = n;
+                    return call;
+                }
+                diag_print(n->file, n->line, n->col, "error",
+                           "variant '%s' carries %d value(s); construct it as %s::%s(...)",
+                           n->name, ei->decl->items[v]->nitems, ei->name, n->name);
+                de_err++;
+                return n;
+            }
+        }
+    }
     return n;
 }
 
@@ -633,17 +668,17 @@ int desugar_enums(Node *prog) {
     for (int i = 0; i < prog->nitems; i++) {
         Node *e = prog->items[i];
         if (e->kind != ND_ENUM_DECL || !e->name) continue;
-        Node *st = node_new(ND_STRUCT_DECL, e->line);
+        Node *st = de_node(ND_STRUCT_DECL, e);
         st->name = strdup(e->name);
-        Node *tagf = node_new(ND_PARAM, e->line);
-        tagf->name = strdup("tag");
+        Node *tagf = de_node(ND_PARAM, e);
+        tagf->name = strdup("__tag");     /* double underscore: not meant to be touched */
         tagf->type = TYPE_I64;
         node_add_item(st, tagf);
         for (int v = 0; v < e->nitems; v++) {
             Node *variant = e->items[v];
             for (int j = 0; j < variant->nitems; j++) {
                 Node *pt = variant->items[j];
-                Node *fld = node_new(ND_PARAM, variant->line);
+                Node *fld = de_node(ND_PARAM, variant);
                 char f[32];
                 snprintf(f, sizeof(f), "v%d_%d", v, j);
                 fld->name = strdup(f);
@@ -658,23 +693,23 @@ int desugar_enums(Node *prog) {
         /* one associated constructor per variant: Shape::Circle(p0) -> Shape */
         for (int v = 0; v < e->nitems; v++) {
             Node *variant = e->items[v];
-            Node *fn = node_new(ND_FUNC, variant->line);
+            Node *fn = de_node(ND_FUNC, variant);
             fn->name = strdup(variant->name);
             fn->is_method = 1;
             fn->ns = strdup(e->name);
             fn->type = TYPE_STRUCT;
             fn->type_name = strdup(e->name);
-            Node *lit = node_new(ND_STRUCT_LIT, variant->line);
+            Node *lit = de_node(ND_STRUCT_LIT, variant);
             lit->name = strdup(e->name);
-            Node *tset = node_new(ND_ASSIGN, variant->line);
-            tset->lhs = de_ident("tag", variant->line);
-            tset->rhs = node_new(ND_INT, variant->line);
+            Node *tset = de_node(ND_ASSIGN, variant);
+            tset->lhs = de_ident("__tag", variant);
+            tset->rhs = de_node(ND_INT, variant);
             tset->rhs->int_val = v;
             tset->rhs->type = TYPE_I64;
             node_add_item(lit, tset);
             for (int j = 0; j < variant->nitems; j++) {
                 Node *pt = variant->items[j];
-                Node *par = node_new(ND_PARAM, variant->line);
+                Node *par = de_node(ND_PARAM, variant);
                 char pn[16];
                 snprintf(pn, sizeof(pn), "p%d", j);
                 par->name = strdup(pn);
@@ -683,16 +718,16 @@ int desugar_enums(Node *prog) {
                 par->type_name = pt->type_name ? strdup(pt->type_name) : NULL;
                 par->sig = pt->sig ? node_clone(pt->sig) : NULL;
                 node_add_item(fn, par);
-                Node *fset = node_new(ND_ASSIGN, variant->line);
+                Node *fset = de_node(ND_ASSIGN, variant);
                 char f[32];
                 snprintf(f, sizeof(f), "v%d_%d", v, j);
-                fset->lhs = de_ident(f, variant->line);
-                fset->rhs = de_ident(pn, variant->line);
+                fset->lhs = de_ident(f, variant);
+                fset->rhs = de_ident(pn, variant);
                 node_add_item(lit, fset);
             }
-            Node *ret = node_new(ND_RETURN, variant->line);
+            Node *ret = de_node(ND_RETURN, variant);
             ret->operand = lit;
-            Node *body = node_new(ND_BLOCK, variant->line);
+            Node *body = de_node(ND_BLOCK, variant);
             node_add_item(body, ret);
             fn->body = body;
             node_add_item(prog, fn);

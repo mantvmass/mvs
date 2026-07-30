@@ -734,7 +734,7 @@ enum Shape {
 }
 
 let c: Shape = Shape::Circle(2.0);
-let n: Shape = Shape::Nothing();       // unit variants are constructor CALLS
+let n: Shape = Shape::Nothing;         // unit variants work bare, like Rust
 
 match (s) {
     Shape::Circle(r) => { io.out("circle {}", r); }
@@ -751,10 +751,14 @@ match (s) {
 - Under the hood an enum desugars into a tagged struct plus one associated
   constructor per variant, and match into an if-chain on the tag; the whole
   feature lives in the front end, so all three backends run it unchanged.
+- Unit variants may be written bare (`Shape::Nothing`) or as calls
+  (`Shape::Nothing()`); payload variants must be called (`Shape::Circle(r)`,
+  a bare `Shape::Circle` is a compile error).
 - Limits (v1): `match` is a statement (not an expression), patterns are one
   level deep (bind then match again for nesting), enums are not generic yet,
   and each variant's payload fields exist side by side in the struct (a sum
-  of sizes, not a union).
+  of sizes, not a union). Printing an enum with io.out shows its raw
+  desugared struct (a `__tag` field plus every payload slot).
 
 ---
 

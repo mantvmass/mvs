@@ -1,0 +1,8 @@
+//~ ERROR: variant 'Go' carries 1 value(s); construct it as Cmd::Go(...)
+// unit variants may be bare (Cmd::Stop), payload variants must be called
+enum Cmd { Go(i64), Stop }
+
+func main() -> i8 {
+    let bad: Cmd = Cmd::Go;
+    return 0;
+}

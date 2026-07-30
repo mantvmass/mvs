@@ -28,7 +28,7 @@ enum Signal { Red, Yellow, Green }
 func main() -> i8 {
     let c: Shape = Shape::Circle(2.0);
     let r: Shape = Shape::Rect(3.0, 4.0);
-    let n: Shape = Shape::Nothing();
+    let n: Shape = Shape::Nothing;      // unit variants work bare, Rust style
     io.out("circle area = {}", area(c));
     io.out("rect area = {}", area(r));
     io.out("nothing = {}", area(n));
@@ -36,7 +36,7 @@ func main() -> i8 {
     describe(r);
 
     // unit-variant enum in a nested match
-    let sig: Signal = Signal::Yellow();
+    let sig: Signal = Signal::Yellow;
     match (sig) {
         Signal::Red => { io.out("stop"); }
         Signal::Yellow => {
