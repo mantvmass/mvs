@@ -406,37 +406,41 @@ static int run_test_suite(const char *argv0, const char *path_arg) {
     }
 
     /* --- user test files (somefile.test.mvs) --- */
+    /* g_tf rows/names rows are formatted with an explicit "%.*s" precision: gcc's
+     * -Wformat-truncation at -O2 otherwise assumes a row could span the whole 2D
+     * array and flags every snprintf as possibly truncating */
+    int tfw = (int)sizeof(g_tf[0]) - 1;
     if (g_ntf > 0) printf("=== test files (*.test.mvs) ===\n");
     for (int i = 0; i < g_ntf; i++) {
         printf("--- %s\n", g_tf[i]);
         char *out = NULL;
         char tbase[PATHBUF + 320];
-        snprintf(tbase, sizeof(tbase), "%s", g_tf[i]);
+        snprintf(tbase, sizeof(tbase), "%.*s", tfw, g_tf[i]);
         tbase[strlen(tbase) - 4] = '\0';           /* strip ".mvs" -> base ends in ".test" */
 #ifdef _WIN32
-        snprintf(cmd, sizeof(cmd), "\"%s\" %s --test-main", argv0, g_tf[i]);
+        snprintf(cmd, sizeof(cmd), "\"%s\" %.*s --test-main", argv0, tfw, g_tf[i]);
         int crc = tr_capture(cmd, &out);
         if (crc != 0) { printf("  FAIL  (compile)\n%s", out); free(out); fail++; continue; }
         free(out);
-        char texe[PATHBUF + 330];
-        snprintf(texe, sizeof(texe), "%s.exe", tbase);
+        char texe[PATHBUF + 340];
+        snprintf(texe, sizeof(texe), "%.*s.exe", tfw, tbase);
         for (char *c = texe; *c; c++) if (*c == '/') *c = '\\';
         int rrc = tr_capture(texe, &out);
         printf("%s", out);
-        snprintf(texe, sizeof(texe), "%s.exe", tbase); remove(texe);
-        snprintf(texe, sizeof(texe), "%s.obj", tbase); remove(texe);
+        snprintf(texe, sizeof(texe), "%.*s.exe", tfw, tbase); remove(texe);
+        snprintf(texe, sizeof(texe), "%.*s.obj", tfw, tbase); remove(texe);
 #else
-        snprintf(cmd, sizeof(cmd), "\"%s\" %s --test-main --target elf64", argv0, g_tf[i]);
+        snprintf(cmd, sizeof(cmd), "\"%s\" %.*s --test-main --target elf64", argv0, tfw, g_tf[i]);
         int crc = tr_capture(cmd, &out);
         if (crc != 0) { printf("  FAIL  (compile)\n%s", out); free(out); fail++; continue; }
         free(out);
-        snprintf(cmd, sizeof(cmd), "gcc \"%s.o\" -o /tmp/mvs_selftest -no-pie -lm", tbase);
+        snprintf(cmd, sizeof(cmd), "gcc \"%.*s.o\" -o /tmp/mvs_selftest -no-pie -lm", tfw, tbase);
         int lrc = tr_capture(cmd, &out);
         if (lrc != 0) { printf("  FAIL  (link)\n%s", out); free(out); fail++; continue; }
         free(out);
         int rrc = tr_capture("/tmp/mvs_selftest", &out);
         printf("%s", out);
-        snprintf(cmd, sizeof(cmd), "%s.o", tbase); remove(cmd);
+        snprintf(cmd, sizeof(cmd), "%.*s.o", tfw, tbase); remove(cmd);
 #endif
         if (rrc != 0) { printf("  FAILED (exit %d)\n", rrc); fail++; }
         else pass++;
@@ -489,7 +493,7 @@ static int run_test_suite(const char *argv0, const char *path_arg) {
         snprintf(cmd, sizeof(cmd), "%s.o", path); remove(cmd);
 #endif
         /* diff against the golden */
-        snprintf(gold_path, sizeof(gold_path), "tests/expected/%s.txt", names[i]);
+        snprintf(gold_path, sizeof(gold_path), "tests/expected/%.*s.txt", TR_NAME_LEN - 1, names[i]);
         FILE *gf = fopen(gold_path, "rb");
         char *want = gf ? tr_read_all(gf) : strdup("");
         if (gf) fclose(gf);
@@ -508,7 +512,7 @@ static int run_test_suite(const char *argv0, const char *path_arg) {
     printf("=== compile-fail (expected errors) ===\n");
     int nfails = tr_list_dir("tests/compile_fail", ".mvs", names, TR_MAX_FILES);
     for (int i = 0; i < nfails; i++) {
-        snprintf(path, sizeof(path), "tests/compile_fail/%s.mvs", names[i]);
+        snprintf(path, sizeof(path), "tests/compile_fail/%.*s.mvs", TR_NAME_LEN - 1, names[i]);
         FILE *sf = fopen(path, "rb");
         if (!sf) { printf("  FAIL  %s (unreadable)\n", names[i]); fail++; continue; }
         char first[512] = "";
@@ -534,7 +538,7 @@ static int run_test_suite(const char *argv0, const char *path_arg) {
         free(out);
         /* remove anything a partially-successful compile left behind */
         char base[PATHBUF];
-        snprintf(base, sizeof(base), "tests/compile_fail/%s", names[i]);
+        snprintf(base, sizeof(base), "tests/compile_fail/%.*s", TR_NAME_LEN - 1, names[i]);
         const char *exts[] = { ".asm", ".obj", ".exe", ".o", ".s" };
         for (size_t e = 0; e < sizeof(exts) / sizeof(exts[0]); e++) {
             char junk[PATHBUF + 8];
