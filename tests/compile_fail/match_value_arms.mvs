@@ -1,0 +1,12 @@
+//~ ERROR: a match statement needs `pattern => { ... }` block arms
+// a match STATEMENT cannot use expression arms
+enum Signal { Red, Green }
+
+func main() -> i8 {
+    let s: Signal = Signal::Red;
+    match (s) {
+        Signal::Red => 1,
+        Signal::Green => 2,
+    }
+    return 0;
+}

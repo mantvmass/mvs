@@ -1,5 +1,5 @@
 /*
- * std/result.mvs - Result<T, E>: success (T) or error (E), Rust style
+ * std/result.mvs - Result<T, E>: success (T) or error (E), a TRUE Rust-style enum
  *
  * Usage:
  *     import { Result, Ok, Err } from "std/result";
@@ -9,60 +9,58 @@
  *         return Ok<i64, str>(x);
  *     }
  *
- *     let r: Result<i64, str> = parse_positive(5);
- *     if (r.is_ok()) { io.out("value = {}", r.unwrap()); }
- *     else { io.out("error = {}", r.unwrap_err()); }
+ *     match (parse_positive(v)) {           // bare Rust-style patterns work
+ *         Ok(n) => { io.out("value {}", n); }
+ *         Err(e) => { io.out("error {}", e); }
+ *     }
  *
- * Note: a Result carries TWO type parameters and only one side has a runtime
- * value, so Ok/Err take both types explicitly: Ok<i64, str>(v).
+ * The methods (is_ok/unwrap/unwrap_err/unwrap_or) remain for pipeline style.
+ * Variant order is part of the representation: Ok = 0, Err = 1.
  */
 
 extern func printf(fmt: str) -> i32;
 extern func exit(code: i32) -> void;
 
-struct Result<T, E> {
-    okf: bool;
-    val: T;
-    err: E;
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
 }
 
 impl Result<T, E> {
-    func is_ok(self: *Result<T, E>) -> bool { return self.okf; }
-    func is_err(self: *Result<T, E>) -> bool { return !self.okf; }
+    func is_ok(self: *Result<T, E>) -> bool { return self.__tag == 0; }
+    func is_err(self: *Result<T, E>) -> bool { return self.__tag == 1; }
 
     // the success value; aborts when this Result is an error
     func unwrap(self: *Result<T, E>) -> T {
-        if (!self.okf) {
+        if (self.__tag != 0) {
             printf("panic: called unwrap() on an Err value\n");
             exit(1);
         }
-        return self.val;
+        return self.v0_0;
     }
 
     // the error value; aborts when this Result is a success
     func unwrap_err(self: *Result<T, E>) -> E {
-        if (self.okf) {
+        if (self.__tag != 1) {
             printf("panic: called unwrap_err() on an Ok value\n");
             exit(1);
         }
-        return self.err;
+        return self.v1_0;
     }
 
     // the success value, or the fallback when this Result is an error
     func unwrap_or(self: *Result<T, E>, fallback: T) -> T {
-        if (self.okf) { return self.val; }
+        if (self.__tag == 0) { return self.v0_0; }
         return fallback;
     }
 }
 
 // a success (both types explicit: Ok<i64, str>(v))
 func Ok<T, E>(v: T) -> Result<T, E> {
-    let r: Result<T, E> = Result<T, E> { okf: true, val: v };
-    return r;
+    return Result<T, E>::Ok(v);
 }
 
 // an error (both types explicit: Err<i64, str>(e))
 func Err<T, E>(e: E) -> Result<T, E> {
-    let r: Result<T, E> = Result<T, E> { okf: false, err: e };
-    return r;
+    return Result<T, E>::Err(e);
 }

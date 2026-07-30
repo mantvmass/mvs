@@ -158,9 +158,14 @@ static Node *parse_struct_lit_body(Parser *p, char *name, int line) {
     return lit;
 }
 
-/* primary := INT | FLOAT | STRING | CHAR | true | false | IDENT | '(' expr ')' */
+/* primary := INT | FLOAT | STRING | CHAR | true | false | IDENT | '(' expr ')' | match */
 static Node *parse_primary(Parser *p) {
     Token t = p->cur;
+    if (check(p, TK_MATCH)) {
+        /* a match VALUE (arms are expressions); the desugar checks it appears
+         * only as an initializer, assignment source, or return value */
+        return parse_match(p);
+    }
     if (check(p, TK_INT)) {
         Node *n = node_new(ND_INT, t.line);
         n->int_val = t.int_val; n->type = TYPE_I64;
@@ -1078,6 +1083,16 @@ static Node *parse_enum(Parser *p) {
     advance(p); /* consume enum */
     if (!check(p, TK_IDENT)) error(p, "expected enum name");
     else { n->name = strdup(p->cur.lexeme); advance(p); }
+    /* generic enum: enum Option<T> { None, Some(T) } */
+    if (match(p, TK_LT)) {
+        do {
+            if (!check(p, TK_IDENT)) { error(p, "expected a generic parameter name"); break; }
+            if (n->ngen < 4) n->gen[n->ngen++] = strdup(p->cur.lexeme);
+            else error(p, "too many generic parameters (max 4)");
+            advance(p);
+        } while (match(p, TK_COMMA));
+        expect(p, TK_GT, "expected '>' after the generic parameters");
+    }
     expect(p, TK_LBRACE, "expected '{' after enum name");
     while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
         Node *v = node_new(ND_PARAM, p->cur.line);
@@ -1099,9 +1114,12 @@ static Node *parse_enum(Parser *p) {
     return n;
 }
 
-/* match_stmt := 'match' '(' expr ')' '{' arm* '}'
- * arm        := ENUM '::' VARIANT [ '(' IDENT (',' IDENT)* ')' ] '=>' block [',']
- *             | '_' '=>' block [',']  */
+/* match := 'match' '(' expr ')' '{' arm* '}'
+ * arm   := pattern '=>' ( block | expr ) [',']
+ * pattern := [ENUM '::'] VARIANT [ '(' IDENT (',' IDENT)* ')' ]   (bare = Rust style)
+ *          | '_'
+ * Block arms make a match STATEMENT; expression arms make a match VALUE
+ * (usable as an initializer, assignment source, or return value). */
 static Node *parse_match(Parser *p) {
     Node *n = node_new(ND_MATCH, p->cur.line);
     advance(p); /* consume match */
@@ -1114,12 +1132,17 @@ static Node *parse_match(Parser *p) {
         if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "_") == 0) {
             advance(p);                      /* the catch-all arm: '_' */
         } else if (check(p, TK_IDENT)) {
-            arm->type_name = strdup(p->cur.lexeme);   /* enum name */
+            /* either Enum::Variant or a bare Variant (resolved from the scrutinee) */
+            char *first = strdup(p->cur.lexeme);
             advance(p);
-            expect(p, TK_COLONCOLON, "expected '::' in the match pattern (Enum::Variant)");
-            if (!check(p, TK_IDENT)) { error(p, "expected a variant name after '::'"); break; }
-            arm->name = strdup(p->cur.lexeme);
-            advance(p);
+            if (match(p, TK_COLONCOLON)) {
+                arm->type_name = first;      /* qualified: Enum::Variant */
+                if (!check(p, TK_IDENT)) { error(p, "expected a variant name after '::'"); break; }
+                arm->name = strdup(p->cur.lexeme);
+                advance(p);
+            } else {
+                arm->name = first;           /* bare variant, Rust style */
+            }
             if (match(p, TK_LPAREN)) {       /* payload bindings: Circle(r), Rect(w, h) */
                 do {
                     if (!check(p, TK_IDENT)) { error(p, "expected a binding name in the pattern"); break; }
@@ -1131,12 +1154,15 @@ static Node *parse_match(Parser *p) {
                 expect(p, TK_RPAREN, "expected ')' after the pattern bindings");
             }
         } else {
-            error(p, "expected a match pattern (Enum::Variant(...) or _)");
+            error(p, "expected a match pattern (Enum::Variant(...), Variant(...), or _)");
             break;
         }
         expect(p, TK_FATARROW, "expected '=>' after the match pattern");
-        if (!check(p, TK_LBRACE)) { error(p, "expected a '{ ... }' block as the arm's body"); break; }
-        arm->body = parse_block(p);
+        if (check(p, TK_LBRACE)) {
+            arm->body = parse_block(p);      /* statement arm */
+        } else {
+            arm->operand = parse_expr(p);    /* value arm */
+        }
         match(p, TK_COMMA);                  /* trailing comma optional */
         node_add_item(n, arm);
         if (p->panic) synchronize(p);

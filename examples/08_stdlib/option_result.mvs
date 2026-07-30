@@ -1,5 +1,6 @@
-// Option<T> and Result<T, E> from std: absence and errors without C-style
-// sentinel values. Some(v) infers T; None/Ok/Err take the types explicitly.
+// Option<T> and Result<T, E> are TRUE Rust-style enums: match them with bare
+// patterns, or use the pipeline methods. Some(v) infers T; None/Ok/Err take
+// their types explicitly because there is nothing to infer from.
 import { io } from "std";
 import { Option, Some, None } from "std/option";
 import { Result, Ok, Err } from "std/result";
@@ -20,11 +21,33 @@ func parse_positive(x: i64) -> Result<i64, str> {
 
 func main() -> i8 {
     let data: [i64; 4] = [10, 20, 30, 40];
+
+    // matched Rust-style
+    match (find(data, 4, 30)) {
+        Some(i) => { io.out("found at {}", i); }
+        None => { io.out("not found"); }
+    }
+    match (find(data, 4, 99)) {
+        Some(i) => { io.out("found at {}", i); }
+        None => { io.out("not found"); }
+    }
+
+    // match as a VALUE
+    let label: str = match (parse_positive(21)) {
+        Ok(v) => "doubled ok",
+        Err(e) => e,
+    };
+    io.out("label = {}", label);
+    match (parse_positive(0 - 5)) {
+        Ok(v) => { io.out("value {}", v); }
+        Err(e) => { io.out("error: {}", e); }
+    }
+
+    // the method API still works
     let hit: Option<i64> = find(data, 4, 30);
     let miss: Option<i64> = find(data, 4, 99);
     io.out("hit: some={} at {}", hit.is_some(), hit.unwrap());
     io.out("miss: none={} fallback={}", miss.is_none(), miss.unwrap_or(0 - 1));
-
     let good: Result<i64, str> = parse_positive(21);
     let bad: Result<i64, str> = parse_positive(0 - 5);
     io.out("good: ok={} val={}", good.is_ok(), good.unwrap());

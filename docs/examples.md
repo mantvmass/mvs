@@ -107,6 +107,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `out_width.mvs` | io.out width/precision specs: `{:8.2}` `{:08}` `{:.3}` `{:04x}` |
 | `option_result.mvs` | `Option<T>` / `Result<T, E>`: Some/None/Ok/Err, unwrap and fallbacks |
 | `lib_vec.mvs` | `Vec<T>` growable array: push/get/set/pop over i64, f64, and struct elements |
+| `lib_map.mvs` | `HashMap<K, V>`: i64 and str keys, `get` returning `Option<V>`, growth + overwrite |
 | `threads.mvs` | OS threads + Mutex: 4 workers, mutex-exact counter, per-thread slots, join |
 
 ## 09_no_std: freestanding (OS / bare-metal, `--nostd`)

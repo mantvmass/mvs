@@ -59,15 +59,17 @@ a story for the name clash with std/option), `cell`, `sync::atomic` and
 
 ## Language
 
-- Pattern matching phase 2: `match` as an EXPRESSION, nested patterns, and
-  generic enums (which would let Option/Result become true enums). Phase 1 is
-  done: `enum` with payload variants + exhaustive `match` statements.
+- Pattern matching phase 3: nested patterns (`Some(Ok(v))`), literal and range
+  patterns, and `if` guards. Phases 1 and 2 are done: enums with payload
+  variants, exhaustive `match` statements AND expressions, bare patterns, and
+  generic enums (`Option`/`Result` are real enums now).
 - Concurrency, phase 2: channels (Mutex + condvar), atomics (compiler
   intrinsics), and a `scoped`-style join helper. Phase 1 (threads + Mutex,
   std/thread + std/sync) is done; Send/Sync-style compile-time race checking
   would need an ownership system and is not planned.
 - Generic struct extensions: pointer/array type arguments, `impl Trait for Vec<T>`.
-- A hash map on top of `Vec<T>` (which is done).
+- More collections: a `HashSet`, ordered maps, and `remove()` on `HashMap`
+  (tombstones). `Vec<T>` and `HashMap<K, V>` are done.
 - Arrays of arrays (`[[T; N]; M]`) and slice syntax (`&a[1..3]`).
 - Macros are deliberately NOT planned; the decorator form above plus intrinsics
   cover the current needs without a second language layer.

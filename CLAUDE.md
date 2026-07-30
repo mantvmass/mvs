@@ -137,10 +137,14 @@ pthreads via @compile; Linux links -lpthread; NO Send/Sync checking, documented)
 ENUMS + MATCH (Rust-style: payload variants, unit variants, `_`, exhaustiveness
 checking; desugared in `desugar_enums` right after module load into a tagged
 struct + associated constructors + if-chains, so no backend work; `::` documented
-as the Rust-style path separator).
+as the Rust-style path separator) · GENERIC ENUMS + match phase 2 (bare patterns
+resolved from the scrutinee's type, match as an EXPRESSION in let/assign/return;
+the desugar is scope-aware and infers through generic instances) · `Option`/
+`Result` rewritten as REAL enums · `std/map` (`HashMap<K, V>`: open addressing,
+`get` returns `Option<V>`, i64 and str keys via `map_hash`/`map_eq` overloads).
 
-**Remaining:** see [ROADMAP.md](ROADMAP.md) (`match`, a hash map, more `core`
-modules, macOS target).
+**Remaining:** see [ROADMAP.md](ROADMAP.md) (nested/guard patterns, more
+collections, more `core` modules, macOS target).
 
 ## Project-specific cautions (full list in docs/rules.md)
 

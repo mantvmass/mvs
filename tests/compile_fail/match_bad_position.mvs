@@ -1,0 +1,11 @@
+//~ ERROR: a match value may only initialize a variable, be assigned, or be returned
+// a match value cannot appear mid-expression
+import { io } from "std";
+
+enum Signal { Red, Green }
+
+func main() -> i8 {
+    let s: Signal = Signal::Red;
+    io.out("{}", 1 + match (s) { Signal::Red => 1, Signal::Green => 2 });
+    return 0;
+}

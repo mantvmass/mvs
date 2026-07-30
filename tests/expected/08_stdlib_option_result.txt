@@ -1,3 +1,7 @@
+found at 2
+not found
+label = doubled ok
+error: negative input
 hit: some=1 at 2
 miss: none=1 fallback=-1
 good: ok=1 val=42

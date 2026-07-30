@@ -1,0 +1,85 @@
+// unit tests for HashMap<K, V> and the enum-based Option/Result
+import { test } from "std";
+import { HashMap } from "std/map";
+import { Option, Some, None } from "std/option";
+import { Result, Ok, Err } from "std/result";
+
+@test
+func map_int_keys() -> void {
+    let m: HashMap<i64, i64> = HashMap<i64, i64>::new();
+    test.ok(m.is_empty());
+    let i: i64 = 0;
+    while (i < 200) {                 // forces several grow + rehash rounds
+        m.insert(i, i * 3);
+        i = i + 1;
+    }
+    test.eq(m.len() as i64, 200);
+    test.eq(m.get(0).unwrap(), 0);
+    test.eq(m.get(199).unwrap(), 597);
+    test.ok(m.contains(150));
+    test.ok(!m.contains(200));
+    m.insert(150, 0 - 1);             // overwrite keeps the length
+    test.eq(m.get(150).unwrap(), 0 - 1);
+    test.eq(m.len() as i64, 200);
+    m.drop();
+}
+
+@test
+func map_str_keys() -> void {
+    let m: HashMap<str, i64> = HashMap<str, i64>::new();
+    m.insert("one", 1);
+    m.insert("two", 2);
+    m.insert("three", 3);
+    test.eq(m.get("two").unwrap(), 2);
+    test.ok(m.contains("three"));
+    test.ok(!m.contains("four"));
+    test.eq(m.len() as i64, 3);
+    m.drop();
+}
+
+@test
+func map_missing_is_none() -> void {
+    let m: HashMap<i64, str> = HashMap<i64, str>::new();
+    m.insert(7, "seven");
+    let hit: str = match (m.get(7)) {
+        Some(v) => v,
+        None => "missing",
+    };
+    let miss: str = match (m.get(8)) {
+        Some(v) => v,
+        None => "missing",
+    };
+    test.eq(hit, "seven");
+    test.eq(miss, "missing");
+    m.drop();
+}
+
+@test
+func option_matches_like_rust() -> void {
+    let a: Option<i64> = Some(5);
+    let n: i64 = match (a) {
+        Some(v) => v * 2,
+        None => 0,
+    };
+    test.eq(n, 10);
+    let b: Option<i64> = None<i64>();
+    match (b) {
+        Some(v) => { test.fail("expected None"); }
+        None => { test.ok(true); }
+    }
+}
+
+@test
+func result_matches_like_rust() -> void {
+    let ok: Result<i64, str> = Ok<i64, str>(3);
+    let err: Result<i64, str> = Err<i64, str>("bad");
+    match (ok) {
+        Ok(v) => { test.eq(v, 3); }
+        Err(e) => { test.fail(e); }
+    }
+    let msg: str = match (err) {
+        Ok(v) => "ok",
+        Err(e) => e,
+    };
+    test.eq(msg, "bad");
+}

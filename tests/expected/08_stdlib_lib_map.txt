@@ -1,0 +1,7 @@
+len = 100
+12^2 = 144
+has 99 = 1 has 100 = 0
+after overwrite = 0 len = 100
+jp -> Tokyo
+de -> (none)
+len = 3 empty = 0

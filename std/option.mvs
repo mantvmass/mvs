@@ -1,62 +1,59 @@
 /*
- * std/option.mvs - Option<T>: a value that may be absent (Rust style)
+ * std/option.mvs - Option<T>: a value that may be absent (a TRUE Rust-style enum)
  *
  * Usage:
  *     import { Option, Some, None } from "std/option";
  *
- *     func find(xs: *i64, n: i64, want: i64) -> Option<i64> {
- *         let i: i64 = 0;
- *         while (i < n) {
- *             if (xs[i] == want) { return Some(i); }
- *             i = i + 1;
- *         }
- *         return None<i64>();
+ *     func find(...) -> Option<i64> {
+ *         if (found) { return Some(i); }    // T inferred from the argument
+ *         return None<i64>();               // nothing to infer: explicit
  *     }
  *
- *     let r: Option<i64> = find(data, 4, 30);
- *     if (r.is_some()) { io.out("found at {}", r.unwrap()); }
+ *     let r: Option<i64> = find(...);
+ *     match (r) {                           // bare Rust-style patterns work
+ *         Some(v) => { io.out("found {}", v); }
+ *         None => { io.out("missing"); }
+ *     }
  *
- * Note: Some(v) infers T from the value; None has no value to infer from, so
- * it takes the type explicitly: None<i64>().
+ * The methods (is_some/unwrap/unwrap_or) remain for pipeline style.
+ * Variant order is part of the representation: None = 0, Some = 1.
  */
 
 extern func printf(fmt: str) -> i32;
 extern func exit(code: i32) -> void;
 
-struct Option<T> {
-    has: bool;
-    val: T;
+enum Option<T> {
+    None,
+    Some(T),
 }
 
 impl Option<T> {
     // does this Option hold a value?
-    func is_some(self: *Option<T>) -> bool { return self.has; }
-    func is_none(self: *Option<T>) -> bool { return !self.has; }
+    func is_some(self: *Option<T>) -> bool { return self.__tag == 1; }
+    func is_none(self: *Option<T>) -> bool { return self.__tag == 0; }
 
     // the value; aborts the program when there is none
     func unwrap(self: *Option<T>) -> T {
-        if (!self.has) {
+        if (self.__tag == 0) {
             printf("panic: called unwrap() on a None value\n");
             exit(1);
         }
-        return self.val;
+        return self.v1_0;
     }
 
     // the value, or the fallback when there is none
     func unwrap_or(self: *Option<T>, fallback: T) -> T {
-        if (self.has) { return self.val; }
+        if (self.__tag == 1) { return self.v1_0; }
         return fallback;
     }
 }
 
 // a present value (T inferred from the argument)
 func Some<T>(v: T) -> Option<T> {
-    let o: Option<T> = Option<T> { has: true, val: v };
-    return o;
+    return Option<T>::Some(v);
 }
 
 // an absent value (give T explicitly: None<i64>())
 func None<T>() -> Option<T> {
-    let o: Option<T> = Option<T> { has: false };
-    return o;
+    return Option<T>::None;
 }

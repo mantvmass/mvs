@@ -544,9 +544,10 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `process` | `run(cmd)` (shell command), `pid()`, `exit(code)` (the extern, reached through the namespace) |
 | `rand` | xorshift64 in pure MVS: `seed`/`next`/`range(lo, hi)`/`unit()`; the same seed gives the SAME sequence on every platform |
 | `test` | assertions for `*.test.mvs` files: `ok(cond)`, `eq(got, want)` (i64/f64/str overloads), `near(got, want, eps)`, `fail(msg)`; see section 4.14 |
-| `option` | `Option<T>` + `Some(v)` / `None<T>()` + `is_some`/`is_none`/`unwrap`/`unwrap_or`; see section 4.15 |
-| `result` | `Result<T, E>` + `Ok<T, E>(v)` / `Err<T, E>(e)` + `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` |
+| `option` | `Option<T>`, a real enum: `Some(v)` / `None<T>()`, matchable with bare patterns, plus `is_some`/`is_none`/`unwrap`/`unwrap_or` |
+| `result` | `Result<T, E>`, a real enum: `Ok<T, E>(v)` / `Err<T, E>(e)` + `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` |
 | `vec` | `Vec<T>` growable array: `Vec<i64>::new()` + `push`/`get`/`set`/`pop`/`len`/`is_empty`/`clear`/`drop`; bounds-checked, any element type incl. structs |
+| `map` | `HashMap<K, V>` (open addressing, linear probing): `HashMap<str, i64>::new()` + `insert`/`get` (returns `Option<V>`)/`contains`/`len`/`is_empty`/`drop`; keys `i64` and `str` |
 | `thread` | OS threads: `spawn(f, arg)` / `join(h)` with `func(*u8) -> *u8` workers (CreateThread vs pthreads via `@compile`); see section 4.16 |
 | `sync` | `Mutex` (`Mutex::new()` or a zeroed one, `lock`/`unlock`; SRWLOCK vs pthread_mutex) |
 
@@ -761,11 +762,42 @@ match (s) {
 - Unit variants may be written bare (`Shape::Nothing`) or as calls
   (`Shape::Nothing()`); payload variants must be called (`Shape::Circle(r)`,
   a bare `Shape::Circle` is a compile error).
-- Limits (v1): `match` is a statement (not an expression), patterns are one
-  level deep (bind then match again for nesting), enums are not generic yet,
-  and each variant's payload fields exist side by side in the struct (a sum
-  of sizes, not a union). Printing an enum with io.out shows its raw
-  desugared struct (a `__tag` field plus every payload slot).
+
+**Patterns may be bare** when the scrutinee's type names the enum, exactly like
+Rust, and **match is also an expression**:
+
+```txt
+let label: str = match (find(xs, 30)) {
+    Some(i) => "found",          // bare patterns, no Option:: prefix
+    None => "missing",
+};
+
+func code(s: Signal) -> i64 {
+    return match (s) {           // as a return value
+        Signal::Red => 1,
+        Signal::Yellow => 2,
+        Signal::Green => 3,
+    };
+}
+wait = match (s) { ... };        // as an assignment source
+```
+
+Value matches use `pattern => expression` arms; statement matches use
+`pattern => { ... }` blocks. A match value may initialize a variable, be
+assigned, or be returned (not appear mid-expression).
+
+**Enums may be generic**, which is how `Option`/`Result` are defined:
+
+```txt
+enum MyOpt<T> { Nothing, Just(T) }
+let a: MyOpt<i64> = MyOpt<i64>::Just(21);
+match (a) { Just(v) => { ... } Nothing => { ... } }
+```
+
+- Limits (v1): patterns are one level deep (bind then match again for nesting),
+  and each variant's payload fields exist side by side in the struct (a sum of
+  sizes, not a union). Printing an enum with io.out shows its raw desugared
+  struct (a `__tag` field plus every payload slot).
 
 ---
 

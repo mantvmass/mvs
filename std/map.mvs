@@ -1,0 +1,147 @@
+/*
+ * std/map.mvs - HashMap<K, V>: open-addressing hash table (linear probing)
+ *
+ * Usage:
+ *     import { io } from "std";
+ *     import { HashMap } from "std/map";
+ *     import { Option } from "std/option";
+ *
+ *     let ages: HashMap<str, i64> = HashMap<str, i64>::new();
+ *     ages.insert("ada", 36);
+ *     match (ages.get("ada")) {
+ *         Some(v) => { io.out("ada is {}", v); }
+ *         None => { io.out("unknown"); }
+ *     }
+ *     ages.drop();
+ *
+ * Key types: i64 and str (each needs a map_hash/map_eq overload below; add a
+ * pair to support another key type). Values may be any type incl. structs.
+ * Grows by doubling at 70% load. No remove() yet (see ROADMAP).
+ */
+import { Option, Some, None } from "std/option";
+
+extern func realloc(p: *u8, n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func strcmp(a: str, b: str) -> i32;
+
+// --- per-key-type hash + equality (overloads; a template method's call picks
+// the right one for each instantiated key type) ---
+
+func map_hash(k: i64) -> u64 {
+    let x: u64 = k as u64;                // splitmix64 finalizer
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EB;
+    return x ^ (x >> 31);
+}
+
+func map_hash(k: str) -> u64 {
+    let p: *u8 = k as *u8;                // FNV-1a over the bytes
+    let h: u64 = 0xCBF29CE484222325;
+    let i: usize = 0;
+    while (p[i] != 0) {
+        h = (h ^ p[i]) * 0x100000001B3;
+        i = i + 1;
+    }
+    return h;
+}
+
+func map_eq(a: i64, b: i64) -> bool { return a == b; }
+func map_eq(a: str, b: str) -> bool { return strcmp(a, b) == 0; }
+
+struct HashMap<K, V> {
+    keys: *K;
+    vals: *V;
+    state: *u8;      // 0 = empty, 1 = occupied
+    cap: usize;
+    len: usize;
+}
+
+impl HashMap<K, V> {
+    // an empty map: let m: HashMap<i64, str> = HashMap<i64, str>::new();
+    func new() -> HashMap<K, V> {
+        let m: HashMap<K, V> = HashMap<K, V> { keys: 0, vals: 0, state: 0, cap: 0, len: 0 };
+        return m;
+    }
+
+    func len(self: *HashMap<K, V>) -> usize { return self.len; }
+    func is_empty(self: *HashMap<K, V>) -> bool { return self.len == 0; }
+
+    // element sizes via scaled pointer arithmetic (no sizeof operator needed)
+    func ksize(self: *HashMap<K, V>) -> usize {
+        return ((self.keys + 1) as usize) - (self.keys as usize);
+    }
+    func vsize(self: *HashMap<K, V>) -> usize {
+        return ((self.vals + 1) as usize) - (self.vals as usize);
+    }
+
+    // double the capacity and re-insert every occupied slot
+    func grow(self: *HashMap<K, V>) -> void {
+        let ocap: usize = self.cap;
+        let okeys: *K = self.keys;
+        let ovals: *V = self.vals;
+        let ostate: *u8 = self.state;
+        let ncap: usize = ocap * 2;
+        if (ncap == 0) { ncap = 8; }
+        self.keys = realloc(0, ncap * self.ksize()) as *K;
+        self.vals = realloc(0, ncap * self.vsize()) as *V;
+        self.state = realloc(0, ncap);
+        let z: usize = 0;
+        while (z < ncap) { self.state[z] = 0; z = z + 1; }
+        self.cap = ncap;
+        self.len = 0;
+        let i: usize = 0;
+        while (i < ocap) {
+            if (ostate[i] == 1) { self.insert(okeys[i], ovals[i]); }
+            i = i + 1;
+        }
+        if (ocap > 0) {
+            free(okeys as *u8);
+            free(ovals as *u8);
+            free(ostate);
+        }
+    }
+
+    // insert or overwrite
+    func insert(self: *HashMap<K, V>, k: K, v: V) -> void {
+        if (self.len * 10 >= self.cap * 7) { self.grow(); }   // incl. the empty map
+        let i: usize = map_hash(k) % self.cap;
+        while (self.state[i] == 1) {
+            if (map_eq(self.keys[i], k)) {
+                self.vals[i] = v;                              // overwrite existing key
+                return;
+            }
+            i = (i + 1) % self.cap;
+        }
+        self.state[i] = 1;
+        self.keys[i] = k;
+        self.vals[i] = v;
+        self.len = self.len + 1;
+    }
+
+    // look a key up; absence is a value, not a sentinel
+    func get(self: *HashMap<K, V>, k: K) -> Option<V> {
+        if (self.cap == 0) { return None<V>(); }
+        let i: usize = map_hash(k) % self.cap;
+        while (self.state[i] == 1) {
+            if (map_eq(self.keys[i], k)) { return Some(self.vals[i]); }
+            i = (i + 1) % self.cap;
+        }
+        return None<V>();
+    }
+
+    func contains(self: *HashMap<K, V>, k: K) -> bool {
+        let r: Option<V> = self.get(k);
+        return r.is_some();
+    }
+
+    // release the buffers (manual memory management, like everything in MVS)
+    func drop(self: *HashMap<K, V>) -> void {
+        if (self.cap > 0) {
+            free(self.keys as *u8);
+            free(self.vals as *u8);
+            free(self.state);
+        }
+        self.keys = 0; self.vals = 0; self.state = 0;
+        self.cap = 0; self.len = 0;
+    }
+}

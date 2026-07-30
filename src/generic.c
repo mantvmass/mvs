@@ -52,6 +52,46 @@ static int type_impls_all(Node *prog, const char *sname, const char *bounds, cha
 
 static int mono_err; /* number of trait bound violation errors (reset in monomorphize) */
 
+/* forward declarations for the generic-name utilities defined further down */
+static int subst_in_cname(const char *src, Bind *gmap, int ngmap, char *out, size_t on);
+static int gs_split(const char *cname, char *base, size_t bn, char *args[4]);
+
+/* Specialize a TEMPLATE method's declared type name for a concrete receiver:
+ * decl_name "Option<V>" + method of HashMap<K,V> + receiver "HashMap<i64,str>"
+ * yields "Option<str>" (and a bare "V" yields "str"). Returns a fresh string,
+ * or NULL when nothing changes. */
+static char *spec_type_name(const char *decl_name, Node *tmpl_method, const char *recv_canon) {
+    char base[128];
+    char *args[4];
+    int nargs = gs_split(recv_canon, base, sizeof(base), args);
+    if (nargs <= 0) return NULL;
+    char *out = NULL;
+    for (int i = 0; i < tmpl_method->ngen && i < nargs; i++)
+        if (tmpl_method->gen[i] && strcmp(decl_name, tmpl_method->gen[i]) == 0) {
+            out = strdup(args[i]);
+            break;
+        }
+    if (!out && strchr(decl_name, '<')) {
+        Bind bm[4];
+        CType ts[4];
+        int nb = 0;
+        for (int i = 0; i < tmpl_method->ngen && i < nargs; i++) {
+            DataType p = datatype_from_name(args[i]);
+            if (p != TYPE_UNKNOWN) { ts[nb].base = p; ts[nb].sname = NULL; }
+            else { ts[nb].base = TYPE_STRUCT; ts[nb].sname = args[i]; }
+            ts[nb].ptr = 0; ts[nb].sig = NULL; ts[nb].arr = 0;
+            bm[nb].name = tmpl_method->gen[i];
+            bm[nb].t = ts[nb];
+            bm[nb].is_const = 0; bm[nb].decl = NULL; bm[nb].used = 0;
+            nb++;
+        }
+        char buf[512];
+        if (subst_in_cname(decl_name, bm, nb, buf, sizeof(buf))) out = strdup(buf);
+    }
+    for (int i = 0; i < nargs; i++) free(args[i]);
+    return out;
+}
+
 /* Find a trait declaration by name */
 static Node *find_trait(Node *prog, const char *name) {
     for (int i = 0; i < prog->nitems; i++)
@@ -265,9 +305,23 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
                     else for (int i = nmap - 1; i >= 0; i--)
                         if (strcmp(map[i].name, callee->operand->name) == 0) { prim_recv = 1; break; }
                 }
+                /* a canonical generic receiver ("HashMap<i64,str>") holds its methods
+                 * under the TEMPLATE name until instantiation; remember the arguments
+                 * so the declared return type can be specialized below */
+                char gbase[128];
+                const char *recv_canon = NULL;
                 if (prim_recv) scope = datatype_name(bt.base);
-                else if (bt.base == TYPE_STRUCT && bt.sname) scope = bt.sname;
-                else if (callee->operand->kind == ND_IDENT) scope = callee->operand->name;
+                else if (bt.base == TYPE_STRUCT && bt.sname) {
+                    scope = bt.sname;
+                    const char *lt = strchr(bt.sname, '<');
+                    if (lt) {
+                        size_t bl = (size_t)(lt - bt.sname);
+                        if (bl >= sizeof(gbase)) bl = sizeof(gbase) - 1;
+                        memcpy(gbase, bt.sname, bl); gbase[bl] = '\0';
+                        scope = gbase;
+                        recv_canon = bt.sname;
+                    }
+                } else if (callee->operand->kind == ND_IDENT) scope = callee->operand->name;
                 Node *best = NULL;
                 for (int i = 0; i < prog->nitems; i++) {
                     Node *f = prog->items[i];
@@ -275,7 +329,20 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
                     if (scope && f->ns && strcmp(f->ns, scope) == 0) { best = f; break; }
                     if (!best) best = f;
                 }
-                if (best) { CType ct = { best->type, best->ptr, best->type_name, NULL, 0 }; return ct; }
+                if (best) {
+                    CType ct = { best->type, best->ptr, best->type_name, NULL, 0 };
+                    /* specialize a template method's return type for this instance:
+                     * HashMap<i64,str>::get declares Option<V> -> Option<str> */
+                    if (recv_canon && best->ngen > 0 && ct.base == TYPE_STRUCT && ct.sname) {
+                        char *spec = spec_type_name(ct.sname, best, recv_canon);
+                        if (spec) {
+                            DataType prim = datatype_from_name(spec);
+                            if (prim != TYPE_UNKNOWN) { ct.base = prim; ct.sname = NULL; }
+                            else ct.sname = spec;
+                        }
+                    }
+                    return ct;
+                }
             }
             break;
         }
@@ -422,14 +489,20 @@ static void substitute(Node *n, Bind *gmap, int ngmap) {
 
 /* ---------- enums + match (Rust-style, desugared before every other pass) ----------
  *
- * enum Shape { Circle(f64), Rect(f64, f64), Nothing }
- * becomes a tagged struct + associated constructors:
- *     struct Shape { tag: i64; v0_0: f64; v1_0: f64; v1_1: f64; }
- *     impl-style: Shape::Circle(p0) -> Shape { tag: 0, v0_0: p0 } ...
- * and every `match (e) { Shape::Circle(r) => {..} ... }` becomes
- *     { let __matchN: Shape = e;  if (__matchN.tag == 0) { let r = __matchN.v0_0; .. } elseif ... }
- * Exhaustiveness is checked here: without a `_` arm, every variant must appear.
- * Later passes and all three backends only ever see plain structs and ifs. */
+ * enum Shape { Circle(f64), ... }            -> tagged struct + constructors
+ * enum Option<T> { None, Some(T) }           -> struct TEMPLATE + template constructors
+ * match (e) { Some(v) => ..., None => ... }  -> if/else chain on __tag with typed bindings
+ *
+ * The pass is SCOPE-AWARE: bare patterns (Some(v) without the enum prefix) and
+ * generic enums need the scrutinee's TYPE, inferred with the same machinery as
+ * every other front-end pass. A match whose arms are expressions is a VALUE;
+ * it may appear as an initializer, an assignment source, or a return value and
+ * is distributed into the arms (target = arm-expr / return arm-expr).
+ * Exhaustiveness is checked here (without '_', every variant must appear), and
+ * the final arm of an exhaustive match becomes the else branch so the
+ * missing-return analysis accepts all-return matches. */
+
+static int gs_split(const char *cname, char *base, size_t bn, char *args[4]);   /* defined below */
 
 #define MAX_ENUMS 64
 typedef struct {
@@ -445,6 +518,25 @@ static EnumInfo *de_find(const char *name) {
     for (int i = 0; i < g_num_enums; i++)
         if (strcmp(g_enum_tab[i].name, name) == 0) return &g_enum_tab[i];
     return NULL;
+}
+
+/* registry lookup tolerating canonical instance names: "Option<i64>" finds the
+ * Option template and (optionally) hands back the argument texts */
+static EnumInfo *de_find_base(const char *name, char *args_out[4], int *nargs_out) {
+    if (nargs_out) *nargs_out = 0;
+    if (!strchr(name, '<')) return de_find(name);
+    char base[128];
+    char *args[4];
+    int na = gs_split(name, base, sizeof(base), args);
+    if (na < 0) return NULL;
+    EnumInfo *ei = de_find(base);
+    if (ei && args_out && nargs_out) {
+        for (int i = 0; i < na; i++) args_out[i] = args[i];
+        *nargs_out = na;
+    } else {
+        for (int i = 0; i < na; i++) free(args[i]);
+    }
+    return ei;
 }
 
 /* nodes built here must carry the SOURCE location they desugar; node_new's
@@ -469,15 +561,131 @@ static Node *de_member(const char *base, const char *field, const Node *src) {
     return m;
 }
 
-/* build the replacement block for one ND_MATCH (children already desugared) */
-static Node *de_match(Node *n) {
+/* substitute the enum's generic parameter names in a payload type text:
+ * exact "T" -> the argument text, composite "Vec<T>" -> textual replacement */
+static char *de_subst_ptype(const char *src, Node *edecl, char *args[4], int nargs) {
+    for (int i = 0; i < edecl->ngen && i < nargs; i++)
+        if (strcmp(src, edecl->gen[i]) == 0) return strdup(args[i]);
+    if (strchr(src, '<')) {
+        Bind bm[4];
+        CType ts[4];
+        int nb = 0;
+        for (int i = 0; i < edecl->ngen && i < nargs; i++) {
+            DataType p = datatype_from_name(args[i]);
+            if (p != TYPE_UNKNOWN) { ts[nb].base = p; ts[nb].sname = NULL; }
+            else { ts[nb].base = TYPE_STRUCT; ts[nb].sname = args[i]; }
+            ts[nb].ptr = 0; ts[nb].sig = NULL; ts[nb].arr = 0;
+            bm[nb].name = edecl->gen[i];
+            bm[nb].t = ts[nb];
+            nb++;
+        }
+        char buf[512];
+        if (subst_in_cname(src, bm, nb, buf, sizeof(buf))) return strdup(buf);
+    }
+    return strdup(src);
+}
+
+/* fill a binding declaration's type from a payload type node, substituting the
+ * enum's generic parameters with the scrutinee's argument texts */
+static void de_bind_type(Node *bd, Node *pt, Node *edecl, char *args[4], int nargs) {
+    bd->ptr = pt->ptr;
+    bd->sig = pt->sig ? node_clone(pt->sig) : NULL;
+    if (pt->type == TYPE_STRUCT && pt->type_name && edecl->ngen > 0) {
+        char *txt = de_subst_ptype(pt->type_name, edecl, args, nargs);
+        DataType p = datatype_from_name(txt);
+        if (p != TYPE_UNKNOWN && bd->ptr == 0) {
+            bd->type = p;
+            bd->type_name = NULL;
+            free(txt);
+        } else if (p != TYPE_UNKNOWN) {          /* pointer to a primitive: *T with T=i64 */
+            bd->type = p;
+            bd->type_name = NULL;
+            free(txt);
+        } else {
+            bd->type = TYPE_STRUCT;
+            bd->type_name = txt;
+        }
+        return;
+    }
+    bd->type = pt->type;
+    bd->type_name = pt->type_name ? strdup(pt->type_name) : NULL;
+}
+
+static Node *de_walk(Node *prog, Node *n, Bind *map, int *nmap);
+
+/* insert child into parent->items at index idx (shifting the rest right) */
+static void de_block_insert(Node *parent, int idx, Node *child) {
+    node_add_item(parent, child);                /* grow by one */
+    for (int i = parent->nitems - 1; i > idx; i--)
+        parent->items[i] = parent->items[i - 1];
+    parent->items[idx] = child;
+}
+
+/* Desugar one ND_MATCH. Children are walked HERE (bindings must be in scope
+ * for the arm bodies). Modes:
+ *   assign_target != NULL -> value match; each arm assigns its expression
+ *   ret_mode != 0         -> value match; each arm returns its expression
+ *   neither               -> statement match; arms must be blocks */
+static Node *de_match(Node *prog, Node *n, Bind *map, int *nmap, Node *assign_target, int ret_mode) {
+    int value_mode = (assign_target != NULL) || ret_mode;
+    n->cond = de_walk(prog, n->cond, map, nmap);
+
+    /* resolve the enum: a qualified arm names it; otherwise the scrutinee's type */
     EnumInfo *ei = NULL;
+    char *gargs[4];
+    int ngargs = 0;
+    CType ct = infer(prog, n->cond, map, *nmap);
+    EnumInfo *cei = NULL;
+    if (ct.ptr == 0 && ct.base == TYPE_STRUCT && ct.sname)
+        cei = de_find_base(ct.sname, gargs, &ngargs);
+    for (int i = 0; i < n->nitems && !ei; i++)
+        if (n->items[i]->type_name) {
+            ei = de_find(n->items[i]->type_name);
+            if (!ei) {
+                diag_print(n->items[i]->file, n->items[i]->line, n->items[i]->col, "error",
+                           "unknown enum '%s' in match pattern", n->items[i]->type_name);
+                de_err++;
+                return n;
+            }
+        }
+    if (!ei) ei = cei;
+    if (!ei) {
+        diag_print(n->file, n->line, n->col, "error",
+                   "cannot infer the enum type of this match; qualify a pattern as Enum::Variant");
+        de_err++;
+        return n;
+    }
+    if (cei && ei != cei) {
+        diag_print(n->file, n->line, n->col, "error",
+                   "the match patterns name enum '%s' but the value is of enum '%s'",
+                   ei->name, cei->name);
+        de_err++;
+        return n;
+    }
+    if (ei->decl->ngen > 0 && ngargs != ei->decl->ngen) {
+        diag_print(n->file, n->line, n->col, "error",
+                   "cannot infer the generic arguments of enum '%s' for this match", ei->name);
+        diag_help("give the scrutinee an annotated type, e.g. let r: %s<...> = ...", ei->name);
+        de_err++;
+        return n;
+    }
+
+    /* validate the arms */
     Node *def_arm = NULL;
     int seen[64] = {0};
-
     for (int i = 0; i < n->nitems; i++) {
         Node *arm = n->items[i];
-        if (!arm->name) {                       /* the '_' arm */
+        if (value_mode && arm->body && !arm->operand) {
+            diag_print(arm->file, arm->line, arm->col, "error",
+                       "a match used as a value needs `pattern => expression` arms");
+            de_err++;
+        }
+        if (!value_mode && arm->operand) {
+            diag_print(arm->file, arm->line, arm->col, "error",
+                       "a match statement needs `pattern => { ... }` block arms (or use its value)");
+            de_err++;
+        }
+        if (!arm->name) {
             if (def_arm) {
                 diag_print(arm->file, arm->line, arm->col, "error", "duplicate '_' arm in match");
                 de_err++;
@@ -485,17 +693,11 @@ static Node *de_match(Node *n) {
             def_arm = arm;
             continue;
         }
-        EnumInfo *e2 = de_find(arm->type_name);
-        if (!e2) {
+        if (arm->type_name && strcmp(arm->type_name, ei->name) != 0) {
+            EnumInfo *other = de_find(arm->type_name);
             diag_print(arm->file, arm->line, arm->col, "error",
-                       "unknown enum '%s' in match pattern", arm->type_name);
-            de_err++;
-            continue;
-        }
-        if (!ei) ei = e2;
-        else if (ei != e2) {
-            diag_print(arm->file, arm->line, arm->col, "error",
-                       "match arms mix enums '%s' and '%s'", ei->name, e2->name);
+                       other ? "match arms mix enums '%s' and '%s'" : "unknown enum '%s' in match pattern (mixed with '%s')",
+                       other ? ei->name : arm->type_name, other ? other->name : ei->name);
             de_err++;
             continue;
         }
@@ -522,38 +724,32 @@ static Node *de_match(Node *n) {
             de_err++;
         }
     }
-    if (!ei) {
-        diag_print(n->file, n->line, n->col, "error",
-                   "a match needs at least one Enum::Variant arm");
-        de_err++;
-        return n;
-    }
     if (!def_arm) {                              /* Rust-style exhaustiveness */
         for (int v = 0; v < ei->decl->nitems; v++) {
             if (!seen[v]) {
                 diag_print(n->file, n->line, n->col, "error",
                            "match on enum '%s' is not exhaustive: variant '%s' is not covered",
                            ei->name, ei->decl->items[v]->name);
-                diag_help("add an arm for it, or a final catch-all `_ => { ... }`");
+                diag_help("add an arm for it, or a final catch-all `_ => ...`");
                 de_err++;
             }
         }
     }
 
+    /* the scrutinee temp keeps the CANONICAL type for generic enums */
     char tmp[32];
     snprintf(tmp, sizeof(tmp), "__match%d", de_tmp++);
     Node *blk = de_node(ND_BLOCK, n);
     Node *decl = de_node(ND_VAR_DECL, n);
     decl->name = strdup(tmp);
     decl->type = TYPE_STRUCT;
-    decl->type_name = strdup(ei->name);
-    decl->operand = n->cond;                     /* the scrutinee, evaluated exactly once */
+    decl->type_name = strdup(ei->decl->ngen > 0 ? ct.sname : ei->name);
+    decl->operand = n->cond;                     /* evaluated exactly once */
     node_add_item(blk, decl);
+    int scope_base = *nmap;
+    add_bind(map, nmap, decl);                   /* visible to nothing outside, but keeps counts honest */
 
-    /* the LAST variant arm of an exhaustive match (no '_') becomes the ELSE
-     * branch: the tag can only be that variant by then, and the complete
-     * if/else chain lets the missing-return analysis accept a match whose
-     * arms all return (as Rust does) */
+    /* turn one arm into its then-block: bindings (in scope) + the body/value */
     int last_variant = -1;
     for (int i = 0; i < n->nitems; i++)
         if (n->items[i]->name) last_variant = i;
@@ -568,20 +764,38 @@ static Node *de_match(Node *n) {
         if (vi < 0) continue;                    /* already reported */
         Node *tb = de_node(ND_BLOCK, arm);
         Node *variant = ei->decl->items[vi];
+        int arm_scope = *nmap;
         for (int j = 0; j < arm->nitems && j < variant->nitems; j++) {
             Node *pt = variant->items[j];
             Node *bd = de_node(ND_VAR_DECL, arm);
             bd->name = strdup(arm->items[j]->name);
-            bd->type = pt->type;
-            bd->ptr = pt->ptr;
-            bd->type_name = pt->type_name ? strdup(pt->type_name) : NULL;
-            bd->sig = pt->sig ? node_clone(pt->sig) : NULL;
+            de_bind_type(bd, pt, ei->decl, gargs, ngargs);
             char f[32];
             snprintf(f, sizeof(f), "v%d_%d", vi, j);
             bd->operand = de_member(tmp, f, arm);
             node_add_item(tb, bd);
+            add_bind(map, nmap, bd);             /* the arm body sees its bindings */
         }
-        node_add_item(tb, arm->body);            /* the arm's block runs after the bindings */
+        if (value_mode) {
+            arm->operand = de_walk(prog, arm->operand, map, nmap);
+            Node *st;
+            if (ret_mode) {
+                st = de_node(ND_RETURN, arm);
+                st->operand = arm->operand;
+            } else {
+                Node *as = de_node(ND_ASSIGN, arm);
+                as->op = TK_ASSIGN;
+                as->lhs = node_clone(assign_target);
+                as->rhs = arm->operand;
+                st = de_node(ND_EXPR_STMT, arm);
+                st->operand = as;
+            }
+            node_add_item(tb, st);
+        } else {
+            arm->body = de_walk(prog, arm->body, map, nmap);
+            node_add_item(tb, arm->body);
+        }
+        *nmap = arm_scope;                       /* bindings drop out of scope */
         if (!def_arm && i == last_variant) {     /* exhaustive: final arm needs no tag test */
             if (cur) cur->else_branch = tb;
             else if (!first_if) first_if = tb;   /* a single-arm match is just its block */
@@ -600,38 +814,140 @@ static Node *de_match(Node *n) {
         else cur->else_branch = iff;
         cur = iff;
     }
-    if (def_arm && cur) cur->else_branch = def_arm->body;
+    if (def_arm) {
+        Node *db;
+        if (value_mode) {
+            def_arm->operand = de_walk(prog, def_arm->operand, map, nmap);
+            db = de_node(ND_BLOCK, def_arm);
+            Node *st;
+            if (ret_mode) {
+                st = de_node(ND_RETURN, def_arm);
+                st->operand = def_arm->operand;
+            } else {
+                Node *as = de_node(ND_ASSIGN, def_arm);
+                as->op = TK_ASSIGN;
+                as->lhs = node_clone(assign_target);
+                as->rhs = def_arm->operand;
+                st = de_node(ND_EXPR_STMT, def_arm);
+                st->operand = as;
+            }
+            node_add_item(db, st);
+        } else {
+            def_arm->body = de_walk(prog, def_arm->body, map, nmap);
+            db = def_arm->body;
+        }
+        if (cur) cur->else_branch = db;
+        else if (!first_if) first_if = db;       /* '_'-only would have errored; keep safe anyway */
+    }
     if (first_if) node_add_item(blk, first_if);
-    else if (def_arm) node_add_item(blk, def_arm->body);
+    *nmap = scope_base;
+    for (int i = 0; i < ngargs; i++) free(gargs[i]);
     return blk;
 }
 
-/* walk a subtree bottom-up, replacing every ND_MATCH with its desugared block
- * and every BARE unit variant (Signal::Red without parens, Rust style) with a
- * call to its constructor */
-static Node *de_walk(Node *n) {
+/* walk a subtree with real scoping, desugaring matches and bare unit variants */
+static Node *de_walk(Node *prog, Node *n, Bind *map, int *nmap) {
     if (!n) return NULL;
-    /* the callee of a call must not be auto-wrapped (Cmd::Go(30) is already a
-     * constructor call); walk only the member's base */
-    if (n->kind == ND_CALL && n->operand && n->operand->kind == ND_MEMBER) {
-        n->operand->operand = de_walk(n->operand->operand);
-    } else {
-        n->operand = de_walk(n->operand);
+    switch (n->kind) {
+        case ND_BLOCK: {
+            int s = *nmap;
+            for (int i = 0; i < n->nitems; i++) {
+                Node *it = n->items[i];
+                if (it->kind == ND_MATCH) {      /* a plain match statement */
+                    n->items[i] = de_match(prog, it, map, nmap, NULL, 0);
+                    continue;
+                }
+                if (it->kind == ND_VAR_DECL && it->operand && it->operand->kind == ND_MATCH) {
+                    /* let x: T = match (...) { ... } -> declare, then assign per arm */
+                    Node *m = it->operand;
+                    it->operand = NULL;
+                    add_bind(map, nmap, it);
+                    Node *target = de_ident(it->name, it);
+                    Node *rep = de_match(prog, m, map, nmap, target, 0);
+                    de_block_insert(n, i + 1, rep);
+                    i++;
+                    continue;
+                }
+                if (it->kind == ND_RETURN && it->operand && it->operand->kind == ND_MATCH) {
+                    n->items[i] = de_match(prog, it->operand, map, nmap, NULL, 1);
+                    continue;
+                }
+                if (it->kind == ND_EXPR_STMT && it->operand && it->operand->kind == ND_ASSIGN &&
+                    it->operand->op == TK_ASSIGN && it->operand->rhs &&
+                    it->operand->rhs->kind == ND_MATCH) {
+                    Node *as = it->operand;
+                    as->lhs = de_walk(prog, as->lhs, map, nmap);
+                    n->items[i] = de_match(prog, as->rhs, map, nmap, as->lhs, 0);
+                    continue;
+                }
+                n->items[i] = de_walk(prog, it, map, nmap);
+            }
+            *nmap = s;
+            return n;
+        }
+        case ND_VAR_DECL:
+            n->operand = de_walk(prog, n->operand, map, nmap);
+            add_bind(map, nmap, n);
+            return n;
+        case ND_FOR: {
+            int s = *nmap;
+            n->init = de_walk(prog, n->init, map, nmap);
+            n->cond = de_walk(prog, n->cond, map, nmap);
+            n->step = de_walk(prog, n->step, map, nmap);
+            n->body = de_walk(prog, n->body, map, nmap);
+            *nmap = s;
+            return n;
+        }
+        case ND_IF: {
+            n->cond = de_walk(prog, n->cond, map, nmap);
+            int s1 = *nmap; n->then_branch = de_walk(prog, n->then_branch, map, nmap); *nmap = s1;
+            int s2 = *nmap; n->else_branch = de_walk(prog, n->else_branch, map, nmap); *nmap = s2;
+            return n;
+        }
+        case ND_WHILE: case ND_DOWHILE: {
+            n->cond = de_walk(prog, n->cond, map, nmap);
+            int s = *nmap; n->body = de_walk(prog, n->body, map, nmap); *nmap = s;
+            return n;
+        }
+        case ND_SWITCH: case ND_CASE: {
+            n->cond = de_walk(prog, n->cond, map, nmap);
+            n->operand = de_walk(prog, n->operand, map, nmap);
+            int s = *nmap;
+            for (int i = 0; i < n->nitems; i++) n->items[i] = de_walk(prog, n->items[i], map, nmap);
+            *nmap = s;
+            return n;
+        }
+        case ND_MATCH:
+            /* reached through an expression slot: not a supported position */
+            diag_print(n->file, n->line, n->col, "error",
+                       "a match value may only initialize a variable, be assigned, or be returned");
+            de_err++;
+            return n;
+        default: break;
     }
-    n->lhs = de_walk(n->lhs);   n->rhs = de_walk(n->rhs);
-    n->cond = de_walk(n->cond);
-    n->then_branch = de_walk(n->then_branch); n->else_branch = de_walk(n->else_branch);
-    n->init = de_walk(n->init); n->step = de_walk(n->step);
-    n->body = de_walk(n->body);
-    for (int i = 0; i < n->nitems; i++) n->items[i] = de_walk(n->items[i]);
-    if (n->kind == ND_MATCH) return de_match(n);
+    /* the callee of a call must not be auto-wrapped (Cmd::Go(30) is a constructor call) */
+    if (n->kind == ND_CALL && n->operand && n->operand->kind == ND_MEMBER) {
+        n->operand->operand = de_walk(prog, n->operand->operand, map, nmap);
+    } else {
+        n->operand = de_walk(prog, n->operand, map, nmap);
+    }
+    n->lhs = de_walk(prog, n->lhs, map, nmap);
+    n->rhs = de_walk(prog, n->rhs, map, nmap);
+    n->cond = de_walk(prog, n->cond, map, nmap);
+    n->then_branch = de_walk(prog, n->then_branch, map, nmap);
+    n->else_branch = de_walk(prog, n->else_branch, map, nmap);
+    n->init = de_walk(prog, n->init, map, nmap);
+    n->step = de_walk(prog, n->step, map, nmap);
+    n->body = de_walk(prog, n->body, map, nmap);
+    for (int i = 0; i < n->nitems; i++) n->items[i] = de_walk(prog, n->items[i], map, nmap);
     if (n->kind == ND_MEMBER && n->operand && n->operand->kind == ND_IDENT && n->name) {
-        EnumInfo *ei = de_find(n->operand->name);
+        /* bare unit variant (Signal::Red, Option<T>::None): wrap into its constructor call */
+        EnumInfo *ei = de_find_base(n->operand->name, NULL, NULL);
         if (ei) {
             for (int v = 0; v < ei->decl->nitems; v++) {
                 if (strcmp(ei->decl->items[v]->name, n->name) != 0) continue;
                 if (ei->decl->items[v]->nitems == 0) {
-                    Node *call = de_node(ND_CALL, n);   /* Signal::Red -> Signal::Red() */
+                    Node *call = de_node(ND_CALL, n);
                     call->operand = n;
                     return call;
                 }
@@ -673,26 +989,57 @@ int desugar_enums(Node *prog) {
         g_enum_tab[g_num_enums].decl = e;
         g_num_enums++;
     }
-    /* 2) desugar match statements everywhere: function bodies, global
-     * initializers, AND trait default-method bodies (those are cloned into
-     * impls later, so a match left inside one would reach codegen raw) */
+    /* 2) desugar matches everywhere: function bodies (scope-aware, with globals
+     * and parameters bound), global initializers, and trait default methods */
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
-        if (f->kind == ND_FUNC && f->body) f->body = de_walk(f->body);
-        else if (f->kind == ND_VAR_DECL && f->operand) f->operand = de_walk(f->operand);
-        else if (f->kind == ND_TRAIT) {
+        if (f->kind == ND_FUNC && f->body) {
+            Bind map[512]; int nmap = 0;
+            seed_globals(prog, map, &nmap);
+            for (int j = 0; j < f->nitems; j++)
+                if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
+            f->body = de_walk(prog, f->body, map, &nmap);
+        } else if (f->kind == ND_VAR_DECL && f->operand) {
+            if (f->operand->kind == ND_MATCH) {
+                diag_print(f->file, f->line, f->col, "error",
+                           "a match value cannot initialize a global variable");
+                de_err++;
+                continue;
+            }
+            Bind map[512]; int nmap = 0;
+            seed_globals(prog, map, &nmap);
+            f->operand = de_walk(prog, f->operand, map, &nmap);
+        } else if (f->kind == ND_TRAIT) {
             for (int j = 0; j < f->nitems; j++) {
                 Node *m = f->items[j];
-                if (m->kind == ND_FUNC && m->body) m->body = de_walk(m->body);
+                if (m->kind != ND_FUNC || !m->body) continue;
+                Bind map[512]; int nmap = 0;
+                seed_globals(prog, map, &nmap);
+                for (int k = 0; k < m->nitems; k++)
+                    if (m->items[k]->kind == ND_PARAM) add_bind(map, &nmap, m->items[k]);
+                m->body = de_walk(prog, m->body, map, &nmap);
             }
         }
     }
-    /* 3) turn each enum declaration into a tagged struct + constructors */
+    /* 3) turn each enum declaration into a (possibly generic) tagged struct
+     * plus one associated constructor per variant */
     for (int i = 0; i < prog->nitems; i++) {
         Node *e = prog->items[i];
         if (e->kind != ND_ENUM_DECL || !e->name) continue;
+        /* the canonical self-type: "Shape" or "Option<T>" for templates */
+        char canon[256];
+        if (e->ngen > 0) {
+            size_t cl = (size_t)snprintf(canon, sizeof(canon), "%s<", e->name);
+            for (int gi = 0; gi < e->ngen; gi++)
+                cl += (size_t)snprintf(canon + cl, sizeof(canon) - cl, "%s%s", gi ? "," : "", e->gen[gi]);
+            snprintf(canon + cl, sizeof(canon) - cl, ">");
+        } else {
+            snprintf(canon, sizeof(canon), "%s", e->name);
+        }
         Node *st = de_node(ND_STRUCT_DECL, e);
         st->name = strdup(e->name);
+        st->ngen = e->ngen;
+        for (int gi = 0; gi < e->ngen; gi++) st->gen[gi] = strdup(e->gen[gi]);
         Node *tagf = de_node(ND_PARAM, e);
         tagf->name = strdup("__tag");     /* double underscore: not meant to be touched */
         tagf->type = TYPE_I64;
@@ -713,17 +1060,21 @@ int desugar_enums(Node *prog) {
             }
         }
         prog->items[i] = st;                     /* the struct replaces the enum in place */
-        /* one associated constructor per variant: Shape::Circle(p0) -> Shape */
+        /* one associated constructor per variant: Shape::Circle(p0) -> Shape;
+         * for a generic enum these are struct-TEMPLATE methods, instantiated
+         * together with each Option<i64>-style instance */
         for (int v = 0; v < e->nitems; v++) {
             Node *variant = e->items[v];
             Node *fn = de_node(ND_FUNC, variant);
             fn->name = strdup(variant->name);
             fn->is_method = 1;
             fn->ns = strdup(e->name);
+            fn->ngen = e->ngen;
+            for (int gi = 0; gi < e->ngen; gi++) fn->gen[gi] = strdup(e->gen[gi]);
             fn->type = TYPE_STRUCT;
-            fn->type_name = strdup(e->name);
+            fn->type_name = strdup(canon);
             Node *lit = de_node(ND_STRUCT_LIT, variant);
-            lit->name = strdup(e->name);
+            lit->name = strdup(canon);
             Node *tset = de_node(ND_ASSIGN, variant);
             tset->lhs = de_ident("__tag", variant);
             tset->rhs = de_node(ND_INT, variant);
@@ -981,7 +1332,13 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
         if (n->operand->kind == ND_IDENT) is_gcall = 1;
         else if (n->operand->kind == ND_MEMBER) {
             CType bt = infer(prog, n->operand->operand, map, *nmap);
-            if (bt.base != TYPE_STRUCT) is_gcall = 1; /* ns.f(...), not obj.method() */
+            /* Type::assoc(...) is NOT a generic free call even when a same-named
+             * generic function exists (Option__i64::Some vs the helper Some<T>);
+             * only a real namespace base (module) may be one */
+            int type_base = 0;
+            if (n->operand->operand->kind == ND_IDENT && n->operand->operand->name)
+                type_base = gs_find_struct(prog, n->operand->operand->name) != NULL;
+            if (bt.base != TYPE_STRUCT && !type_base) is_gcall = 1; /* ns.f(...), not obj.method() */
         }
     }
     if (is_gcall) {
