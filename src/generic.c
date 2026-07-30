@@ -16,8 +16,9 @@
 /* Inferred concrete type (base + pointer depth + struct name + signature if it is a function pointer) */
 typedef struct { DataType base; int ptr; char *sname; Node *sig; } CType;
 
-/* Mapping entry, name -> type (used as the per-function var-type map and the generic-param map) */
-typedef struct { char *name; CType t; } Bind;
+/* Mapping entry, name -> type (used as the per-function var-type map and the generic-param map).
+ * is_const marks let/const so the type checker can reject writes to constants */
+typedef struct { char *name; CType t; int is_const; } Bind;
 
 /* ---------- program lookup helpers ---------- */
 
@@ -217,6 +218,7 @@ static void add_bind(Bind *map, int *nmap, Node *d) {
     if (*nmap >= 512 || !d->name) return;
     map[*nmap].name = d->name;
     map[*nmap].t.base = d->type; map[*nmap].t.ptr = d->ptr; map[*nmap].t.sname = d->type_name; map[*nmap].t.sig = d->sig;
+    map[*nmap].is_const = (d->kind == ND_VAR_DECL) ? d->is_const : 0;
     (*nmap)++;
 }
 
@@ -571,6 +573,99 @@ void resolve_overloads(Node *prog) {
     }
 }
 
+/* ---------- default argument filling ----------
+ *
+ * A parameter may declare a default value: func f(a: i32, b: i32 = 5). A call that
+ * omits trailing arguments gets clones of those default expressions appended here,
+ * before monomorphize/overload/typecheck run, so every later pass sees complete calls.
+ * Filling only happens when the callee resolves to exactly one candidate:
+ *   - plain call f(...): exactly one non-extern, non-method function with that name
+ *   - method call obj.m(...): the method found by (struct name, m)
+ * Overloaded names are left alone (mixing defaults into overload resolution would be ambiguous). */
+
+/* The single non-extern function with this name, or NULL if none/overloaded */
+static Node *df_find_unique(Node *prog, const char *name) {
+    Node *found = NULL;
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *f = prog->items[i];
+        if (f->kind != ND_FUNC || f->is_extern || f->is_method || !f->name) continue;
+        if (strcmp(f->name, name) != 0) continue;
+        if (found) return NULL;                      /* overloaded: leave the call alone */
+        found = f;
+    }
+    return found;
+}
+
+/* Count of leading parameters without a default (the minimum a caller must pass) */
+static int df_min_args(Node *fn, int argoff) {
+    for (int i = argoff; i < fn->nitems; i++)
+        if (fn->items[i]->operand) return i - argoff;
+    return fn->nitems - argoff;
+}
+
+/* Append default-value clones to a call that omits trailing arguments */
+static void df_fill_call(Node *prog, Node *call, Bind *map, int nmap) {
+    Node *callee = call->operand, *fn = NULL;
+    int argoff = 0;
+    if (!callee) return;
+    if (callee->kind == ND_IDENT) {
+        fn = df_find_unique(prog, callee->name);
+    } else if (callee->kind == ND_MEMBER) {
+        CType bt = infer(prog, callee->operand, map, nmap);
+        if (bt.base == TYPE_STRUCT && bt.sname) {    /* obj.method(...) */
+            for (int i = 0; i < prog->nitems; i++) {
+                Node *d = prog->items[i];
+                if (d->kind == ND_FUNC && d->is_method && d->ns && callee->name &&
+                    strcmp(d->ns, bt.sname) == 0 && strcmp(d->name, callee->name) == 0) { fn = d; argoff = 1; break; }
+            }
+        }
+    }
+    if (!fn || fn->ngen > 0) return;                 /* generic templates: types unresolved, skip */
+    int total = fn->nitems - argoff;
+    int min = df_min_args(fn, argoff);
+    if (call->nitems < min || call->nitems >= total) return;  /* wrong count: typecheck reports it */
+    for (int i = call->nitems + argoff; i < fn->nitems; i++)
+        node_add_item(call, node_clone(fn->items[i]->operand));
+}
+
+/* Scope-aware walk over a function body (same shape as scan_calls/scan_ov) */
+static void df_walk(Node *prog, Node *n, Bind *map, int *nmap) {
+    if (!n) return;
+    switch (n->kind) {
+        case ND_BLOCK: { int s=*nmap; for (int i=0;i<n->nitems;i++) df_walk(prog,n->items[i],map,nmap); *nmap=s; return; }
+        case ND_VAR_DECL: { df_walk(prog,n->operand,map,nmap); add_bind(map,nmap,n); return; }
+        case ND_FOR: { int s=*nmap; df_walk(prog,n->init,map,nmap); df_walk(prog,n->cond,map,nmap); df_walk(prog,n->step,map,nmap); df_walk(prog,n->body,map,nmap); *nmap=s; return; }
+        case ND_IF: { df_walk(prog,n->cond,map,nmap); int s1=*nmap; df_walk(prog,n->then_branch,map,nmap); *nmap=s1; int s2=*nmap; df_walk(prog,n->else_branch,map,nmap); *nmap=s2; return; }
+        case ND_WHILE: case ND_DOWHILE: { df_walk(prog,n->cond,map,nmap); int s=*nmap; df_walk(prog,n->body,map,nmap); *nmap=s; return; }
+        case ND_SWITCH: { df_walk(prog,n->cond,map,nmap); int s=*nmap; for (int i=0;i<n->nitems;i++) df_walk(prog,n->items[i],map,nmap); *nmap=s; return; }
+        case ND_CASE: { df_walk(prog,n->operand,map,nmap); int s=*nmap; for (int i=0;i<n->nitems;i++) df_walk(prog,n->items[i],map,nmap); *nmap=s; return; }
+        default: break;
+    }
+    df_walk(prog, n->lhs, map, nmap);   df_walk(prog, n->rhs, map, nmap);
+    df_walk(prog, n->operand, map, nmap); df_walk(prog, n->cond, map, nmap);
+    df_walk(prog, n->then_branch, map, nmap); df_walk(prog, n->else_branch, map, nmap);
+    df_walk(prog, n->init, map, nmap);  df_walk(prog, n->step, map, nmap);
+    df_walk(prog, n->body, map, nmap);
+    for (int i = 0; i < n->nitems; i++) df_walk(prog, n->items[i], map, nmap);
+    if (n->kind == ND_CALL) df_fill_call(prog, n, map, *nmap);
+}
+
+void fill_default_args(Node *prog) {
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *f = prog->items[i];
+        if (f->kind == ND_FUNC && f->body) {         /* includes generic templates: instances clone the filled calls */
+            Bind map[512]; int nmap = 0;
+            seed_globals(prog, map, &nmap);
+            for (int j = 0; j < f->nitems; j++) if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
+            df_walk(prog, f->body, map, &nmap);
+        } else if (f->kind == ND_VAR_DECL && f->operand) {
+            Bind map[512]; int nmap = 0;
+            seed_globals(prog, map, &nmap);
+            df_walk(prog, f->operand, map, &nmap);
+        }
+    }
+}
+
 /* ---------- compile-time type checker ----------
  *
  * Purpose: catch type nonsense at compile time (instead of letting it break at runtime), e.g.
@@ -638,7 +733,31 @@ static void tc_add(TcCtx *c, Node *d) {
     c->map[*c->nmap].t.ptr = d->ptr;
     c->map[*c->nmap].t.sname = d->type_name;
     c->map[*c->nmap].t.sig = d->sig;
+    c->map[*c->nmap].is_const = (d->kind == ND_VAR_DECL) ? d->is_const : 0;
     (*c->nmap)++;
+}
+
+/* Find the nearest in-scope binding for a name (shadowing: most recent wins), NULL if not found */
+static Bind *tc_find(TcCtx *c, const char *name) {
+    if (!name) return NULL;
+    for (int i = *c->nmap - 1; i >= 0; i--)
+        if (strcmp(c->map[i].name, name) == 0) return &c->map[i];
+    return NULL;
+}
+
+/* If an assignment/increment target is (a field of) a const variable, report it.
+ * Walks member chains (p.x.y) down to the base identifier; writes through a
+ * dereferenced pointer are allowed (the pointer may point at mutable memory) */
+static void tc_check_const_target(TcCtx *c, Node *target, Node *site) {
+    Node *base = target;
+    while (base && base->kind == ND_MEMBER) base = base->operand;
+    if (!base || base->kind != ND_IDENT) return;
+    Bind *b = tc_find(c, base->name);
+    if (b && b->is_const) {
+        fprintf(stderr, "type error (line %d): cannot assign to constant '%s' (declared with 'const')\n",
+                site->line, base->name);
+        (*c->errc)++;
+    }
 }
 
 static void tc_check(TcCtx *c, Node *n) {
@@ -754,6 +873,9 @@ static void tc_check(TcCtx *c, Node *n) {
         CType lt = infer(c->prog, n->lhs, c->map, *c->nmap);
         CType rt = infer(c->prog, n->rhs, c->map, *c->nmap);
         if (!tc_assignable(lt, rt)) tc_err(c, n, "cannot assign value of type", rt, lt);   /* "... rt to lt" */
+        tc_check_const_target(c, n->lhs, n);                       /* const is read-only */
+    } else if (n->kind == ND_UNARY && (n->op == TK_PLUSPLUS || n->op == TK_MINUSMINUS)) {
+        tc_check_const_target(c, n->operand, n);                   /* x++ / x-- also writes x */
     } else if (n->kind == ND_RETURN && n->operand) {
         CType vt = infer(c->prog, n->operand, c->map, *c->nmap);
         if (!tc_assignable(c->ret, vt)) tc_err(c, n, "return type mismatch between", c->ret, vt);
@@ -787,9 +909,16 @@ static void tc_check(TcCtx *c, Node *n) {
             }
         }
         if (fn) {
-            if (n->nitems != fn->nitems - argoff) {
-                fprintf(stderr, "type error (line %d): %s '%s' expects %d argument(s) but got %d\n",
-                        n->line, argoff ? "method" : "function", fn->name, fn->nitems - argoff, n->nitems);
+            int total = fn->nitems - argoff;
+            int min = df_min_args(fn, argoff);
+            if (n->nitems != total) {
+                /* defaults are filled before this pass; a count mismatch here is a real error */
+                if (min != total)
+                    fprintf(stderr, "type error (line %d): %s '%s' expects between %d and %d arguments but got %d\n",
+                            n->line, argoff ? "method" : "function", fn->name, min, total, n->nitems);
+                else
+                    fprintf(stderr, "type error (line %d): %s '%s' expects %d argument(s) but got %d\n",
+                            n->line, argoff ? "method" : "function", fn->name, total, n->nitems);
                 (*c->errc)++;
             } else {
                 for (int i = 0; i < n->nitems; i++) {

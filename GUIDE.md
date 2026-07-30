@@ -143,7 +143,7 @@ Rule of thumb: `str` for fixed text and read-only parameters; `String` when you 
 
 ```rust
 let name: type = value;     // mutable
-const NAME: type = value;   // intended constant
+const NAME: type = value;   // constant: initializer required, any later write is a compile error
 let x: i32;                 // declared, uninitialized (stack value not guaranteed)
 ```
 
@@ -166,6 +166,9 @@ Precedence (high → low): `unary` → `as` → `**` → `* / %` → `+ -` → `
 
 `&` is both address-of (prefix `&x`) and bitwise AND (infix `a & b`), told apart by position; `**`
 is both power (`a ** b`) and double-deref (`**ptr`), likewise by position.
+
+`**` binds tighter than prefix `-` and `~` (math convention): `-2 ** 2` is `-(2 ** 2)` = -4;
+write `(-2) ** 2` to square the negative value.
 
 #### Compile-time type checking
 
@@ -229,6 +232,17 @@ func greet() -> void { ... }        // no return value
 - Recursion is supported.
 - More than 4 parameters supported (arg 5+ passed on the stack).
 - `func main() -> i8` is the entry point; its return is the exit code.
+
+#### Default parameter values
+
+```rust
+func area(w: i32, h: i32 = 10, scale: i32 = 1) -> i32 { return w * h * scale; }
+area(3);        // 30 (h=10, scale=1 filled in at compile time)
+area(3, 4, 2);  // 24
+```
+
+Defaults must be trailing (a plain parameter cannot follow a defaulted one). They work for
+methods too (`p.shifted()`), but not for overloaded names, generic templates, or extern C.
 
 #### Generic functions (monomorphization)
 
@@ -412,6 +426,9 @@ Import checks (immediate errors):
 - a symbol imported with form B must exist → otherwise `module 'x' has no exported symbol 'name'`.
 - duplicate name (same ns+name+type for struct/trait/func) → `duplicate ...` (different-type overloads don't count).
 - a namespace/alias bound to two different modules → `namespace 'x' is already bound to a different module`.
+- one module imported under two different namespaces → error; mixing a namespace import with a
+  symbol import of the same module → warning (free functions stay under the first form's namespace;
+  structs/traits are global and work either way).
 - a cycle (A→B→A) → `circular import detected`.
 
 ```rust
@@ -860,8 +877,6 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
   (i32 vs i64 are separate), with an integer literal matched by category if there's a single int overload;
   `trait`/`<T: Trait>`/default methods exist, but it's **static dispatch only** (no `dyn Trait`/vtable, no
   multi-condition `where`).
-- `const` isn't truly enforced yet (writable at the codegen level), intent only.
-- Default parameter values (`age: u8 = 5`) parse but codegen ignores them.
 
 ### Numbers
 
@@ -947,6 +962,11 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
 - stdlib in MVS: `io` (out/print/in), `fs` (write/read), `net` (TcpServer/TcpClient, tested with curl),
   `string` (`String` on the heap), `fmt` (`Display` + `println`/`print`).
 - C interop (`extern`/`export` + `-c`); `--nostd` freestanding (proven self-contained via `llvm-nm`).
+- `const` enforcement (initializer required, writes are compile errors); default parameter values
+  (functions + methods, compile-time filled); compound assignment evaluates its lvalue exactly once;
+  `**` binds tighter than unary minus; import-form mixing is reported instead of silently deduped.
+- Golden test suite (`make test`): run-pass output diffs, compile-only, and compile-fail
+  (expected-error) tests in `tests/`, run by CI.
 
 Verified by running, not just compiling: the net server echoes real HTTP from curl; C calls
 `mvs_square`/`mvs_sum_to` through a `.obj`; the freestanding `.obj` has no undefined symbols.
@@ -975,12 +995,8 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 
 ### Known minor limits (low risk, not yet fixed)
 
-- **One module = one namespace:** importing the same file under different names/forms dedups silently the second
-  time; a symbol may not be exposed as expected.
 - An extern C function taking `f32` in stack position ≥4 isn't narrowed double→single yet (registers 0-3 are done).
-- A compound assignment whose lvalue base contains a call (`getptr().x += 1`) may evaluate the call twice (rare).
-- `[`/`]` are lexed but there's no array type; generic params beyond 4 are clamped; `-2 ** 2 == 4` (unary binds
-  tighter than `**`).
+- `[`/`]` are lexed but there's no array type; generic params beyond 4 are clamped.
 - Function pointers (v1): the type doesn't take varargs in its signature; can't overload by function-pointer type
   (all mangle to `func`); assignment to a func-ptr variable is type-checked leniently; pointing a func-ptr at a C
   `extern` taking/returning `f32` won't narrow double↔single (func pointers are meant for MVS functions).

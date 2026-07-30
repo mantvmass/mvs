@@ -132,6 +132,7 @@ static Node *parse_primary(Parser *p) {
     if (match(p, TK_LPAREN)) {
         Node *n = parse_expr(p);
         expect(p, TK_RPAREN, "expected ')'");
+        n->paren = 1;   /* remember the parentheses: (-2) ** 2 must not be re-anchored by parse_power */
         return n;
     }
     error(p, "expected expression");
@@ -226,16 +227,25 @@ static Node *parse_cast(Parser *p) {
     return node;
 }
 
-/* power := cast ('**' power)?  Exponentiation is right-associative (2**3**2 = 2**(3**2)) */
+/* power := cast ('**' power)?  Exponentiation is right-associative (2**3**2 = 2**(3**2)).
+ * '**' binds tighter than prefix '-'/'~' (math convention): -2 ** 2 = -(2 ** 2) = -4,
+ * while an explicit (-2) ** 2 keeps the minus inside (the paren flag blocks re-anchoring) */
 static Node *parse_power(Parser *p) {
     Node *left = parse_cast(p);
     if (check(p, TK_STARSTAR)) {
         Node *b = node_new(ND_BINARY, p->cur.line);
         b->op = TK_STARSTAR;
         advance(p);
-        b->lhs = left;
         b->rhs = parse_power(p); /* recurse on itself to get right-associativity */
-        return b;
+        /* re-anchor the power under any prefix -/~ chain: the chain's innermost operand
+         * becomes the power's base, so the unary applies to the whole power result */
+        Node **slot = &left;
+        while ((*slot)->kind == ND_UNARY && !(*slot)->paren &&
+               ((*slot)->op == TK_MINUS || (*slot)->op == TK_TILDE))
+            slot = &(*slot)->operand;
+        b->lhs = *slot;
+        *slot = b;
+        return left;
     }
     return left;
 }
@@ -477,6 +487,9 @@ static Node *parse_var_decl(Parser *p) {
     n->type = parse_type(p, &n->ptr, &n->type_name, &n->sig);
     if (match(p, TK_ASSIGN)) {
         n->operand = parse_expr(p); /* initial value */
+    } else if (is_const) {
+        /* a const without a value can never be given one later (writes are rejected) */
+        error(p, "const declaration requires an initializer");
     }
     return n;
 }
@@ -669,12 +682,24 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
             advance(p);
             expect(p, TK_COLON, "expected ':' after parameter name");
             param->type = parse_type(p, &param->ptr, &param->type_name, &param->sig);
-            /* Default values are accepted by the grammar but unused in this subset (discarded) */
-            if (match(p, TK_ASSIGN)) parse_expr(p);
+            /* Default value: stored in the param's operand; call sites missing trailing
+             * arguments get a clone of this expression (fill_default_args in generic.c) */
+            if (match(p, TK_ASSIGN)) param->operand = parse_expr(p);
             node_add_item(fn, param);
         } while (match(p, TK_COMMA));
     }
     expect(p, TK_RPAREN, "expected ')' after parameters");
+    /* defaults must be trailing: once one parameter has a default, all later ones need one too */
+    {
+        int seen_default = 0;
+        for (int i = 0; i < fn->nitems; i++) {
+            if (fn->items[i]->operand) seen_default = 1;
+            else if (seen_default) {
+                error(p, "parameter without a default follows a parameter with a default");
+                break;
+            }
+        }
+    }
     expect(p, TK_ARROW, "expected '->' before return type");
     fn->type = parse_type(p, &fn->ptr, &fn->type_name, NULL); /* nested func-ptr return not supported */
     if (is_extern) {

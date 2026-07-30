@@ -242,10 +242,23 @@ static void load_module(Loader *L, const char *path, const char *ns) {
          * clash because struct/trait symbols are global anyway.) */
         const char *prev_ns = L->loaded_ns[prev] ? L->loaded_ns[prev] : "";
         const char *now_ns = ns ? ns : "";
-        if (prev_ns[0] && now_ns[0] && strcmp(prev_ns, now_ns) != 0) {
-            fprintf(stderr, "error: module '%s' is already imported as namespace '%s'; cannot also import it as '%s'\n",
-                    path, prev_ns, now_ns);
-            L->had_error = 1;
+        if (strcmp(prev_ns, now_ns) != 0) {
+            /* Mixing import forms for one module used to dedup silently; the second import's
+             * free functions then live under the first form's namespace and are unreachable
+             * under the requested one. Structs/traits/methods are global either way, so this
+             * is a warning, not an error; two DIFFERENT namespaces stay a hard error. */
+            if (prev_ns[0] && now_ns[0]) {
+                fprintf(stderr, "error: module '%s' is already imported as namespace '%s'; cannot also import it as '%s'\n",
+                        path, prev_ns, now_ns);
+                L->had_error = 1;
+            } else if (prev_ns[0]) {
+                fprintf(stderr, "warning: module '%s' was already imported as namespace '%s'; free functions from this "
+                        "symbol import remain reachable only as '%s.<name>' (structs/traits work either way)\n",
+                        path, prev_ns, prev_ns);
+            } else {
+                fprintf(stderr, "warning: module '%s' was already symbol-imported; its free functions are NOT reachable "
+                        "as '%s.<name>' (structs/traits work either way)\n", path, now_ns);
+            }
         }
         return;
     }

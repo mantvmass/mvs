@@ -514,14 +514,16 @@ static void gen_expr(Gen *g, Node *n) {
                 gen_store_typed(g, st, sz);
                 fprintf(g->out, "    mov rax, rcx\n"); /* the expression's result = the assigned value */
             } else {
-                /* x op= y : load the old value, compute, store back (computes the address twice) */
+                /* x op= y : compute the target address ONCE, then load-compute-store through it.
+                 * (Computing it twice would re-run any call inside the lvalue, e.g. getptr().x += 1) */
                 TokenType bop = n->op == TK_PLUS_ASSIGN ? TK_PLUS :
                                 n->op == TK_MINUS_ASSIGN ? TK_MINUS :
                                 n->op == TK_STAR_ASSIGN ? TK_STAR : TK_SLASH;
-                gen_expr(g, n->rhs); push_tmp(g);                 /* save rhs */
-                gen_addr(g, target);
-                gen_load_typed(g, st, sz);                         /* rax = old value */
-                pop_tmp(g, "rcx");                                /* rcx = rhs */
+                gen_addr(g, target); push_tmp(g);                 /* stash the address on the temp stack */
+                gen_expr(g, n->rhs);                              /* rax = rhs */
+                fprintf(g->out, "    mov rcx, rax\n");            /* rcx = rhs */
+                fprintf(g->out, "    mov rax, [rsp]\n");          /* peek the stashed address */
+                gen_load_typed(g, st, sz);                         /* rax = old value (rcx survives) */
                 if (is_float_type(tt.base) && tt.ptr == 0) {
                     /* compute in floating point (old value in xmm0, rhs in xmm1) */
                     ExprType rt2 = type_of(g, n->rhs);
@@ -537,10 +539,10 @@ static void gen_expr(Gen *g, Node *n) {
                     }
                     gen_binop_apply(g, bop, is_unsigned_val(tt.base, tt.ptr)); /* rax = old op rhs */
                 }
-                fprintf(g->out, "    mov rcx, rax\n");
-                gen_addr(g, target);                              /* rax = address (again) */
+                fprintf(g->out, "    mov rcx, rax\n");            /* rcx = the computed result */
+                pop_tmp(g, "rax");                                /* rax = the stashed address */
                 gen_store_typed(g, st, sz);
-                fprintf(g->out, "    mov rax, rcx\n");
+                fprintf(g->out, "    mov rax, rcx\n");            /* expression value = the result */
             }
             break;
         }

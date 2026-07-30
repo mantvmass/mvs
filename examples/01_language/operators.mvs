@@ -14,6 +14,8 @@ func main() -> i8 {
     io.out("2 + 3 * 4 = {}", 2 + 3 * 4);       // 14 (precedence)
     io.out("(2 + 3) * 4 = {}", (2 + 3) * 4);   // 20
     io.out("2 ** 10 = {}", 2 ** 10);           // 1024 (** = power)
+    io.out("-2 ** 2 = {}", -2 ** 2);           // -4 (** binds tighter than unary minus, math convention)
+    io.out("(-2) ** 2 = {}", (-2) ** 2);       // 4  (parentheses keep the minus inside)
     io.out("17 % 5 = {}", 17 % 5);             // 2  (modulo, integers only)
 
     io.out("5 > 3 = {}", 5 > 3);               // 1 (comparison yields bool 1/0)

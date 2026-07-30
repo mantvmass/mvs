@@ -120,6 +120,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "compilation failed (duplicate definitions)\n");
         return 1;
     }
+    fill_default_args(program);        /* append declared default values to calls that omit them */
     if (monomorphize(program) > 0) {   /* checks trait bounds during instantiation */
         fprintf(stderr, "compilation failed (trait bound errors)\n");
         return 1;

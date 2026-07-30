@@ -1,0 +1,7 @@
+//~ ERROR: cannot assign to constant
+// ++/-- also writes the variable, so it is rejected on const
+func main() -> i8 {
+    const N: i32 = 1;
+    N++;
+    return 0;
+}

@@ -27,6 +27,9 @@ make
 #                  src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/codegen.c `
 #                  src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
 
+# run the test suite (golden output + compile-only + compile-fail)
+make test
+
 # compile an MVS program to .exe, then run it
 .\mvs.exe examples\demo.mvs
 .\examples\demo.exe
@@ -70,8 +73,10 @@ make
 ## Before calling it done
 
 1. `make` passes with no warnings.
-2. Compile **and run** `examples/demo.mvs` + `examples/01_language/types.mvs` with correct results.
-3. New feature → add an example under `examples/` proving it works.
+2. `make test` passes: the golden output + compile-only + compile-fail suite in `tests/run.ps1`.
+3. New feature → add an example under `examples/`, register it in `tests/run.ps1` + the Makefile
+   `EXAMPLES` list, and regenerate goldens with `tests/run.ps1 -Update`. New error → add a
+   `tests/compile_fail/*.mvs` with a `//~ ERROR:` header.
 
 ## Feature status (details in GUIDE.md)
 
@@ -82,7 +87,9 @@ stdlib `io`/`fs`/`net`/`string` + `io.in` · args > 4 · tree-shaking · sret ·
 struct by-value params + struct-returning call as an rvalue · type checking + `as` cast ·
 trait + associated function (`Type::new`) + `<T: Trait>` + default method · `String` (heap) +
 `String::from`/`from_int` · float xmm across the C boundary both ways (f32 single↔double) ·
-function pointer (`func(...) -> T` as a value + indirect `call rax`).
+function pointer (`func(...) -> T` as a value + indirect `call rax`) · const enforcement ·
+default parameter values · single-eval compound assignment · math-style `**` precedence ·
+golden test suite (`make test`).
 
 **Remaining:** full 128-bit i128/u128 math · dynamic dispatch (`dyn`/vtable) + multi-condition `where` ·
 a real array type · io.out as a library (variadic + reflection) · ARM64/Linux backends.

@@ -54,7 +54,8 @@ typedef enum {
     ND_STRUCT_LIT, /* struct literal: uses name (struct name), items (field inits as ND_ASSIGN) */
 
     /* --- top level --- */
-    ND_PARAM,      /* function parameter/struct field: uses name, type, ptr, type_name */
+    ND_PARAM,      /* function parameter/struct field: uses name, type, ptr, type_name;
+                    *  operand = default value expression (parameters only, NULL = no default) */
     ND_FUNC,       /* function definition: uses name, type (return type), items (parameters), body.
                     *  If is_extern = 1 and body = NULL, this declares a foreign function */
     ND_IMPORT,     /* module import: uses str_val (path), items (imported names as ND_IDENT) */
@@ -100,6 +101,8 @@ typedef struct Node {
     /* unbounded child list (block stmts / call args / func params / program decls) */
     struct Node **items;
     int           nitems;
+    int           paren;      /* 1 = this expression was written in parentheses; used by the parser
+                               * so (-2) ** 2 keeps the unary minus inside while -2 ** 2 = -(2 ** 2) */
     int           is_const;   /* used by ND_VAR_DECL: 1 = const, 0 = let */
     int           is_extern;  /* used by ND_FUNC: 1 = foreign function (no body) */
     int           is_export;  /* used by ND_FUNC: 1 = exported for C to call (raw symbol name) */

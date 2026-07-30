@@ -1,0 +1,6 @@
+//~ ERROR: const declaration requires an initializer
+// a const can never be assigned later, so it must start with a value
+func main() -> i8 {
+    const X: i32;
+    return 0;
+}

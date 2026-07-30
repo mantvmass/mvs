@@ -1,0 +1,7 @@
+//~ ERROR: cannot assign to constant
+// const variables are read-only after initialization
+func main() -> i8 {
+    const MAX: i32 = 10;
+    MAX = 20;
+    return 0;
+}

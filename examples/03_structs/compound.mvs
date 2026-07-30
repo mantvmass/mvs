@@ -1,0 +1,31 @@
+// ============================================================
+//  compound: compound assignment through an lvalue containing a call
+//  build:  mvs.exe examples/03_structs/compound.mvs
+//  run:    examples\03_structs\compound.exe
+//
+//  get().value += 5 must evaluate get() exactly once; the counter proves it.
+// ============================================================
+import { io } from "std";
+extern func malloc(n: usize) -> *u8;
+
+struct Cell { value: i32; }
+
+let cell: *Cell = 0;
+let calls: i32 = 0;
+
+func get() -> *Cell {
+    calls++;
+    return cell;
+}
+
+func main() -> i8 {
+    cell = malloc(8) as *Cell;
+    cell.value = 10;
+
+    get().value += 5;      // one call, value 15
+    get().value *= 2;      // one call, value 30
+
+    io.out("value = {}", cell.value);   // 30
+    io.out("calls = {}", calls);        // 2 (each statement called get() once)
+    return 0;
+}

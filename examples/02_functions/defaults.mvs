@@ -1,0 +1,34 @@
+// ============================================================
+//  defaults: parameters with default values
+//  build:  mvs.exe examples/02_functions/defaults.mvs
+//  run:    examples\02_functions\defaults.exe
+//
+//  A trailing parameter may declare a default (h: i32 = 10); calls that omit it
+//  get the default filled in at compile time. Works for methods too.
+// ============================================================
+import { io } from "std";
+
+func area(w: i32, h: i32 = 10, scale: i32 = 1) -> i32 {
+    return w * h * scale;
+}
+
+struct Point { x: i32; y: i32; }
+
+impl Point {
+    func shifted(self: *Point, dx: i32 = 1, dy: i32 = 1) -> Point {
+        return Point { x: self.x + dx, y: self.y + dy };
+    }
+}
+
+func main() -> i8 {
+    io.out("area(3)       = {}", area(3));         // 30 (h=10, scale=1)
+    io.out("area(3, 4)    = {}", area(3, 4));      // 12 (scale=1)
+    io.out("area(3, 4, 2) = {}", area(3, 4, 2));   // 24
+
+    let p: Point = Point { x: 5, y: 5 };
+    let q: Point = p.shifted();                    // both defaults -> (6, 6)
+    io.out("shifted()   = ({}, {})", q.x, q.y);
+    let r: Point = p.shifted(10);                  // dy defaults to 1 -> (15, 6)
+    io.out("shifted(10) = ({}, {})", r.x, r.y);
+    return 0;
+}

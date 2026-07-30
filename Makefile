@@ -35,8 +35,9 @@ EXAMPLES = examples/demo \
            examples/01_language/casts examples/01_language/control examples/01_language/bitwise \
            examples/01_language/args \
            examples/02_functions/generics examples/02_functions/overload examples/02_functions/recursion \
-           examples/02_functions/funcptr \
+           examples/02_functions/funcptr examples/02_functions/defaults \
            examples/03_structs/structs examples/03_structs/methods examples/03_structs/pointers \
+           examples/03_structs/compound \
            examples/04_traits/traits examples/04_traits/display \
            examples/05_strings/strings \
            examples/06_modules/use_import \

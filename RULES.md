@@ -269,9 +269,11 @@ src/arch/
 ## 8. Definition of done
 
 1. `make` passes with no warnings (`-Wall -Wextra` on; deprecation silenced by flag). No dead code.
-2. Compile and **run** `examples/hello.mvs` and `examples/demo.mvs` with correct results.
-3. New feature → add an example under `examples/` that proves it works.
-4. Eyeball the output: bad codegen often assembles and links fine but runs wrong.
+2. `make test` passes: golden output diffs + compile-only + compile-fail tests (`tests/run.ps1`).
+3. New feature → add an example under `examples/`, register it in `tests/run.ps1` and the Makefile
+   `EXAMPLES` list, regenerate goldens (`tests/run.ps1 -Update`), and EYEBALL the new golden file;
+   bad codegen often assembles and links fine but runs wrong, and `-Update` records whatever ran.
+4. New compiler error → add a `tests/compile_fail/*.mvs` with a `//~ ERROR: <substring>` first line.
 
 ## 9. Code style
 

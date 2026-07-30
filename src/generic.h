@@ -26,4 +26,9 @@ int typecheck(Node *program);
  * Call before monomorphize. Returns the number of errors (0 = pass) */
 int check_duplicates(Node *program);
 
+/* Fill omitted trailing arguments with the parameters' declared default values
+ * (func f(a: i32, b: i32 = 5) called as f(1) becomes f(1, 5)).
+ * Call after check_duplicates and before monomorphize */
+void fill_default_args(Node *program);
+
 #endif /* MVS_GENERIC_H */

@@ -1,0 +1,4 @@
+//~ ERROR: without a default follows
+// defaults must be trailing: a plain parameter cannot come after a defaulted one
+func f(a: i32 = 1, b: i32) -> i32 { return a + b; }
+func main() -> i8 { return 0; }
