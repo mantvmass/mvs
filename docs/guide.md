@@ -503,6 +503,7 @@ code is `lea rax, [rel <label>]` for the value and `call rax` for the call (see 
 
 ```txt
 let pi: f64 = 3.14159;
+let avogadro: f64 = 6.02e23;      // scientific notation: 1e9, 2.5e-3, 6.02E23
 let area: f64 = pi * 2.0 * 2.0;
 io.out("{}", 1.5 + 2);     // int -> float automatically -> 3.500000
 ```
@@ -573,9 +574,11 @@ Import checks (immediate errors):
 - a symbol imported with form B must exist → otherwise `module 'x' has no exported symbol 'name'`.
 - duplicate name (same ns+name+type for struct/trait/func) → `duplicate ...` (different-type overloads don't count).
 - a namespace/alias bound to two different modules → `namespace 'x' is already bound to a different module`.
-- one module imported under two different namespaces → error; mixing a namespace import with a
-  symbol import of the same module → warning (free functions stay under the first form's namespace;
-  structs/traits are global and work either way).
+- one module imported under two different namespaces → error.
+- mixing a namespace import with a symbol import of the SAME module is fine: its free functions are
+  reachable under both spellings (`import { io, string } from "std"` next to
+  `import { String } from "std/string"` is the normal way to write it).
+- a global is a symbol like any other: `import { LIB_BASE } from "./lib.mvs"` works.
 - a cycle (A→B→A) → `circular import detected`.
 
 ```txt

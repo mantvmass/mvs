@@ -161,15 +161,24 @@ the stars, mangled `Vec__pNode`) · generic inference through a composite
 parameter (`head<T>(v: Vec<T>)`) and from a sibling argument
 (`unwrap_or(None(), "b")`) · function values in every position (global, array
 element, container field, returned and called on the spot) · `&value` accepted
-in a variadic trait slice, matching how a trait object is written everywhere else.
+in a variadic trait slice, matching how a trait object is written everywhere
+else · float literals in scientific notation (`1e9`, `2.5e-3`, `6.02E23`) ·
+globals importable by name (`import { LIB_BASE } from "./lib.mvs"`) · a module
+imported under both a namespace and a symbol form works under both spellings
+(the loader aliases its free functions instead of warning) · unresolved
+overload calls stop the pipeline instead of reappearing as codegen errors.
 
 **How the audit is kept exhaustive:** `sh scripts/audit.sh` is the one command.
-Its three enumerated axes are `scripts/matrix.sh` (every TYPE through every
+Its five enumerated axes are `scripts/matrix.sh` (every TYPE through every
 context), `scripts/matrix_features.sh` (every FEATURE through every context:
-traits, function pointers, generic inference, pointers, control flow), and
-`tests/diff/ops_*` from `scripts/gen_ops_diff.py` (every OPERATOR on every
-integer type, with C as the oracle: 1690 checks). When a bug turns up, add the
-axis that would have caught it rather than a single regression test.
+traits, function pointers, generic inference, pointers, control flow),
+`scripts/matrix_modules.sh` (every IMPORT FORM crossed with every kind of
+exported thing, plus @compile filtering and the import errors),
+`scripts/api_coverage.py` (every std/core function must be called by a test or
+an example), and `tests/diff/ops_*` from `scripts/gen_ops_diff.py` (every
+OPERATOR on every numeric type, with C as the oracle: 1924 checks). When a bug
+turns up, add the axis that would have caught it rather than a single
+regression test.
 
 **Dogfood:** `examples/10_json` is a real 1084-line program in MVS (JSON
 library + CLI). Run it before claiming a language change is ergonomic; it is

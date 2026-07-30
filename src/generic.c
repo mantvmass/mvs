@@ -51,6 +51,7 @@ static int type_impls_all(Node *prog, const char *sname, const char *bounds, cha
 }
 
 static int mono_err; /* number of trait bound violation errors (reset in monomorphize) */
+static int ov_err;   /* unresolved or ambiguous overload calls (reset in resolve_overloads) */
 
 /* forward declarations for the generic-name utilities defined further down */
 static int subst_in_cname(const char *src, Bind *gmap, int ngmap, char *out, size_t on);
@@ -1933,6 +1934,7 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
                                "ambiguous call to '%s' with argument types (%s): multiple width overloads match",
                                sets[s].orig, wx);
                     diag_help("disambiguate with an explicit cast, e.g. f(x as i32)");
+                    ov_err++;
                     return;
                 }
             }
@@ -1940,6 +1942,8 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
             else {
                 diag_print(n->file, n->line, n->col, "error",
                            "no overload of '%s' matches argument types (%s)", sets[s].orig, wx);
+                ov_err++;   /* stop before codegen, which would only repeat this
+                             * as an undefined-function error with less context */
             }
         }
     }
@@ -1986,7 +1990,8 @@ int check_duplicates(Node *prog) {
     return errc;
 }
 
-void resolve_overloads(Node *prog) {
+int resolve_overloads(Node *prog) {
+    ov_err = 0;
     /* The overload table is sized to THIS program: one slot per eligible
      * function is always enough (a fixed ceiling here used to reject large
      * programs with a message about overloading, which was doubly wrong: they
@@ -1994,11 +1999,11 @@ void resolve_overloads(Node *prog) {
     int cap = 0;
     for (int i = 0; i < prog->nitems; i++)
         if (ov_eligible(prog->items[i])) cap++;
-    if (cap == 0) return;
+    if (cap == 0) return 0;
     OvSet *sets = (OvSet *)calloc((size_t)cap, sizeof(OvSet));
     if (!sets) {
         fprintf(stderr, "error: out of memory building the overload table (%d function names)\n", cap);
-        return;
+        return 1;
     }
     int nsets = 0;
     /* 1) group functions by namespace + original name (each module has its own sets) */
@@ -2044,6 +2049,7 @@ void resolve_overloads(Node *prog) {
         }
     }
     free(sets);   /* the renames are already in the AST; the table itself is done */
+    return ov_err;
 }
 
 /* ---------- default argument filling ----------

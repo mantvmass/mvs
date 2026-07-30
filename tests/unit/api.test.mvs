@@ -1,0 +1,99 @@
+// The API axis: functions that scripts/api_coverage.py found nothing calling.
+// A std function nothing calls is a function nothing proves still works, so
+// every gap the coverage check reports gets a test here.
+import { test, math } from "std";
+import { String } from "std/string";
+import { Option, Some, None } from "std/option";
+import { HashMap, map_hash, map_eq } from "std/map";
+import { ptr, arch } from "core";
+
+struct Point { x: i64; y: i64; }
+
+extern func malloc(n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+
+@test
+func api_math_constants() -> void {
+    test.near(math.e(), 2.718281828459045, 0.000000001);
+    test.near(math.pi(), 3.141592653589793, 0.000000001);
+    // e and pi are distinct values, not the same constant returned twice
+    test.ok(math.e() < math.pi());
+}
+
+@test
+func api_string_from_uint() -> void {
+    let a: String = String::from_uint(0);
+    test.eq(a.as_str(), "0");
+    a.drop();
+    let b: String = String::from_uint(18446744073709551615);   // u64 max, not -1
+    test.eq(b.as_str(), "18446744073709551615");
+    b.drop();
+    let c: String = String::from_int(0 - 42);
+    test.eq(c.as_str(), "-42");
+    c.drop();
+}
+
+@test
+func api_ptr_byte_access() -> void {
+    let p: *u8 = malloc(8);
+    ptr.write8(p, 200);                     // above i8 range: must stay unsigned
+    test.eq(ptr.read8(p) as i64, 200);
+    ptr.write8(ptr.offset(p, 3), 7);
+    test.eq(ptr.read8(ptr.offset(p, 3)) as i64, 7);
+    test.eq(ptr.diff(ptr.offset(p, 3), p), 3);
+    // offset accepts a negative step
+    test.eq(ptr.read8(ptr.offset(ptr.offset(p, 3), 0 - 3)) as i64, 200);
+    free(p);
+}
+
+@test
+func api_option_none_constructor() -> void {
+    let a: Option<i64> = None<i64>();       // explicit type argument
+    test.ok(a.is_none());
+    let b: Option<str> = None();            // inferred from the declared type
+    test.ok(b.is_none());
+    test.eq(b.unwrap_or("fallback"), "fallback");
+    let c: Option<i64> = Some(5);
+    test.eq(c.unwrap_or(9), 5);
+}
+
+@test
+func api_map_internals() -> void {
+    // element sizes come from scaled pointer arithmetic, so they are worth
+    // checking directly: a wrong size corrupts every slot in the table
+    let a: HashMap<str, i64> = HashMap<str, i64>::new();
+    test.eq(a.ksize() as i64, 8);
+    test.eq(a.vsize() as i64, 8);
+    a.insert("k", 1);
+    test.ok(a.contains("k"));
+    a.drop();
+
+    let b: HashMap<i64, Point> = HashMap<i64, Point>::new();
+    test.eq(b.ksize() as i64, 8);
+    test.eq(b.vsize() as i64, 16);          // two i64 fields
+    b.drop();
+
+    // the hash and equality overloads the table dispatches on
+    test.ok(map_eq(7, 7));
+    test.ok(!map_eq(7, 8));
+    test.ok(map_eq("ab", "ab"));
+    test.ok(!map_eq("ab", "ac"));
+    test.ok(map_hash(7) == map_hash(7));
+    test.ok(map_hash("ab") == map_hash("ab"));
+    test.ok(map_hash("ab") != map_hash("ac"));
+}
+
+@test
+func api_arch_sync_instructions() -> void {
+    // cpuid clobbers rbx, which is callee-saved: the wrapper must restore it.
+    // Keeping live values around the call is the check.
+    let a: i64 = 11;
+    let b: i64 = 22;
+    let c: i64 = 33;
+    arch.sync_instructions();
+    test.eq(a + b + c, 66);
+    let t1: u64 = arch.timestamp();
+    arch.sync_instructions();
+    let t2: u64 = arch.timestamp();
+    test.ok(t2 >= t1);
+}

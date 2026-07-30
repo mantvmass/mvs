@@ -179,6 +179,20 @@ static Token read_number(Lexer *lx) {
         advance(lx); /* consume the dot */
         while (isdigit((unsigned char)peek(lx))) advance(lx);
     }
+    /* Scientific notation: 1e9, 2.5e-3, 6.02E23. The exponent must have at least
+     * one digit, otherwise this is not an exponent at all (1e is 1 followed by
+     * the identifier e) and the number ends before it */
+    if (peek(lx) == 'e' || peek(lx) == 'E') {
+        size_t save_pos = lx->pos; int save_line = lx->line, save_col = lx->col;
+        advance(lx);
+        if (peek(lx) == '+' || peek(lx) == '-') advance(lx);
+        if (isdigit((unsigned char)peek(lx))) {
+            is_float = 1;
+            while (isdigit((unsigned char)peek(lx))) advance(lx);
+        } else {
+            lx->pos = save_pos; lx->line = save_line; lx->col = save_col;
+        }
+    }
     Token t = make_token(lx, is_float ? TK_FLOAT : TK_INT, start, lx->pos, line, col);
     if (is_float) t.float_val = atof(t.lexeme);
     else {

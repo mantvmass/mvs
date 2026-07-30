@@ -11,6 +11,8 @@
 #   2  built-in runner      mvs test: goldens + unit tests + compile-fail
 #   3  feature matrix       every type through every context, self-checking
 #   3b feature matrix 2     traits, function pointers, generics, pointers, flow
+#   3c module matrix        every import form x every kind of exported thing
+#   3d API coverage         every std/core function is called by a test or example
 #   4  differential tests   the same programs in MVS and C must agree
 #   5  optimizer equality   every example must print the same thing under -O
 #   6  freestanding         --nostd objects with zero undefined symbols
@@ -55,6 +57,15 @@ if sh scripts/matrix_features.sh elf64 > /tmp/audit_mf.txt 2>&1; then tail -1 /t
 if [ "$QUICK" != "quick" ]; then
     if sh scripts/matrix_features.sh arm64 > /tmp/audit_mf64.txt 2>&1; then tail -1 /tmp/audit_mf64.txt; else tail -12 /tmp/audit_mf64.txt; note "feature matrix 2 (arm64)"; fi
 fi
+
+step "3c. module matrix: import forms, conditional compilation, import errors"
+if sh scripts/matrix_modules.sh elf64 > /tmp/audit_mm.txt 2>&1; then tail -1 /tmp/audit_mm.txt; else tail -12 /tmp/audit_mm.txt; note "module matrix (elf64)"; fi
+if [ "$QUICK" != "quick" ]; then
+    if sh scripts/matrix_modules.sh arm64 > /tmp/audit_mm64.txt 2>&1; then tail -1 /tmp/audit_mm64.txt; else tail -12 /tmp/audit_mm64.txt; note "module matrix (arm64)"; fi
+fi
+
+step "3d. API coverage: every std and core function must be exercised"
+if python3 scripts/api_coverage.py > /tmp/audit_api.txt 2>&1; then tail -1 /tmp/audit_api.txt; else tail -20 /tmp/audit_api.txt; note "std/core API coverage"; fi
 
 step "4. differential tests against the C reference"
 if sh scripts/difftest.sh elf64 > /tmp/audit_diff.txt 2>&1; then tail -1 /tmp/audit_diff.txt; else tail -10 /tmp/audit_diff.txt; note "difftest (elf64)"; fi

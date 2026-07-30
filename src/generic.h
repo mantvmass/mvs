@@ -21,7 +21,7 @@ int monomorphize(Node *program);
 
 /* Resolve overloaded functions (same name, different parameter types): rename each definition by its
  * signature, then resolve call sites to the definition whose argument types match */
-void resolve_overloads(Node *program);
+int resolve_overloads(Node *program);   /* returns the number of unresolved calls */
 
 /* Compile-time type checking: catches invalid type mixes (e.g. 50 + "50", u8 = str).
  * Returns the number of errors found (0 = pass). Call after monomorphize + resolve_overloads */

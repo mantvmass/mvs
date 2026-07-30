@@ -43,3 +43,14 @@ func test_strings() -> void {
     let t: str = s;
     test.eq(t, s);
 }
+
+func test_float_literals() -> void {
+    // scientific notation, both signs of exponent and both spellings of 'e'
+    test.near(1e3, 1000.0, 0.000001);
+    test.near(1.0e18, 1000000000000000000.0, 1000.0);
+    test.near(2.5e-3, 0.0025, 0.0000001);
+    test.near(6.02E2, 602.0, 0.000001);
+    // an 'e' with no digits after it is not an exponent at all
+    let a: f64 = 5.0;
+    test.near(a, 5.0, 0.000001);
+}

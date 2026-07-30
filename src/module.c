@@ -22,6 +22,8 @@ typedef struct {
     char       *loaded[MAX_LOADED];  /* canonical paths of loaded modules (prevents reload/loops) */
     char       *defs[MAX_LOADED];    /* top-level symbol list per module, form "|name|name|" (import checks) */
     char       *loaded_ns[MAX_LOADED];/* namespace a module was tagged with on first load (guards ns clash) */
+    int         item_start[MAX_LOADED];/* range of result items this module contributed, so a later */
+    int         item_end[MAX_LOADED];  /* import under the other form can alias its free functions */
     int         nloaded;
     char       *ns_name[MAX_LOADED]; /* bound namespaces (io, net, alias); guards rebinding to another module */
     char       *ns_canon[MAX_LOADED];
@@ -114,7 +116,9 @@ static int find_loaded(Loader *L, const char *canon) {
     return -1;
 }
 
-/* Collect a module's top-level symbol names (struct/trait/non-method functions) as "|a|b|c|" */
+/* Collect a module's top-level symbol names (struct/trait/enum/global/non-method
+ * function) as "|a|b|c|". A global is a symbol like any other: importing one by
+ * name used to be rejected while the module's functions imported fine. */
 static char *collect_defs(Node *prog) {
     size_t cap = 256, len = 1;
     char *s = (char *)malloc(cap);
@@ -123,7 +127,7 @@ static char *collect_defs(Node *prog) {
         Node *d = prog->items[i];
         const char *nm = NULL;
         if ((d->kind == ND_FUNC && !d->is_method) || d->kind == ND_STRUCT_DECL ||
-            d->kind == ND_TRAIT || d->kind == ND_ENUM_DECL)
+            d->kind == ND_TRAIT || d->kind == ND_ENUM_DECL || d->kind == ND_VAR_DECL)
             nm = d->name;
         if (!nm) continue;
         size_t need = len + strlen(nm) + 2;
@@ -143,6 +147,32 @@ static int defs_has(const char *defs, const char *name) {
 }
 
 static void load_module(Loader *L, const char *path, const char *ns);
+
+/* A module imported under one form and then the other: clone its free functions
+ * under the second spelling so both resolve. `from_ns` is the namespace the
+ * module was first loaded with (empty for a symbol import), `to_ns` the one the
+ * second import asked for. Methods, externs and exports keep their own naming.
+ * The clones are ordinary functions, so tree-shaking drops the unused copies. */
+static void alias_module_functions(Loader *L, int mod_index, const char *from_ns, const char *to_ns) {
+    int start = L->item_start[mod_index], end = L->item_end[mod_index];
+    if (end > L->result->nitems) end = L->result->nitems;
+    int added = 0;
+    for (int i = start; i < end; i++) {
+        Node *it = L->result->items[i];
+        if (it->kind != ND_FUNC || it->is_method || it->is_extern || it->is_export) continue;
+        /* generic templates are found by name across the whole program, so a
+         * second copy would give monomorphization two templates to instantiate */
+        if (it->ngen > 0) continue;
+        const char *cur = it->ns ? it->ns : "";
+        if (strcmp(cur, from_ns) != 0) continue;
+        Node *cl = node_clone(it);
+        free(cl->ns);  cl->ns  = to_ns[0] ? strdup(to_ns) : NULL;
+        free(cl->mod); cl->mod = to_ns[0] ? strdup(to_ns) : (from_ns[0] ? strdup(from_ns) : NULL);
+        node_add_item(L->result, cl);
+        added++;
+    }
+    (void)added;
+}
 
 /* Bind namespace name to module canon; if already bound to another module, error */
 static void register_ns(Loader *L, const char *name, const char *canon) {
@@ -281,13 +311,13 @@ static void load_module(Loader *L, const char *path, const char *ns) {
                 fprintf(stderr, "error: module '%s' is already imported as namespace '%s'; cannot also import it as '%s'\n",
                         path, prev_ns, now_ns);
                 L->had_error = 1;
-            } else if (prev_ns[0]) {
-                fprintf(stderr, "warning: module '%s' was already imported as namespace '%s'; free functions from this "
-                        "symbol import remain reachable only as '%s.<name>' (structs/traits work either way)\n",
-                        path, prev_ns, prev_ns);
             } else {
-                fprintf(stderr, "warning: module '%s' was already symbol-imported; its free functions are NOT reachable "
-                        "as '%s.<name>' (structs/traits work either way)\n", path, now_ns);
+                /* One namespace form and one symbol form of the SAME module. Both
+                 * spellings are legitimate (import { io, string } from "std" next
+                 * to import { String } from "std/string" is the normal way to
+                 * write it), so the module's free functions are made reachable
+                 * under both instead of one of them silently not working. */
+                alias_module_functions(L, prev, prev_ns, now_ns);
             }
         }
         return;
@@ -323,6 +353,7 @@ static void load_module(Loader *L, const char *path, const char *ns) {
     char dir[1024];
     path_dirname(path, dir);
 
+    int item_start = L->result->nitems;   /* where this module's items begin */
     for (int i = 0; i < prog->nitems; i++) {
         Node *it = prog->items[i];
         if (!cfg_matches(L, it)) continue;    /* @compile says this item is not for this target */
@@ -349,6 +380,8 @@ static void load_module(Loader *L, const char *path, const char *ns) {
         L->loaded[L->nloaded] = strdup(canon);
         L->defs[L->nloaded] = mod_defs;
         L->loaded_ns[L->nloaded] = strdup(ns ? ns : "");
+        L->item_start[L->nloaded] = item_start;
+        L->item_end[L->nloaded] = L->result->nitems;
         L->nloaded++;
     } else {
         free(mod_defs);

@@ -86,6 +86,14 @@ jobs:
       - name: Feature matrix (traits, function pointers, generics, flow)
         run: sh scripts/matrix_features.sh elf64
 
+      - name: Module matrix (import forms, conditional compilation)
+        run: sh scripts/matrix_modules.sh elf64
+
+      # Every std/core function must be called by a test or an example, so a
+      # module that rots after a language change cannot go unnoticed.
+      - name: std and core API coverage
+        run: python3 scripts/api_coverage.py
+
       - name: Upload Linux binary
         uses: actions/upload-artifact@v4
         with:
@@ -149,3 +157,6 @@ jobs:
 
       - name: Feature matrix 2 on AArch64
         run: sh scripts/matrix_features.sh arm64
+
+      - name: Module matrix on AArch64
+        run: sh scripts/matrix_modules.sh arm64

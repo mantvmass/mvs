@@ -751,7 +751,10 @@ int main(int argc, char **argv) {
         fprintf(stderr, "compilation failed (trait bound errors)\n");
         return 1;
     }
-    resolve_overloads(program);
+    if (resolve_overloads(program) > 0) {   /* an unresolved call has no target to generate */
+        fprintf(stderr, "compilation failed (overload resolution)\n");
+        return 1;
+    }
 
     /* compile-time type check (catches type mismatches such as 50 + "50") before codegen */
     if (typecheck(program) > 0) {
