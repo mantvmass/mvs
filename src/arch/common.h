@@ -18,9 +18,15 @@
 #include <stdio.h>
 #include "../ast.h"
 
-#define MAX_SYM   512
-#define MAX_FUNC  256
-#define MAX_STR   256
+/* Table sizes. These are ceilings on ONE program, so they must be generous
+ * enough for a real one: a few thousand functions and a few thousand strings
+ * is an ordinary size for a project, not an abuse. Every table lives inside
+ * Gen, which the backends keep in static storage (a Gen this size would blow
+ * the stack as a local). Exceeding any of them is a diagnosed error, never
+ * silent truncation. */
+#define MAX_SYM   4096   /* locals per function (a pre-pass reserves them all) */
+#define MAX_FUNC  2048   /* functions, and separately structs, per program */
+#define MAX_STR   4096   /* distinct string literals per program */
 #define MAX_LOOP  64
 #define MAX_ARGS  4   /* supports 4 register arguments (extras go on the stack) */
 #define LABEL_MAX 720 /* label buffer size (fits long generic instance names); globals get prefix mvs_gv_ vs funcs */

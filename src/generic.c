@@ -1665,14 +1665,26 @@ int check_duplicates(Node *prog) {
 }
 
 void resolve_overloads(Node *prog) {
-    static OvSet sets[256]; int nsets = 0;
+    /* The overload table is sized to THIS program: one slot per eligible
+     * function is always enough (a fixed ceiling here used to reject large
+     * programs with a message about overloading, which was doubly wrong: they
+     * had no overloads, and the limit was not about overloads at all). */
+    int cap = 0;
+    for (int i = 0; i < prog->nitems; i++)
+        if (ov_eligible(prog->items[i])) cap++;
+    if (cap == 0) return;
+    OvSet *sets = (OvSet *)calloc((size_t)cap, sizeof(OvSet));
+    if (!sets) {
+        fprintf(stderr, "error: out of memory building the overload table (%d function names)\n", cap);
+        return;
+    }
+    int nsets = 0;
     /* 1) group functions by namespace + original name (each module has its own sets) */
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
         if (!ov_eligible(f)) continue;
         int si = ov_find(sets, nsets, f->ns, f->name);
         if (si < 0) {
-            if (nsets >= 256) { fprintf(stderr, "codegen error: too many distinct function names for overloading\n"); break; }
             si = nsets++; sets[si].ns = strdup(f->ns ? f->ns : ""); sets[si].orig = strdup(f->name); sets[si].n = 0;
         }
         if (sets[si].n < 16) {
@@ -1709,6 +1721,7 @@ void resolve_overloads(Node *prog) {
             scan_ov(prog, f->operand, map, &nmap, sets, nsets);
         }
     }
+    free(sets);   /* the renames are already in the AST; the table itself is done */
 }
 
 /* ---------- default argument filling ----------
@@ -2232,6 +2245,15 @@ static void tc_check(TcCtx *c, Node *n) {
             diag_print(n->file, n->line, n->col, "warning",
                        "comparing two 'str' values compares their addresses, not their text");
             diag_help("compare the contents instead: cstr.eq(a, b) from \"core\", or strcmp(a, b) == 0");
+        }
+        /* a CONSTANT division or modulo by zero is a program bug the compiler
+         * can see: reject it here rather than let the hardware trap at run time
+         * (a constant array index out of range is already rejected the same way) */
+        if ((op == TK_SLASH || op == TK_PERCENT) && n->rhs->kind == ND_INT && n->rhs->int_val == 0) {
+            diag_print(n->file, n->line, n->col, "error",
+                       op == TK_SLASH ? "division by zero" : "remainder by zero");
+            diag_help("the divisor is the literal 0; integer division by zero traps at run time");
+            (*c->errc)++;
         }
         if (op == TK_PLUS || op == TK_MINUS) {
             int lp = tc_isptr(lt), rp = tc_isptr(rt);

@@ -1667,7 +1667,9 @@ static int scan_uses_dyn(Node *n) {
 /* ---------- entry point ---------- */
 
 int arm64_linux_generate(Node *program, FILE *out) {
-    Gen g;
+    /* static, not a local: Gen holds the symbol/struct/string tables and is far
+     * too large for the stack */
+    static Gen g;
     memset(&g, 0, sizeof(g));
     g.out = out;
     g.program = program;

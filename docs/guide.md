@@ -177,6 +177,12 @@ compile error; the literal length must match N exactly; parameters cannot be arr
 the array decays); whole-array assignment (`a = b`) is rejected, copy element by element.
 For dynamically-sized buffers use `malloc` + pointer arithmetic as before.
 
+**Division by zero.** A constant zero divisor (`x / 0`, `x % 0`) is a compile
+error. A zero divisor computed at run time is NOT checked: integer division by
+zero traps in hardware (SIGFPE on Linux, an integer-divide-by-zero exception on
+Windows), exactly as in C. Floating point follows IEEE and yields infinity or
+NaN instead of trapping.
+
 **Bounds checking.** A NON-constant index into a `[T; N]` is checked at run time
 (the comparison is unsigned, so a negative index fails too). An out-of-range
 index TRAPS instead of touching memory: `ud2` on x86-64 (SIGILL), `brk #1` on

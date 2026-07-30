@@ -1,0 +1,7 @@
+//~ ERROR: division by zero
+// a constant zero divisor is visible at compile time, like a constant index
+// out of range, so it is rejected instead of trapping at run time
+func main() -> i8 {
+    let x: i64 = 5 / 0;
+    return 0;
+}
