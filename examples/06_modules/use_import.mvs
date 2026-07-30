@@ -1,13 +1,13 @@
 // ============================================================
-//  use_import — นำเข้าข้ามไฟล์
+//  use_import: importing across files
 //  build:  mvs.exe examples/06_modules/use_import.mvs
 //  run:    examples\06_modules\use_import.exe
 //
-//  รูปแบบ import (path เป็นตัวกำหนด):
-//   A) import { io } from "std"               submodule ของ package -> namespace (io.out)
-//   B) import { square } from "./mathlib.mvs" ดึงสัญลักษณ์ตรง ๆ
-//   C) import m from "./mathlib.mvs"          ทั้งโมดูลเป็น namespace (m.square) — ดูหมายเหตุ
-//  หมายเหตุ: หนึ่งโมดูลผูกได้หนึ่ง namespace ต่อการ build — เลือกรูปแบบ B หรือ C ต่อไฟล์ (อย่าผสมไฟล์เดียวกัน)
+//  import forms (the path decides):
+//   A) import { io } from "std"               package submodule -> namespace (io.out)
+//   B) import { square } from "./mathlib.mvs" pulls symbols directly
+//   C) import m from "./mathlib.mvs"          whole module as a namespace (m.square), see note
+//  note: one module binds one namespace per build; pick form B or C per file (do not mix for the same file)
 // ============================================================
 import { io } from "std";                          // A
 import { square, factorial } from "./mathlib.mvs"; // B

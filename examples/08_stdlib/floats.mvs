@@ -1,10 +1,10 @@
 // ============================================================
-//  floats — เลขทศนิยม f32/f64 (เลขคณิต, เปรียบเทียบ, เรียก C math)
+//  floats: f32/f64 floating point (arithmetic, comparison, calling C math)
 //  build:  mvs.exe examples/08_stdlib/floats.mvs
 //  run:    examples\08_stdlib\floats.exe
 // ============================================================
 import { io } from "std";
-extern func sqrt(x: f64) -> f64;     // จาก C math (ลิงก์อยู่กับ CRT)
+extern func sqrt(x: f64) -> f64;     // from C math (linked with the CRT)
 
 func circleArea(r: f64) -> f64 { return 3.14159 * r * r; }
 
@@ -12,9 +12,9 @@ func main() -> i8 {
     let r: f64 = 2.0;
     io.out("area(r=2) = {}", circleArea(r));   // 12.566360
     io.out("3.0 / 2.0 = {}", 3.0 / 2.0);       // 1.5
-    io.out("2.0 ** 10 = {}", 2.0 ** 10);       // 1024.0 (ยกกำลังฐานทศนิยม)
-    io.out("mixed 1.5 + 2 = {}", 1.5 + 2);     // 3.5 (int -> float อัตโนมัติ)
-    io.out("sqrt(144) = {}", sqrt(144.0));     // 12.0 (เรียก C math)
+    io.out("2.0 ** 10 = {}", 2.0 ** 10);       // 1024.0 (power with a float base)
+    io.out("mixed 1.5 + 2 = {}", 1.5 + 2);     // 3.5 (int -> float automatically)
+    io.out("sqrt(144) = {}", sqrt(144.0));     // 12.0 (calls C math)
     io.out("-3.5 (unary minus) = {}", 0.0 - 3.5 - (3.5 - 3.5)); // -3.5
     return 0;
 }

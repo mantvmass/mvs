@@ -1,8 +1,8 @@
 // ============================================================
-//  extern_c — MVS เรียกฟังก์ชันของภาษา C โดยตรงผ่าน extern
+//  extern_c: MVS calling C functions directly via extern
 //  build:  mvs.exe examples/07_c_interop/extern_c.mvs
 //  run:    examples\07_c_interop\extern_c.exe
-//  (extern = ประกาศ foreign function จาก C runtime / ไลบรารีที่ลิงก์อยู่)
+//  (extern = declare a foreign function from the C runtime / a linked library)
 // ============================================================
 import { io } from "std";
 

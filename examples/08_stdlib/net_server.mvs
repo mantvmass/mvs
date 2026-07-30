@@ -1,16 +1,16 @@
 // ============================================================
-//  net_server — TCP echo server แบบ Rust (struct + method, ผ่าน Winsock)
+//  net_server: Rust-style TCP echo server (struct + method, via Winsock)
 //  build:  mvs.exe examples/08_stdlib/net_server.mvs
 //  run:    examples\08_stdlib\net_server.exe
-//  ทดสอบ:  เปิดอีกเทอร์มินัล -> curl http://127.0.0.1:8080/
+//  test:   open another terminal -> curl http://127.0.0.1:8080/
 // ============================================================
 import { io, net } from "std";
 
 func main() -> i8 {
-    let server: TcpServer = net.TcpServer("0.0.0.0", 8080);  // รอที่ port 8080
+    let server: TcpServer = net.TcpServer("0.0.0.0", 8080);  // wait on port 8080
     io.out("listening on port 8080 ...");
 
-    let conn: TcpSocket = server.accept();   // รับหนึ่งการเชื่อมต่อ
+    let conn: TcpSocket = server.accept();   // accept one connection
     let request: str = conn.recv();
     io.out("got request:\n{}", request);
 

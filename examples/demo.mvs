@@ -1,8 +1,8 @@
 // ============================================================
-//  demo — โชว์เคสรวมความสามารถหลักของ MVS (จุดเริ่มต้นที่ดีสำหรับมือใหม่)
+//  demo: showcase of MVS core features (a good starting point for newcomers)
 //  build:  mvs.exe examples/demo.mvs
 //  run:    examples\demo.exe
-//  ดูตัวอย่างเฉพาะเรื่องในโฟลเดอร์ 01_language .. 08_stdlib
+//  See topic-specific examples in the 01_language .. 08_stdlib folders
 // ============================================================
 import { io } from "std";
 

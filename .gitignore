@@ -1,8 +1,8 @@
-# คอมไพเลอร์ที่ build แล้ว
+# the built compiler
 mvs
 mvs.exe
 
-# ไฟล์กลาง/ผลลัพธ์จากการคอมไพล์ (ทุกโฟลเดอร์)
+# intermediate/output files from compilation (every folder)
 *.asm
 *.obj
 *.o
@@ -11,15 +11,15 @@ mvs.exe
 *.pdb
 *.lib
 
-# ไฟล์ที่ตัวอย่างสร้างขึ้นตอนรัน
-# (greeting.txt มาจาก examples/08_stdlib/files.mvs)
+# files created by examples at run time
+# (greeting.txt comes from examples/08_stdlib/files.mvs)
 greeting.txt
 
-# โฟลเดอร์ทดลอง/ชั่วคราว
+# experimental/temporary folders
 tmp/
 _t/
 
-# editor / IDE / ระบบ
+# editor / IDE / OS
 .vscode/
 .idea/
 *.swp

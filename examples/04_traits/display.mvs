@@ -1,13 +1,13 @@
 // ============================================================
-//  display — trait Display + fmt.println (formatting แบบ library จริง)
+//  display: trait Display + fmt.println (formatting as a real library)
 //  build:  mvs.exe examples/04_traits/display.mvs
 //  run:    examples\04_traits\display.exe
 //
-//  io.out("{}", ..) เป็น compiler intrinsic (รับ arg ไม่จำกัด เหมือน println! ของ Rust)
-//  ส่วน fmt.println เป็นฟังก์ชัน MVS ล้วน — ชนิดที่ impl Display พิมพ์ได้ผ่านมัน (static dispatch)
+//  io.out("{}", ..) is a compiler intrinsic (unlimited args, like Rust's println!)
+//  fmt.println is pure MVS; any type that impls Display prints through it (static dispatch)
 // ============================================================
 import { fmt } from "std";              // fmt.println + trait Display
-import { String } from "std/string";    // ชนิด String
+import { String } from "std/string";    // the String type
 
 struct Point { x: i32; y: i32; }
 impl Display for Point {

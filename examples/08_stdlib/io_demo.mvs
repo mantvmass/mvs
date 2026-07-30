@@ -1,5 +1,5 @@
 // ============================================================
-//  io_demo — การแสดงผลด้วย io.out (รูปแบบ {} สไตล์ Rust)
+//  io_demo: output with io.out (Rust-style {} formatting)
 //  build:  mvs.exe examples/08_stdlib/io_demo.mvs
 //  run:    examples\08_stdlib\io_demo.exe
 // ============================================================
@@ -8,7 +8,7 @@ import { io } from "std";
 struct Point { x: i32; y: i32; }
 
 func main() -> i8 {
-    io.out("plain text");                                  // ข้อความล้วน (+ ขึ้นบรรทัดใหม่)
+    io.out("plain text");                                  // plain text (+ trailing newline)
     io.out("int={} float={} str={} char={} bool={}", 7, 2.5, "hi", 'A', true);
     io.out("hex: {:x}", 255);                              // ff
     io.out("literal braces: {{}}");                        // {}
@@ -16,7 +16,7 @@ func main() -> i8 {
     let pt: Point = Point { x: 3, y: 4 };
     io.out("struct: {}", pt);                              // Point { x: 3, y: 4 }
 
-    io.print("no newline");                                // io.print: ไม่ขึ้นบรรทัดใหม่
+    io.print("no newline");                                // io.print: no trailing newline
     io.print(" ... continued\n");
     return 0;
 }

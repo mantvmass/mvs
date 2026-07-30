@@ -1,6 +1,6 @@
 // ============================================================
-//  mathlib — โมดูลที่ผู้ใช้เขียนเอง (นำเข้าโดย use_import.mvs)
-//  ไม่ต้อง build เดี่ยว — ถูก import โดยไฟล์อื่น
+//  mathlib: a user-written module (imported by use_import.mvs)
+//  no standalone build needed; it is imported by another file
 // ============================================================
 
 func square(x: i32) -> i32 { return x * x; }

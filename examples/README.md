@@ -11,7 +11,7 @@ examples\<group>\<file>.exe             # run it
 mvs.exe examples/<group>/<file>.mvs -S  # inspect the generated assembly (no nasm/clang)
 ```
 
-You need **clang** and **nasm** on your PATH — mvs.exe warns if either is missing and prints the
+You need **clang** and **nasm** on your PATH. mvs.exe warns if either is missing and prints the
 versions it uses.
 
 ---
@@ -20,7 +20,7 @@ versions it uses.
 
 A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/while, hex.
 
-## 01_language — language core
+## 01_language: language core
 
 | File | Contents |
 |------|----------|
@@ -32,16 +32,16 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `control.mvs` | if/elseif/else, while, for, do-while, switch/case |
 | `args.mvs` | command-line args via `main(argc, argv)` |
 
-## 02_functions — functions / generics / overloading
+## 02_functions: functions / generics / overloading
 
 | File | Contents |
 |------|----------|
 | `recursion.mvs` | self-recursion + mutual recursion |
 | `generics.mvs` | generic functions (monomorphization) |
 | `overload.mvs` | overloading by type + a generic calling an overload |
-| `funcptr.mvs` | function pointers — `func(...) -> T` as a value, pass/store/call (indirect) |
+| `funcptr.mvs` | function pointers: `func(...) -> T` as a value, pass/store/call (indirect) |
 
-## 03_structs — struct / method / pointer
+## 03_structs: struct / method / pointer
 
 | File | Contents |
 |------|----------|
@@ -49,27 +49,27 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `methods.mvs` | methods + associated `Type::new` + chaining |
 | `pointers.mvs` | `&`/`*`/`**`, pointer arithmetic, arrays via malloc |
 
-## 04_traits — trait / Display
+## 04_traits: trait / Display
 
 | File | Contents |
 |------|----------|
 | `traits.mvs` | trait + `impl Trait for` + `<T: Trait>` (static dispatch) |
 | `display.mvs` | trait `Display` + `fmt.println` (library-style formatting) |
 
-## 05_strings — strings
+## 05_strings: strings
 
 | File | Contents |
 |------|----------|
 | `strings.mvs` | `String` (heap, owned): `from`/`from_int`/`push_str`/`as_str`/`drop` |
 
-## 06_modules — module system
+## 06_modules: module system
 
 | File | Contents |
 |------|----------|
 | `use_import.mvs` | the three import forms (namespace / symbol / alias) |
 | `mathlib.mvs` | a user-written module (imported by the above) |
 
-## 07_c_interop — working with C
+## 07_c_interop: working with C
 
 | File | Contents |
 |------|----------|
@@ -78,7 +78,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `export_lib.mvs` + `caller.c` | C calling MVS (`export func` + a C-side prototype) |
 | `freestanding.mvs` | `--nostd` mode (no std/CRT/OS) for OS / bare-metal |
 
-## 08_stdlib — the standard library
+## 08_stdlib: the standard library
 
 | File | Contents |
 |------|----------|

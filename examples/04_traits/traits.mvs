@@ -1,8 +1,8 @@
 // ============================================================
-//  traits — trait + impl Trait for Type + generic ผูก trait (<T: Area>)
+//  traits: trait + impl Trait for Type + trait-bounded generics (<T: Area>)
 //  build:  mvs.exe examples/04_traits/traits.mvs
 //  run:    examples\04_traits\traits.exe
-//  dispatch เป็น static (monomorphization) — ไม่มี vtable/overhead
+//  dispatch is static (monomorphization), no vtable/overhead
 // ============================================================
 import { io } from "std";
 
@@ -10,7 +10,7 @@ struct Point { x: i32; y: i32; }
 struct Circle { r: i32; }
 
 trait Area {
-    func area(self: *Self) -> i32;          // signature เท่านั้น; Self = ชนิดที่ impl
+    func area(self: *Self) -> i32;          // signature only; Self = the implementing type
 }
 
 impl Point  { func new(x: i32, y: i32) -> Point { return Point { x: x, y: y }; } }  // associated fn
@@ -18,13 +18,13 @@ impl Area for Point  { func area(self: *Point)  -> i32 { return self.x * self.y;
 impl Circle { func new(r: i32) -> Circle { return Circle { r: r }; } }
 impl Area for Circle { func area(self: *Circle) -> i32 { return 3 * self.r * self.r; } }
 
-// generic ผูก trait: T ต้อง impl Area เท่านั้นถึงเรียก .area() ได้
+// trait-bounded generic: T must impl Area to be able to call .area()
 func describe<T: Area>(shape: T) -> i32 { return shape.area(); }
 
 func main() -> i8 {
     let p: Point = Point::new(3, 4);
     let c: Circle = Circle::new(5);
-    io.out("point area  = {}", describe(p));   // 12  -> เลือก Point::area
-    io.out("circle area = {}", describe(c));   // 75  -> เลือก Circle::area
+    io.out("point area  = {}", describe(p));   // 12  -> picks Point::area
+    io.out("circle area = {}", describe(c));   // 75  -> picks Circle::area
     return 0;
 }

@@ -1,12 +1,12 @@
-# RULES — developer rules and gotchas for the MVS compiler
+# RULES: developer rules and gotchas for the MVS compiler
 
 Read this before touching the code. Breaking these rules tends to produce silently
 wrong output rather than a clean failure. For language reference and current status see
 [GUIDE.md](GUIDE.md).
 
-A reminder on comments: source comments inside `src/**` are written in **Thai** (detailed,
-explaining what/why/how). Everything the program prints — stdout and error messages — is
-plain **English**. These docs are English too. Don't mix the two up.
+A reminder on language: everything in this project is **English only**. Source comments
+(detailed, explaining what/why/how), everything the program prints (stdout and error
+messages), and these docs.
 
 ---
 
@@ -20,22 +20,22 @@ an OS, a bootloader, firmware, or bare-metal code with it.
   explicitly by the user.
 - `io.out` is an intrinsic, but it is gated behind `import { io }`. No import, no `io.out`.
 - Codegen uses the x86-64 / win64 calling convention. That is the ABI of *calling a function*,
-  not an OS API — you can write an OS for the same architecture using the same convention.
+  not an OS API; you can write an OS for the same architecture using the same convention.
 - `--nostd` is the real freestanding mode: no package imports, no CRT linkage, emits a `.obj`
   you link or embed yourself (e.g. into a kernel image).
 - When adding a feature, never bake an OS/CRT dependency into the core. If you genuinely need
   the OS, reach it through `extern` from inside `std/*.mvs`.
 
 A note on object format for OS authors: `--nostd` produces self-contained x86-64 (provable
-with `llvm-nm` — no undefined symbols), but the output is currently **COFF/PE + win64**
+with `llvm-nm`, no undefined symbols), but the output is currently **COFF/PE + win64**
 (`nasm -f win64`). That links fine with LLVM/lld. If you target GNU ld + ELF (GRUB multiboot)
 you need the ELF/SysV backend that is still on the roadmap. "win" here means the calling
 convention, not a dependency on Windows.
 
 ## 0.5 C interop
 
-- **MVS calling C:** `extern func name(...) -> T;` — raw symbol name, matches C.
-- **C calling MVS:** `export func name(...) -> T { ... }` — emits a raw symbol name plus `global`.
+- **MVS calling C:** `extern func name(...) -> T;` uses the raw symbol name, matching C.
+- **C calling MVS:** `export func name(...) -> T { ... }` emits a raw symbol name plus `global`.
 - **Object output:** `mvs file.mvs -c` (or `--emit-obj`) produces a `.obj` you can link into a C program.
 - Ordinary MVS functions use the `mvs_<...>` label prefix to avoid clashes. Only `export` uses raw names.
 
@@ -48,13 +48,14 @@ convention, not a dependency on Windows.
 
 ## 2. Comments (important)
 
-- Comments in `src/**` are detailed Thai, explaining what/why/how — not a literal restatement
-  of the code.
+- Comments are detailed English, explaining what/why/how, not a literal restatement
+  of the code. No Thai (or any other language) anywhere in the codebase.
 - Every function should have a header comment describing its job; every file opens with a block
   comment describing its role.
-- Everything the program prints (output and error messages) is plain English. Thai is for
-  comments only.
-- Don't nest `/*` or `*/` inside a block comment — clang warns with `-Wcomment`. If you need to
+- Everything the program prints (output and error messages) is plain English.
+- Never use em dash or en dash in comments, output, or docs. Use comma, period, colon,
+  semicolon, or hyphen instead.
+- Don't nest `/*` or `*/` inside a block comment: clang warns with `-Wcomment`. If you need to
   mention a comment delimiter, describe it in words instead.
 
 ## 3. Toolchain and pipeline
@@ -77,7 +78,7 @@ convention, not a dependency on Windows.
   float↔int except where mixed arithmetic introduces it deliberately.
 - `type_of`/`infer` on `ND_BINARY` must promote order-independently: `int <op> float` → float
   (widest), `int <op> int` → the wider int type (`int_rank`/`type_size`), `ptr±int` → ptr,
-  `ptr-ptr` → isize. Never return `type_of(lhs)` directly — that picks the wrong format/overload
+  `ptr-ptr` → isize. Never return `type_of(lhs)` directly: that picks the wrong format/overload
   and depends on operand order.
 - `scan_calls` must go children-first (resolve the inner generic call before the outer). Otherwise
   a nested generic `f(g(x))` infers the outer from an un-instantiated template and gets raw `T`.
@@ -94,11 +95,11 @@ convention, not a dependency on Windows.
 - The parser has a depth guard (`MAX_PARSE_DEPTH` in `parse_expr`/`parse_block`/`parse_unary`) to
   stop deeply nested input from overflowing the stack.
 - A struct containing itself by value is an error (`struct_has_cycle` in `layout_structs`), and
-  `expand_struct` has a depth cap — both guard against unbounded loops.
+  `expand_struct` has a depth cap; both guard against unbounded loops.
 - Overload signatures (`width_code`/`cat_code`) must include pointer depth + pointee (`*i32`→`pi32`),
   otherwise `f(*i32)` and `f(*u8)` collide (false duplicate / duplicate label).
 - Every analysis pass (`typecheck`/`scan_ov`/`scan_calls`) must call `seed_globals()` before adding
-  params, or globals get inferred as i64 — and it must scan **global initializers**, not just
+  params, or globals get inferred as i64, and it must scan **global initializers**, not just
   function bodies.
 - `io.out` printing a struct returned from a function (`io.out("{}", mk())`) must materialize once
   via `ND_FRAMEREF` (referencing the temp slot reserved by `collect_struct_temps`), or each field
@@ -114,10 +115,10 @@ Build / assemble / link:
   - `ws2_32` is for the net module (always linked; harmless for programs that don't use it).
 - Assembly is NASM Intel syntax with `default rel` (RIP-relative).
 
-## 4. win64 ABI — the rules that fail silently when missed
+## 4. win64 ABI: the rules that fail silently when missed
 
 - First four integer args: rcx, rdx, r8, r9; arg 5+ go on the stack above the shadow space.
-- Float args: xmm0–xmm3 by position (variadic calls like printf fill both the GPR and the xmm).
+- Float args: xmm0-xmm3 by position (variadic calls like printf fill both the GPR and the xmm).
 - Reserve **32 bytes of shadow space** before every `call` (`sub rsp,32` / `add rsp,32`).
 - rsp must be 16-byte aligned at the `call`.
   - At function entry rsp ≡ 8 (mod 16); `push rbp` makes it ≡ 0.
@@ -126,9 +127,9 @@ Build / assemble / link:
     inside an expression. Don't switch them to 8-byte push/pop.
 - Return value is in rax; `main` uses rax/al as the exit code.
 - Callee-saved (nonvolatile) registers on win64: rbx, rbp, rdi, rsi, rsp, r12-r15. Functions we
-  emit must not clobber these without saving/restoring — especially **rsi/rdi** (easy to miss
+  emit must not clobber these without saving/restoring, especially **rsi/rdi** (easy to miss
   because `rep movsb` uses them). Break this and C code that calls an exported MVS function breaks.
-  - Copy memory with `gen_memcpy()` (a byte loop using r10/r11/rcx/rax — all volatile). Don't use
+  - Copy memory with `gen_memcpy()` (a byte loop using r10/r11/rcx/rax, all volatile). Don't use
     `rep movsb`.
   - Free scratch (volatile) registers: rax, rcx, rdx, r8, r9, r10, r11, xmm0-5.
 
@@ -149,7 +150,7 @@ See `func_label_of()` and `find_func()` in `arch/common.c` for the source of tru
 ## 5.5 struct / pointer / float / ABI details
 
 - **Type width:** variables are allocated at their real size (`type_size`); stores truncate to size
-  (al/ax/eax/rax), loads extend with `movsx`/`movzx` by sign (`is_signed_type`) — but math still
+  (al/ax/eax/rax), loads extend with `movsx`/`movzx` by sign (`is_signed_type`), but math still
   runs in 64-bit registers.
 - **lvalue/address:** `gen_addr()` puts an address into rax; shared by member access, `&`, `*`, assignment.
 - **struct return (sret):** functions returning a struct use a hidden pointer in rcx, with the real
@@ -163,23 +164,23 @@ See `func_label_of()` and `find_func()` in `arch/common.c` for the source of tru
   - Floats cross the C boundary both ways (arg in `xmm<pos>`, return in xmm0). For f32 across that
     boundary: an export taking f32 does `cvtss2sd` on entry, and `cvtsd2ss` before `ret` when
     returning f32 (C uses single, MVS uses double internally).
-  - Every float operation must be handled in xmm — don't apply integer instructions to the bit-pattern.
+  - Every float operation must be handled in xmm; don't apply integer instructions to the bit-pattern.
     `**` is a `mulsd` loop; unary `-` is an xor of the sign bit (not `neg`). `%`, `++`/`--`, and
     `switch` on a float are compile errors (caught in typecheck/codegen).
 
-## 5.6 struct methods (impl) — Rust-style
+## 5.6 struct methods (impl), Rust-style
 
 - Declared as `impl StructName { func method(self: *StructName, ...) -> T {...} }`.
 - A method gets `ns = struct name` (for the label `mvs_<Struct>_<method>`) and `is_method = 1`.
-- Called as `obj.method(args)` — the compiler injects `self` (a pointer to obj) as the first argument.
+- Called as `obj.method(args)`: the compiler injects `self` (a pointer to obj) as the first argument.
   - If `obj` is a struct value → pass `&obj`; if it's already a pointer → pass it directly.
 - **Chaining** works when a method returns a pointer (`*Struct`), e.g. a builder `v.setX(1).setY(2)`.
-- **`ns` vs `mod`** (on the `Node`) — don't confuse them:
+- **`ns` vs `mod`** (on the `Node`). Don't confuse them:
   - `ns` = the namespace of the **symbol label** (module for ordinary funcs, struct name for methods).
   - `mod` = the namespace of the **owning module**, used to resolve unqualified calls (`g->cur_ns = fn->mod`).
   - If a method (ns = struct) used ns as cur_ns it would call itself in a loop (e.g. method `send`
     calling extern `send`).
-- Unqualified calls inside a method resolve in the module first, then globally — to call a sibling
+- Unqualified calls inside a method resolve in the module first, then globally; to call a sibling
   method use `self.x()`.
 
 ## 5.7 trait + associated function + generic bound
@@ -193,8 +194,8 @@ See `func_label_of()` and `find_func()` in `arch/common.c` for the source of tru
   implement the trait (have an `ND_TRAIT_IMPL`). If not, `monomorphize()` returns a nonzero error count and
   main stops.
 - **Dispatch is static and free:** after monomorphize T is concrete, so `x.method()` resolves by type on its
-  own. No vtable — a trait is mostly "syntax + checking" and codegen needn't know about traits.
-- codegen/typecheck **skip** `ND_TRAIT`/`ND_TRAIT_IMPL` (they aren't `ND_FUNC`) — don't accidentally emit them
+  own. No vtable: a trait is mostly "syntax + checking" and codegen needn't know about traits.
+- codegen/typecheck **skip** `ND_TRAIT`/`ND_TRAIT_IMPL` (they aren't `ND_FUNC`); don't accidentally emit them
   as functions.
 - Extra checks: an `impl` must provide every method the trait declares, and the referenced trait must exist
   (`check_trait_impls` in generic.c).
@@ -204,7 +205,7 @@ See `func_label_of()` and `find_func()` in `arch/common.c` for the source of tru
 - **Scope shadowing works** (a visibility stack `g->visible[]` pushed/popped per block; `find_var` searches
   most-recent-first; each variable gets its own slot even when names repeat). Every type-analysis pass
   (`typecheck`/`scan_ov`/`scan_calls`) is scope-aware too. (It used to use a flat map via `collect_vars`,
-  which made overload/generic resolution pick the wrong type and segfault on differently-typed shadows — fixed.)
+  which made overload/generic resolution pick the wrong type and segfault on differently-typed shadows; fixed.)
 - Math still runs in 64-bit registers (width respected only at load/store), so mid-expression overflow is 64-bit.
 - Passing a struct **by value as a parameter** works (caller passes &arg, callee copies), and a struct **result
   from a function is usable as an rvalue** (`g(make())`, `make().field`) via temps reserved by
@@ -213,15 +214,15 @@ See `func_label_of()` and `find_func()` in `arch/common.c` for the source of tru
 - **extern/export names must not collide with NASM reserved words** (`abs`, `rel`, `seg`, `wrt`) since they use
   raw symbol names → nasm syntax error. Wrap or rename (e.g. C `abs` can't be used directly).
 
-## 6.5 Module system (import) — rules and behavior
+## 6.5 Module system (import): rules and behavior
 
 - Import resolution lives in `src/module.c` (the front-end still parses one file at a time).
-- **Three forms — the path decides** (see `handle_import`):
-  - `import { io } from "std"` — path is a **bare package** → names in `{}` are **submodules**, loaded as a
+- **Three forms, the path decides** (see `handle_import`):
+  - `import { io } from "std"`: path is a **bare package** → names in `{}` are **submodules**, loaded as a
     namespace (`io.xxx`).
-  - `import { S } from "std/x"` / `from "./f.mvs"` — path is a **specific module** → names in `{}` are
+  - `import { S } from "std/x"` / `from "./f.mvs"`: path is a **specific module** → names in `{}` are
     **symbols**, pulled in directly (ns="").
-  - `import alias from "std/x"` / `from "./f.mvs"` — **no `{}`** → the whole module becomes a **namespace =
+  - `import alias from "std/x"` / `from "./f.mvs"`: **no `{}`** → the whole module becomes a **namespace =
     alias** (stored in `imp->name`).
   - Relative file vs package submodule: ending in `.mvs` = a file (relative to base_dir); otherwise
     `<stddir>/<sub>.mvs`.
@@ -239,10 +240,10 @@ See `func_label_of()` and `find_func()` in `arch/common.c` for the source of tru
   (`import { String } from "std/string"`). Alias/namespace only affects **free functions** (methods/associated
   functions are already tied to the struct name).
 - `io.out` is a compiler intrinsic (like Rust's `println!`): it parses `{}`/`{:x}` at compile time and picks a
-  format by arg type — see `build_c_format()` in `arch/common.c`; gated on whether io has been imported.
+  format by arg type; see `build_c_format()` in `arch/common.c`; gated on whether io has been imported.
 - **Tree-shaking:** only functions reachable from main are emitted (`reach_func`/`reach_node`); unreferenced
   functions are dropped.
-- Cross-module name clashes (same ns+name+sig) are caught by `check_duplicates` (extern excepted — deduped later).
+- Cross-module name clashes (same ns+name+sig) are caught by `check_duplicates` (extern excepted, deduped later).
 
 ## 7. Multi-architecture structure (don't break this)
 
@@ -258,7 +259,7 @@ src/arch/
 ```
 
 - `src/lexer`, `src/parser`, `src/ast`, `src/module` must not depend on any architecture.
-- The shared part (`common.c`) must not emit instructions — it holds only logic (type/struct/symtab/
+- The shared part (`common.c`) must not emit instructions; it holds only logic (type/struct/symtab/
   reachability). Functions that emit asm (gen_expr/gen_stmt/gen_call/gen_func etc.) live in the backend file.
 - To add an arch/os: create `src/arch/<arch>/<os>.c` that `#include "../common.h"`, write only the emission
   part, add a value to `TargetArch` (codegen.h), and add a case to `codegen_generate()`. Don't touch the
@@ -270,7 +271,7 @@ src/arch/
 1. `make` passes with no warnings (`-Wall -Wextra` on; deprecation silenced by flag). No dead code.
 2. Compile and **run** `examples/hello.mvs` and `examples/demo.mvs` with correct results.
 3. New feature → add an example under `examples/` that proves it works.
-4. Eyeball the output — bad codegen often assembles and links fine but runs wrong.
+4. Eyeball the output: bad codegen often assembles and links fine but runs wrong.
 
 ## 9. Code style
 

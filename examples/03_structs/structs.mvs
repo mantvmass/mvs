@@ -1,5 +1,5 @@
 // ============================================================
-//  structs — struct, สมาชิก, คืน struct, struct literal, io.out struct
+//  structs: structs, members, returning a struct, struct literals, io.out on structs
 //  build:  mvs.exe examples/03_structs/structs.mvs
 //  run:    examples\03_structs\structs.exe
 // ============================================================
@@ -15,10 +15,10 @@ func main() -> i8 {
     p.x = 10; p.y += 5;
     io.out("after update: ({}, {})", p.x, p.y); // (10, 9)
 
-    let q: Point = makePoint(7, 8);            // คืน struct จากฟังก์ชัน
-    io.out("q = {}", q);                       // q = Point { x: 7, y: 8 }  (io.out พิมพ์ struct ได้)
+    let q: Point = makePoint(7, 8);            // return a struct from a function
+    io.out("q = {}", q);                       // q = Point { x: 7, y: 8 }  (io.out can print structs)
 
-    // ผลลัพธ์ struct จากฟังก์ชันใช้เป็น rvalue ได้โดยตรง
+    // a struct returned from a function can be used directly as an rvalue
     io.out("makePoint(1,2).x = {}", makePoint(1, 2).x);   // 1
     return 0;
 }

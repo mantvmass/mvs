@@ -1,8 +1,8 @@
 /*
- * parser.h - ส่วนหัวของตัววิเคราะห์ไวยากรณ์ (Parser)
+ * parser.h - Header for the syntax analyzer (Parser)
  *
- * parser อ่าน token จาก lexer แล้วประกอบเป็น AST ตามไวยากรณ์ของภาษา MVS
- * ใช้เทคนิค recursive descent (ฟังก์ชันหนึ่งตัวต่อกฎไวยากรณ์หนึ่งกฎ)
+ * The parser reads tokens from the lexer and assembles them into an AST following
+ * the MVS grammar. It uses recursive descent (one function per grammar rule).
  */
 #ifndef MVS_PARSER_H
 #define MVS_PARSER_H
@@ -10,15 +10,15 @@
 #include "lexer.h"
 #include "ast.h"
 
-/* สถานะของ parser */
+/* Parser state */
 typedef struct {
-    Lexer *lx;          /* ตัวตัดคำที่กำลังใช้ */
-    Token  cur;         /* token ปัจจุบันที่กำลังพิจารณา */
-    int    had_error;   /* ธงบอกว่าพบ syntax error หรือไม่ */
-    int    depth;       /* ความลึก recursion ปัจจุบัน (กัน stack overflow จาก input ซ้อนลึก) */
+    Lexer *lx;          /* the lexer in use */
+    Token  cur;         /* current token under consideration */
+    int    had_error;   /* flag: whether a syntax error was found */
+    int    depth;       /* current recursion depth (guards against stack overflow from deeply nested input) */
 } Parser;
 
-/* แปลงซอร์สโค้ดทั้งไฟล์เป็น AST (โหนด ND_PROGRAM) คืน NULL ถ้ามี error ร้ายแรง */
+/* Parse a whole source file into an AST (ND_PROGRAM node). Returns NULL on a fatal error */
 Node *parse_program(const char *src, const char *filename, int *had_error);
 
 #endif /* MVS_PARSER_H */

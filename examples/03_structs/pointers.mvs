@@ -1,8 +1,8 @@
 // ============================================================
-//  pointers — &x, *p, multi-level, pointer arithmetic, อาเรย์ผ่าน malloc
+//  pointers: &x, *p, multi-level, pointer arithmetic, arrays via malloc
 //  build:  mvs.exe examples/03_structs/pointers.mvs
 //  run:    examples\03_structs\pointers.exe
-//  (MVS ไม่มีชนิด array — ใช้ pointer + malloc แทน)
+//  (MVS has no array type; use pointer + malloc instead)
 // ============================================================
 import { io } from "std";
 extern func malloc(n: usize) -> *u8;
@@ -22,15 +22,15 @@ func main() -> i8 {
     **pp = 7;
     io.out("n via **pp = {}", n);        // 7
 
-    // อาเรย์ของ struct ผ่าน malloc + pointer arithmetic (scale ตาม sizeof)
-    let arr: *Pt = malloc(80) as *Pt;    // 10 ช่อง (sizeof(Pt)=8)
+    // array of structs via malloc + pointer arithmetic (scaled by sizeof)
+    let arr: *Pt = malloc(80) as *Pt;    // 10 slots (sizeof(Pt)=8)
     for (let i: i32 = 0; i < 5; i++) {
         (*(arr + i)).x = i;
         (*(arr + i)).y = i * 10;
     }
     io.out("arr[3] = ({}, {})", (*(arr + 3)).x, (*(arr + 3)).y);  // (3, 30)
 
-    // ผลต่าง pointer = จำนวน element
+    // pointer difference = element count
     let last: *Pt = arr + 4;
     io.out("last - arr = {}", last - arr);   // 4
     free(arr as *u8);

@@ -1,18 +1,18 @@
 /*
- * std/net.mvs - โมดูล net (เครือข่าย TCP) แบบ Rust: struct + method
+ * std/net.mvs - the net (TCP networking) module, Rust style: struct + method
  *
- * ใช้ Winsock2 ของ Windows (คอมไพเลอร์ลิงก์ ws2_32 ให้อัตโนมัติ)
- * สถานะ: ทดลอง (experimental) — โครงสร้างและการเรียก Winsock ครบ
- *         แต่ทดสอบจริงต้องมีเซิร์ฟเวอร์/ไคลเอนต์ปลายทาง
+ * Uses Windows Winsock2 (the compiler links ws2_32 automatically)
+ * Status: experimental. The structures and Winsock calls are complete,
+ *         but real testing needs a server/client on the other end.
  *
- * ตัวอย่าง (ไคลเอนต์):
+ * Example (client):
  *     import { net } from "std";
  *     let conn = net.TcpClient("93.184.216.34", 80);
  *     conn.send("GET / HTTP/1.0\r\n\r\n");
  *     let reply = conn.recv();
  *     conn.close();
  *
- * ตัวอย่าง (เซิร์ฟเวอร์):
+ * Example (server):
  *     let server = net.TcpServer("0.0.0.0", 8080);
  *     let conn = server.accept();
  *     conn.send("hello");
@@ -20,25 +20,25 @@
  *     server.close();
  */
 
-// โครงสร้างที่อยู่ปลายทางแบบ IPv4 (ตรงกับ sockaddr_in ของ Winsock ขนาด 16 ไบต์)
+// IPv4 destination address structure (matches Winsock's sockaddr_in, 16 bytes)
 struct sockaddr_in {
     family: u16;   // AF_INET = 2
-    port: u16;     // หมายเลขพอร์ต (network byte order)
-    addr: u32;     // ที่อยู่ IP (network byte order)
-    zero: u64;     // ช่องว่าง 8 ไบต์
+    port: u16;     // port number (network byte order)
+    addr: u32;     // IP address (network byte order)
+    zero: u64;     // 8 bytes of padding
 }
 
-// soket ที่เชื่อมต่อแล้ว (ใช้รับ-ส่งข้อมูล)
+// a connected socket (used to send and receive data)
 struct TcpSocket {
     fd: usize;     // socket handle
 }
 
-// เซิร์ฟเวอร์ที่กำลัง listen อยู่
+// a server that is currently listening
 struct TcpServer {
     fd: usize;     // listening socket handle
 }
 
-// --- foreign functions จาก Winsock (ws2_32) และ C runtime ---
+// --- foreign functions from Winsock (ws2_32) and the C runtime ---
 extern func WSAStartup(version: u16, data: *u8) -> i32;
 extern func socket(family: i32, kind: i32, protocol: i32) -> usize;
 extern func connect(s: usize, addr: *u8, addrlen: i32) -> i32;
@@ -53,19 +53,19 @@ extern func inet_addr(ip: str) -> u32;
 extern func strlen(s: str) -> usize;
 extern func malloc(n: usize) -> *u8;
 
-// เริ่มต้น Winsock (เรียกซ้ำได้)
+// initialize Winsock (safe to call repeatedly)
 func startup() -> i32 {
-    let data: *u8 = malloc(512);   // บัฟเฟอร์ WSADATA
-    return WSAStartup(514, data);  // 514 = 0x0202 = เวอร์ชัน 2.2
+    let data: *u8 = malloc(512);   // WSADATA buffer
+    return WSAStartup(514, data);  // 514 = 0x0202 = version 2.2
 }
 
-// --- method ของ TcpSocket ---
+// --- TcpSocket methods ---
 impl TcpSocket {
-    // ส่งข้อมูล (สตริง) คืนจำนวนไบต์ที่ส่ง
+    // send data (a string); returns the number of bytes sent
     func send(self: *TcpSocket, data: str) -> i32 {
         return send(self.fd, data, strlen(data), 0);
     }
-    // รับข้อมูล (สูงสุด ~4095 ไบต์) คืนเป็นสตริงปิดท้ายด้วย 0
+    // receive data (up to ~4095 bytes); returns a zero-terminated string
     func recv(self: *TcpSocket) -> str {
         let buf: *u8 = malloc(4096);
         let n: i32 = recv(self.fd, buf, 4095, 0);
@@ -73,28 +73,28 @@ impl TcpSocket {
         *(buf + n) = 0;
         return buf;
     }
-    // ปิด socket
+    // close the socket
     func close(self: *TcpSocket) -> i32 {
         return closesocket(self.fd);
     }
 }
 
-// --- method ของ TcpServer ---
+// --- TcpServer methods ---
 impl TcpServer {
-    // รอรับการเชื่อมต่อ คืน TcpSocket ของไคลเอนต์
+    // wait for a connection; returns the client's TcpSocket
     func accept(self: *TcpServer) -> TcpSocket {
         let cfd: usize = accept(self.fd, 0, 0);
         return TcpSocket { fd: cfd };
     }
-    // ปิดเซิร์ฟเวอร์
+    // close the server
     func close(self: *TcpServer) -> i32 {
         return closesocket(self.fd);
     }
 }
 
-// --- constructor ---
+// --- constructors ---
 
-// เชื่อมต่อ TCP ไปยัง ip:port คืน TcpSocket
+// open a TCP connection to ip:port; returns a TcpSocket
 func TcpClient(ip: str, port: u16) -> TcpSocket {
     startup();
     let fd: usize = socket(2, 1, 6);  // AF_INET=2, SOCK_STREAM=1, IPPROTO_TCP=6
@@ -107,7 +107,7 @@ func TcpClient(ip: str, port: u16) -> TcpSocket {
     return TcpSocket { fd: fd };
 }
 
-// สร้างเซิร์ฟเวอร์ที่ bind + listen ที่ ip:port คืน TcpServer
+// create a server that binds + listens at ip:port; returns a TcpServer
 func TcpServer(ip: str, port: u16) -> TcpServer {
     startup();
     let fd: usize = socket(2, 1, 6);

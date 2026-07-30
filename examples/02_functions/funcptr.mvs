@@ -1,5 +1,5 @@
 // ============================================================
-//  function pointer — ชนิด func(...) -> T เป็นค่า เก็บ/ส่ง/เรียกได้
+//  function pointer: func(...) -> T as a value, storable/passable/callable
 //  build:  mvs.exe examples/02_functions/funcptr.mvs
 //  run:    examples\02_functions\funcptr.exe
 // ============================================================
@@ -8,26 +8,26 @@ import { io } from "std";
 func add(a: i32, b: i32) -> i32 { return a + b; }
 func mul(a: i32, b: i32) -> i32 { return a * b; }
 
-// รับ function pointer เป็นพารามิเตอร์ (higher-order function)
+// take a function pointer as a parameter (higher-order function)
 func apply(op: func(i32, i32) -> i32, a: i32, b: i32) -> i32 {
-    return op(a, b);   // เรียกผ่านตัวแปร (indirect call)
+    return op(a, b);   // call through a variable (indirect call)
 }
 
-// เก็บ function pointer เป็นฟิลด์ของ struct
+// store a function pointer as a struct field
 struct Op { name: str; fn: func(i32, i32) -> i32; }
 
 func main() -> i8 {
-    // 1) เก็บในตัวแปร + เปลี่ยนค่าได้ (ชื่อฟังก์ชันเปล่า ๆ = ค่า function pointer)
+    // 1) store in a variable, reassignable (a bare function name = a function pointer value)
     let f: func(i32, i32) -> i32 = add;
     io.out("f(3,4)       = {}", f(3, 4));        // 7
     f = mul;
     io.out("f(3,4)       = {}", f(3, 4));        // 12
 
-    // 2) ส่งเป็น argument
+    // 2) pass as an argument
     io.out("apply(add)   = {}", apply(add, 10, 20));  // 30
     io.out("apply(mul)   = {}", apply(mul, 10, 20));  // 200
 
-    // 3) เก็บในฟิลด์ struct แล้วเรียกผ่านฟิลด์
+    // 3) store in a struct field and call through the field
     let plus: Op = Op { name: "plus", fn: add };
     io.out("{}(5,6)     = {}", plus.name, plus.fn(5, 6));  // plus(5,6) = 11
 

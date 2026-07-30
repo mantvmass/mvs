@@ -1,8 +1,8 @@
 // ============================================================
-//  overload — ฟังก์ชันชื่อเดียวกัน ต่างชนิด/จำนวนพารามิเตอร์
+//  overload: same function name, different parameter types/counts
 //  build:  mvs.exe examples/02_functions/overload.mvs
 //  run:    examples\02_functions\overload.exe
-//  + generic เรียก overload = constraint แบบ duck-typed
+//  + a generic calling an overload = a duck-typed constraint
 // ============================================================
 import { io } from "std";
 

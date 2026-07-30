@@ -1,24 +1,24 @@
 // ============================================================
-//  strings — ชนิด String (heap, owned) จาก std/string.mvs
+//  strings: the String type (heap, owned) from std/string.mvs
 //  build:  mvs.exe examples/05_strings/strings.mvs
 //  run:    examples\05_strings\strings.exe
 //
-//  str    = ตัวชี้ข้อความคงที่ (อ่านอย่างเดียว, ใช้ "")
-//  String = บัฟเฟอร์บน heap ต่อ/แก้ได้ และต้อง drop() เอง (ไม่มี GC)
+//  str    = pointer to constant text (read-only, uses "")
+//  String = heap buffer, appendable/mutable, must be drop()ed manually (no GC)
 // ============================================================
 import { io } from "std";
 import { String } from "std/string";
 
 func main() -> i8 {
-    let s: String = String::from("hello");                 // สร้างจาก str (คัดลอกลง heap)
+    let s: String = String::from("hello");                 // build from a str (copied to the heap)
     io.out("s = {} (len {})", s.as_str(), s.len());        // hello (len 5)
 
-    s.push_str(", world").push_str("!");                   // ต่อข้อความ (chain ได้)
+    s.push_str(", world").push_str("!");                   // append text (chainable)
     io.out("joined = {} (len {})", s.as_str(), s.len());   // hello, world! (len 13)
 
-    let n: String = String::from_int(2026);                // สร้างจากจำนวนเต็ม
+    let n: String = String::from_int(2026);                // build from an integer
     io.out("year = {}", n.as_str());                       // 2026
 
-    s.drop(); n.drop();                                    // คืนหน่วยความจำเมื่อเลิกใช้
+    s.drop(); n.drop();                                    // free the memory when done
     return 0;
 }

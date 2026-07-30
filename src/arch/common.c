@@ -1,32 +1,32 @@
 /*
- * common.c - ส่วนกลางของ backend (ไม่ขึ้นกับสถาปัตยกรรม)
- * ดูคำอธิบายภาพรวมใน common.h
+ * common.c - backend core (architecture independent)
+ * See the overview comment in common.h.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "common.h"
 
-/* ---------- ฟังก์ชันช่วยทั่วไป ---------- */
+/* ---------- general helper functions ---------- */
 
-/* ออกหมายเลข label ใหม่ที่ไม่ซ้ำ */
+/* Issue a new unique label number */
 int new_label(Gen *g) { return g->label_id++; }
 
-/* เขียนชื่อ label ของฟังก์ชันลงบัฟเฟอร์ตามกฎ:
- *   - extern (foreign): ใช้ชื่อดิบ เช่น printf (เพื่อให้ตรงกับสัญลักษณ์ใน C runtime)
- *   - main (namespace ว่าง): คงชื่อ main ให้ C runtime เรียกได้
- *   - มี namespace: mvs_<ns>_<name>   เช่น io.out -> mvs_io_out
- *   - ไม่มี namespace: mvs_<name>      เช่น factorial -> mvs_factorial */
+/* Write a function's label name into the buffer according to these rules:
+ *   - extern (foreign): raw name, e.g. printf (to match the symbol in the C runtime)
+ *   - main (empty namespace): keep the name main so the C runtime can call it
+ *   - has a namespace: mvs_<ns>_<name>   e.g. io.out -> mvs_io_out
+ *   - no namespace: mvs_<name>           e.g. factorial -> mvs_factorial */
 void func_label_of(Node *fn, char *buf) {
-    /* extern และ export ใช้ชื่อสัญลักษณ์ดิบ เพื่อให้ตรงกับ/เรียกได้จากภาษา C (buf ต้องมีขนาด LABEL_MAX) */
+    /* extern and export use the raw symbol name so C can match/call it (buf must be LABEL_MAX bytes) */
     if (fn->is_extern || fn->is_export) { snprintf(buf, LABEL_MAX, "%s", fn->name); return; }
     const char *ns = fn->ns ? fn->ns : "";
     if (ns[0] == 0 && strcmp(fn->name, "main") == 0) { snprintf(buf, LABEL_MAX, "main"); return; }
-    if (ns[0]) snprintf(buf, LABEL_MAX, "mvs_%s_%s", ns, fn->name);   /* method ใช้ ns = ชื่อ struct */
+    if (ns[0]) snprintf(buf, LABEL_MAX, "mvs_%s_%s", ns, fn->name);   /* methods use ns = struct name */
     else       snprintf(buf, LABEL_MAX, "mvs_%s", fn->name);
 }
 
-/* ค้นหาฟังก์ชันตาม (namespace, ชื่อ) — namespace ว่างหมายถึงระดับ global */
+/* Look up a function by (namespace, name); an empty namespace means global level */
 Node *find_func(Gen *g, const char *ns, const char *name) {
     for (int i = 0; i < g->nfuncs; i++) {
         Node *f = g->funcs[i];
@@ -36,13 +36,13 @@ Node *find_func(Gen *g, const char *ns, const char *name) {
     return NULL;
 }
 
-/* เขียนชื่อ label ของตัวแปร global (เติมนำหน้า mvs_gv_ กันชนกับสัญลักษณ์ใน C runtime
- * และกันชนกับ label ฟังก์ชัน/method ที่เป็น mvs_<ns>_<name> เช่น struct ชื่อ g) */
+/* Write a global variable's label name (prefix mvs_gv_ to avoid clashing with C runtime symbols
+ * and with function/method labels of the form mvs_<ns>_<name>, e.g. a struct named g) */
 void global_label(const char *name, char *buf) {
     snprintf(buf, LABEL_MAX, "mvs_gv_%s", name);
 }
 
-/* ค้นหาสัญลักษณ์ตัวแปร: ดูจาก scope ที่มองเห็นได้ (ในออกนอก เพื่อ shadowing) แล้วค่อย global */
+/* Look up a variable symbol: search visible scopes (inner to outer, for shadowing), then globals */
 Sym *find_var(Gen *g, const char *name) {
     for (int i = g->nvisible - 1; i >= 0; i--) {
         Sym *s = &g->locals[g->visible[i]];
@@ -53,7 +53,7 @@ Sym *find_var(Gen *g, const char *name) {
     return NULL;
 }
 
-/* ลงทะเบียนสตริงในคลัง คืนดัชนี (ใช้เป็นชื่อ label str_<idx>) */
+/* Register a string in the pool; returns its index (used as the label name str_<idx>) */
 int intern_string(Gen *g, const char *data, int len) {
     if (g->nstrs >= MAX_STR) { fprintf(stderr, "codegen error: too many string literals (max %d)\n", MAX_STR); g->had_error = 1; return 0; }
     int idx = g->nstrs++;
@@ -64,9 +64,9 @@ int intern_string(Gen *g, const char *data, int len) {
     return idx;
 }
 
-/* ---------- ระบบชนิดข้อมูล: ขนาด, struct layout, การอนุมานชนิด ---------- */
+/* ---------- type system: sizes, struct layout, type inference ---------- */
 
-/* หา layout ของ struct ตามชื่อ */
+/* Find a struct's layout by name */
 StructInfo *find_struct(Gen *g, const char *name) {
     if (!name) return NULL;
     for (int i = 0; i < g->nstructs; i++)
@@ -74,27 +74,27 @@ StructInfo *find_struct(Gen *g, const char *name) {
     return NULL;
 }
 
-/* ขนาดเป็นไบต์ของชนิด: pointer/str = 8, struct = ขนาดของ layout */
+/* Size in bytes of a type: pointer/str = 8, struct = size of its layout */
 int type_size(Gen *g, DataType base, int ptr, const char *sname) {
     if (ptr > 0) return 8;
     switch (base) {
         case TYPE_I8: case TYPE_U8: case TYPE_BOOL: case TYPE_CHAR: return 1;
         case TYPE_I16: case TYPE_U16: return 2;
-        /* f32 เก็บ 4 ไบต์จริง (single-precision); คำนวณ/ส่งผ่านฟังก์ชันใช้ double แล้วแปลงตอน load/store */
+        /* f32 is stored as a real 4 bytes (single precision); math and call passing use double, converted on load/store */
         case TYPE_I32: case TYPE_U32: case TYPE_F32: return 4;
         case TYPE_I64: case TYPE_U64: case TYPE_ISIZE: case TYPE_USIZE: case TYPE_F64: return 8;
         case TYPE_I128: case TYPE_U128: return 16;
         case TYPE_STR: return 8;
-        case TYPE_FUNC: return 8;   /* function pointer = ที่อยู่ 8 ไบต์ */
+        case TYPE_FUNC: return 8;   /* function pointer = an 8-byte address */
         case TYPE_STRUCT: { StructInfo *s = find_struct(g, sname); return s ? s->size : 0; }
         default: return 8;
     }
 }
 
-/* ชนิดทศนิยมหรือไม่ */
+/* Is it a floating-point type */
 int is_float_type(DataType t) { return t == TYPE_F32 || t == TYPE_F64; }
 
-/* ชนิดจำนวนเต็มแบบมีเครื่องหมายหรือไม่ (ใช้เลือก movsx/movzx ตอนโหลด) */
+/* Is it a signed integer type (used to pick movsx/movzx when loading) */
 int is_signed_type(DataType t) {
     switch (t) {
         case TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64: case TYPE_I128: case TYPE_ISIZE: return 1;
@@ -102,7 +102,7 @@ int is_signed_type(DataType t) {
     }
 }
 
-/* ลงทะเบียนชื่อ struct + ข้อมูลฟิลด์ (ยังไม่คำนวณ offset/size — ทำใน layout_structs) */
+/* Register a struct's name + field info (offset/size not computed yet; done in layout_structs) */
 void register_struct(Gen *g, Node *decl) {
     if (g->nstructs >= MAX_FUNC) { fprintf(stderr, "codegen error: too many structs\n"); g->had_error = 1; return; }
     StructInfo *s = &g->structs[g->nstructs++];
@@ -114,12 +114,12 @@ void register_struct(Gen *g, Node *decl) {
         Node *f = decl->items[i];
         Field *fd = &s->fields[s->nfields++];
         fd->name = f->name; fd->type = f->type; fd->ptr = f->ptr; fd->sname = f->type_name;
-        fd->sig = f->sig;   /* ลายเซ็น (เฉพาะฟิลด์ที่เป็น function pointer) */
+        fd->sig = f->sig;   /* signature (only for function-pointer fields) */
         fd->offset = 0; fd->size = 0;
     }
 }
 
-/* DFS ตรวจ struct ที่อ้างถึงตัวเอง "แบบ by-value" (ptr==0) ซึ่งมีขนาดอนันต์ */
+/* DFS to detect structs that contain themselves "by value" (ptr==0), which would have infinite size */
 static int struct_has_cycle(Gen *g, int si, int *onpath) {
     if (onpath[si]) return 1;
     onpath[si] = 1;
@@ -134,17 +134,17 @@ static int struct_has_cycle(Gen *g, int si, int *onpath) {
     return 0;
 }
 
-/* คำนวณ offset/ขนาดของทุก struct แบบ fixpoint (รองรับ struct ที่อ้างถึง struct อื่นซึ่งประกาศทีหลัง) */
+/* Compute offset/size of every struct as a fixpoint (supports structs referencing structs declared later) */
 void layout_structs(Gen *g) {
-    /* ตรวจ struct ที่บรรจุตัวเองแบบ by-value ก่อน (ขนาดอนันต์ → ต้องใช้ pointer; กัน loop ตอน layout/print) */
+    /* Detect structs containing themselves by value first (infinite size, needs a pointer; avoids layout/print loops) */
     int onpath[MAX_FUNC];
     for (int si = 0; si < g->nstructs; si++) {
         memset(onpath, 0, sizeof(onpath));
         if (struct_has_cycle(g, si, onpath)) {
-            fprintf(stderr, "codegen error: struct '%s' contains itself by value (infinite size) — use a pointer field (*%s)\n",
+            fprintf(stderr, "codegen error: struct '%s' contains itself by value (infinite size); use a pointer field (*%s)\n",
                     g->structs[si].name, g->structs[si].name);
             g->had_error = 1;
-            return;   /* หยุดก่อน layout เพื่อเลี่ยง recursion ไม่รู้จบ */
+            return;   /* stop before layout to avoid endless recursion */
         }
     }
     for (int round = 0; round <= g->nstructs; round++) {
@@ -156,31 +156,31 @@ void layout_structs(Gen *g) {
                 int fsize = type_size(g, s->fields[i].type, s->fields[i].ptr, s->fields[i].sname);
                 s->fields[i].offset = off;
                 s->fields[i].size = fsize;
-                off += fsize; /* แบบ packed (ไม่ใส่ padding ระหว่างฟิลด์) */
+                off += fsize; /* packed layout (no padding between fields) */
             }
-            int newsize = (off + 7) / 8 * 8; /* ปัดขึ้นเป็นพหุคูณของ 8 */
+            int newsize = (off + 7) / 8 * 8; /* round up to a multiple of 8 */
             if (newsize != s->size) { s->size = newsize; changed = 1; }
         }
         if (!changed) break;
     }
 }
 
-/* หาฟิลด์ภายใน struct ตามชื่อ */
+/* Find a field within a struct by name */
 Field *find_field(StructInfo *s, const char *name) {
     for (int i = 0; i < s->nfields; i++)
         if (strcmp(s->fields[i].name, name) == 0) return &s->fields[i];
     return NULL;
 }
 
-/* ถ้านิพจน์ callee เป็น "ค่า function pointer" (ตัวแปร/ฟิลด์ที่ชนิดเป็น TYPE_FUNC) คืนลายเซ็นของมัน
- * ถ้าเป็นการเรียกฟังก์ชัน/method โดยตรง (ชื่อฟังก์ชัน ไม่ใช่ค่า func-ptr) คืน NULL
- * ใช้แยกแยะ "การเรียกผ่าน function pointer (indirect)" ออกจากการเรียกตรงทั้งใน type_of และ gen_call */
+/* If the callee expression is a "function pointer value" (variable/field of type TYPE_FUNC), return its signature.
+ * If it is a direct function/method call (a function name, not a func-ptr value), return NULL.
+ * Used to tell "indirect calls through a function pointer" apart from direct calls in both type_of and gen_call */
 Node *expr_func_sig(Gen *g, Node *callee) {
     if (!callee) return NULL;
     if (callee->kind == ND_IDENT) {
         Sym *s = find_var(g, callee->name);
-        if (s && s->type == TYPE_FUNC && s->ptr == 0) return s->sig;  /* ตัวแปร/พารามิเตอร์ที่เป็น func-ptr */
-        return NULL;                                                  /* ไม่ใช่ตัวแปร -> ชื่อฟังก์ชันเรียกตรง */
+        if (s && s->type == TYPE_FUNC && s->ptr == 0) return s->sig;  /* variable/parameter that is a func-ptr */
+        return NULL;                                                  /* not a variable -> function name, direct call */
     }
     if (callee->kind == ND_MEMBER) {
         ExprType bt = type_of(g, callee->operand);
@@ -190,7 +190,7 @@ Node *expr_func_sig(Gen *g, Node *callee) {
     return NULL;
 }
 
-/* อนุมานชนิด/ขนาด/ความลึก pointer ของนิพจน์ (ลึกพอสำหรับ struct/pointer) */
+/* Infer the type/size/pointer depth of an expression (deep enough for struct/pointer) */
 ExprType type_of(Gen *g, Node *n) {
     ExprType r = { TYPE_I64, 0, NULL, NULL };
     if (!n) return r;
@@ -204,7 +204,7 @@ ExprType type_of(Gen *g, Node *n) {
         case ND_IDENT: {
             Sym *s = find_var(g, n->name);
             if (s) { r.base = s->type; r.ptr = s->ptr; r.sname = s->sname; r.sig = s->sig; }
-            else {  /* ไม่ใช่ตัวแปร: อาจเป็น "ชื่อฟังก์ชันใช้เป็นค่า" -> function pointer */
+            else {  /* not a variable: may be a "function name used as a value" -> function pointer */
                 Node *f = find_func(g, g->cur_ns ? g->cur_ns : "", n->name);
                 if (!f) f = find_func(g, "", n->name);
                 if (f) { r.base = TYPE_FUNC; r.ptr = 0; r.sig = f; }
@@ -227,16 +227,16 @@ ExprType type_of(Gen *g, Node *n) {
                 n->op==TK_LE||n->op==TK_GE||n->op==TK_AND||n->op==TK_OR) { r.base = TYPE_BOOL; break; }
             else {
                 ExprType lt = type_of(g, n->lhs), rt = type_of(g, n->rhs);
-                /* เลขคณิต pointer: ptr±int -> pointer, ptr-ptr -> จำนวน (isize) */
+                /* pointer arithmetic: ptr +/- int -> pointer, ptr - ptr -> a count (isize) */
                 if (n->op==TK_PLUS || n->op==TK_MINUS) {
                     if (lt.ptr>0 && rt.ptr>0) { r.base=TYPE_ISIZE; break; }
                     if (lt.ptr>0) { r=lt; break; }
                     if (rt.ptr>0) { r=rt; break; }
                 }
-                /* ผสมทศนิยม: ผลเป็น float (กว้างสุด) — สำคัญต่อการเลือก format/แปลงชนิด */
+                /* float mixed in: result is float (the widest); matters for format selection/type conversion */
                 int lf = is_float_type(lt.base)&&lt.ptr==0, rf = is_float_type(rt.base)&&rt.ptr==0;
                 if (lf || rf) { r.base = (lt.base==TYPE_F64||rt.base==TYPE_F64)?TYPE_F64:TYPE_F32; break; }
-                /* int-int: ชนิดผลลัพธ์ = ตัวที่กว้างกว่า (order-independent) */
+                /* int-int: result type = the wider one (order independent) */
                 r = (type_size(g, rt.base, 0, NULL) > type_size(g, lt.base, 0, NULL)) ? rt : lt;
             }
             break;
@@ -245,7 +245,7 @@ ExprType type_of(Gen *g, Node *n) {
         case ND_FRAMEREF: r.base = n->type; r.ptr = n->ptr; r.sname = n->type_name; break;
         case ND_CALL: {
             Node *callee = n->operand;
-            /* การเรียกผ่าน function pointer (indirect): ชนิดผลลัพธ์ = ชนิดคืนค่าของลายเซ็น */
+            /* indirect call through a function pointer: result type = the signature's return type */
             Node *fsig = expr_func_sig(g, callee);
             if (fsig) { r.base = fsig->type; r.ptr = fsig->ptr; r.sname = fsig->type_name; break; }
             Node *f = NULL;
@@ -265,12 +265,12 @@ ExprType type_of(Gen *g, Node *n) {
     return r;
 }
 
-/* อนุมานชนิดพื้นฐาน (ใช้เลือก format specifier ของ io.out) */
+/* Infer the base type (used to pick the io.out format specifier) */
 DataType infer_type(Gen *g, Node *n) {
     return type_of(g, n).base;
 }
 
-/* ต่อสตริง s เข้าบัฟเฟอร์ที่ขยายได้ (อัปเดตค่าที่ out, len, cap ชี้อยู่) */
+/* Append string s to a growable buffer (updates the values pointed to by out, len, cap) */
 static void buf_append(char **out, size_t *len, size_t *cap, const char *s) {
     size_t sl = strlen(s);
     while (*len + sl + 2 > *cap) { *cap *= 2; *out = (char *)realloc(*out, *cap); }
@@ -278,10 +278,10 @@ static void buf_append(char **out, size_t *len, size_t *cap, const char *s) {
     *len += sl;
 }
 
-/* เลือก printf specifier ตามชนิด (pointer=address, str=%s, char=%c, float=%f, unsigned=%llu, อื่น ๆ=%lld) */
+/* Pick a printf specifier by type (pointer=address, str=%s, char=%c, float=%f, unsigned=%llu, others=%lld) */
 static const char *spec_for(DataType base, int ptr, const char *user) {
     if (user && (strcmp(user, "x") == 0 || strcmp(user, ":x") == 0)) return "%llx";
-    if (ptr > 0) return "%llu";                 /* pointer = ที่อยู่ */
+    if (ptr > 0) return "%llu";                 /* pointer = address */
     if (base == TYPE_STR) return "%s";
     if (base == TYPE_CHAR) return "%c";
     if (is_float_type(base)) return "%f";
@@ -289,16 +289,16 @@ static const char *spec_for(DataType base, int ptr, const char *user) {
     return "%lld";
 }
 
-/* ขยาย struct เป็นรูป "Name { f1: <spec>, f2: <spec> }" (แบบ {:?} ของ Rust)
- * พร้อมเก็บโหนดเข้าถึงสมาชิก (base.field) ลง vals เพื่อส่งให้ printf */
+/* Expand a struct into the form "Name { f1: <spec>, f2: <spec> }" (like Rust's {:?})
+ * and store the member-access nodes (base.field) into vals to pass to printf */
 static void expand_struct(Gen *g, Node *base, const char *sname,
                           char **out, size_t *len, size_t *cap,
                           Node **vals, int *nv, int vals_cap, int depth) {
     StructInfo *s = find_struct(g, sname);
     if (!s) { buf_append(out, len, cap, "?"); return; }
-    if (depth > 32) { buf_append(out, len, cap, "..."); return; }  /* กัน recursion ลึกผิดปกติ */
-    /* ถ้า base เป็นผลลัพธ์ struct จากฟังก์ชัน (ND_CALL) ให้ชี้ไปที่ "ช่อง temp" ที่จองไว้แทน
-     * (อ่านสมาชิกจาก temp เดียวกัน) ไม่งั้นแต่ละฟิลด์จะ gen_call ซ้ำ -> เรียกฟังก์ชันหลายรอบ/ค่าผิด */
+    if (depth > 32) { buf_append(out, len, cap, "..."); return; }  /* guard against abnormally deep recursion */
+    /* If base is a struct result from a function (ND_CALL), point at the reserved "temp slot" instead
+     * (members read from the same temp); otherwise each field would gen_call again -> repeated calls/wrong values */
     if (base->kind == ND_CALL && base->int_val) {
         Node *fr = node_new(ND_FRAMEREF, base->line);
         fr->int_val = base->int_val;
@@ -311,25 +311,25 @@ static void expand_struct(Gen *g, Node *base, const char *sname,
         if (i) buf_append(out, len, cap, ", ");
         buf_append(out, len, cap, s->fields[i].name);
         buf_append(out, len, cap, ": ");
-        Node *m = node_new(ND_MEMBER, base->line);  /* โหนด base.field */
+        Node *m = node_new(ND_MEMBER, base->line);  /* base.field node */
         m->operand = base; m->name = strdup(s->fields[i].name);
         if (s->fields[i].type == TYPE_STRUCT && s->fields[i].ptr == 0) {
-            expand_struct(g, m, s->fields[i].sname, out, len, cap, vals, nv, vals_cap, depth + 1); /* ซ้อน */
+            expand_struct(g, m, s->fields[i].sname, out, len, cap, vals, nv, vals_cap, depth + 1); /* nested */
         } else if (*nv < vals_cap) {
             buf_append(out, len, cap, spec_for(s->fields[i].type, s->fields[i].ptr, NULL));
             vals[(*nv)++] = m;
         } else {
-            buf_append(out, len, cap, "?"); /* เกินขีดจำกัด vals — ใส่ literal เพื่อให้ specifier ตรงกับจำนวน arg */
+            buf_append(out, len, cap, "?"); /* over the vals limit; emit a literal so specifiers match the arg count */
         }
     }
     buf_append(out, len, cap, " }");
 }
 
-/* แปลง format string ของ MVS (รูปแบบ {} แบบ Rust) เป็น format ของ C printf
- *   {} / {:?}  -> เลือก specifier ตามชนิด argument; ถ้าเป็น struct จะขยายเป็น "Name { ... }"
- *   {:x}       -> เลขฐานสิบหก ; {{ }} -> { } ; % -> %% ; ต่อท้าย \n อัตโนมัติ
- * คืนบัฟเฟอร์ใหม่ (malloc); ตั้ง *out_len, *out_nph (จำนวน placeholder ระดับ MVS),
- * และเติม vals[] (ค่าที่ต้องส่งให้ printf จริง — struct ถูกขยายเป็นหลายฟิลด์) พร้อม *out_nv */
+/* Convert an MVS format string (Rust-style {}) into a C printf format
+ *   {} / {:?}  -> specifier chosen by the argument's type; structs are expanded into "Name { ... }"
+ *   {:x}       -> hexadecimal ; {{ }} -> { } ; % -> %% ; a \n is appended automatically
+ * Returns a new (malloc) buffer; sets *out_len, *out_nph (number of MVS-level placeholders),
+ * and fills vals[] (values actually passed to printf; structs expanded into multiple fields) plus *out_nv */
 char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out_nph,
                      Node **vals, int *out_nv, int vals_cap) {
     size_t cap = strlen(fmt) * 2 + 32, len = 0;
@@ -344,7 +344,7 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
             p++;
             while (*p && *p != '}') { if (si < 15) spec[si++] = *p; p++; }
             spec[si] = '\0';
-            if (*p == '\0') break;   /* '{' ไม่ปิด: กันอ่านเกิน buffer */
+            if (*p == '\0') break;   /* unclosed '{': avoid reading past the buffer */
             Node *arg = (argi < call->nitems) ? call->items[argi] : NULL;
             ExprType at = { TYPE_I64, 0, NULL, NULL };
             if (arg) at = type_of(g, arg);
@@ -361,20 +361,20 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
         if (p[0] == '%') { out[len++] = '%'; out[len++] = '%'; continue; }
         out[len++] = p[0];
     }
-    out[len++] = '\n'; /* ขึ้นบรรทัดใหม่อัตโนมัติ */
+    out[len++] = '\n'; /* automatic trailing newline */
     *out_len = (int)len;
     *out_nph = ph;
     *out_nv = nv;
     return out;
 }
 
-/* ---------- การจองพื้นที่ตัวแปรบน stack ---------- */
+/* ---------- reserving variable space on the stack ---------- */
 
-/* เพิ่มตัวแปร local พร้อมจัดสรร offset (จองเป็นพหุคูณของ 8 ไบต์ ตามขนาดจริง) คืน offset */
+/* Add a local variable and assign its offset (slot rounded up to a multiple of 8 bytes); returns the offset */
 int add_local(Gen *g, const char *name, DataType type, int ptr, char *sname, Node *sig, int *frame) {
     if (g->nlocals >= MAX_SYM) { fprintf(stderr, "codegen error: too many local variables (max %d)\n", MAX_SYM); g->had_error = 1; return 0; }
     int size = type_size(g, type, ptr, sname);
-    int slot = (size + 7) / 8 * 8;       /* จองพื้นที่อย่างน้อย 8 ไบต์ และเป็นพหุคูณของ 8 */
+    int slot = (size + 7) / 8 * 8;       /* reserve at least 8 bytes, in multiples of 8 */
     *frame += slot;
     Sym *s = &g->locals[g->nlocals++];
     s->name = (char *)name;
@@ -383,18 +383,18 @@ int add_local(Gen *g, const char *name, DataType type, int ptr, char *sname, Nod
     s->sname = sname;
     s->size = size;
     s->is_global = 0;
-    s->sig = sig;                        /* ลายเซ็น (เฉพาะ function pointer) */
-    s->offset = *frame;                  /* ตัวแปรอยู่ที่ [rbp - offset .. rbp - offset + size) */
+    s->sig = sig;                        /* signature (function pointers only) */
+    s->offset = *frame;                  /* the variable lives at [rbp - offset .. rbp - offset + size) */
     return s->offset;
 }
 
-/* เดินสำรวจ body ของฟังก์ชันเพื่อจองพื้นที่ให้ทุกการประกาศตัวแปร (pre-pass)
- * ทำให้รู้ขนาดเฟรมทั้งหมดก่อนเริ่ม gen โค้ดจริง */
+/* Walk the function body to reserve space for every variable declaration (pre-pass),
+ * so the whole frame size is known before real code generation starts */
 void collect_locals(Gen *g, Node *n, int *frame) {
     if (!n) return;
     switch (n->kind) {
         case ND_VAR_DECL:
-            n->int_val = g->nlocals;   /* จดดัชนี slot ของตัวแปรนี้ ใช้ตอน gen + scope */
+            n->int_val = g->nlocals;   /* record this variable's slot index, used during gen + scoping */
             add_local(g, n->name, n->type, n->ptr, n->type_name, n->sig, frame);
             break;
         case ND_BLOCK:
@@ -408,15 +408,15 @@ void collect_locals(Gen *g, Node *n, int *frame) {
             collect_locals(g, n->body, frame);
             break;
         case ND_FOR:
-            collect_locals(g, n->init, frame); /* ตัวแปรใน for-init */
+            collect_locals(g, n->init, frame); /* variables in the for-init */
             collect_locals(g, n->body, frame);
             break;
         case ND_DOWHILE:
             collect_locals(g, n->body, frame);
             break;
         case ND_SWITCH:
-            /* จองช่องเก็บค่าที่ใช้เทียบของ switch ไว้บน frame (เก็บ offset ไว้ใน int_val)
-             * เพื่อไม่ต้องคงค่าไว้บน temp stack — ทำให้ออกจาก switch ทุกทาง (break/continue) ปลอดภัย */
+            /* Reserve a frame slot for the switch comparison value (offset stored in int_val)
+             * so it need not stay on the temp stack; leaving the switch any way (break/continue) is safe */
             n->int_val = add_local(g, "$switch", TYPE_I64, 0, NULL, NULL, frame);
             for (int i = 0; i < n->nitems; i++) collect_locals(g, n->items[i], frame);
             break;
@@ -427,9 +427,9 @@ void collect_locals(Gen *g, Node *n, int *frame) {
     }
 }
 
-/* เดินทั้งต้นไม้ (รวมนิพจน์) จองช่อง temp ให้ทุกการเรียกฟังก์ชันที่ "คืน struct"
- * เก็บ offset ไว้ใน int_val ของโหนด ND_CALL — ใช้ตอนผลลัพธ์ struct ถูกใช้เป็น rvalue
- * (เช่น เป็นอาร์กิวเมนต์ หรือฐานของ .field) ที่ต้องมีที่อยู่จริงให้ผลลัพธ์ */
+/* Walk the whole tree (expressions included), reserving a temp slot for every call that "returns a struct".
+ * The offset is stored in the ND_CALL node's int_val, used when the struct result is used as an rvalue
+ * (e.g. as an argument, or as the base of .field) that needs a real address for the result */
 void collect_struct_temps(Gen *g, Node *n, int *frame) {
     if (!n) return;
     if (n->kind == ND_CALL) {
@@ -445,9 +445,9 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
     for (int i = 0; i < n->nitems; i++) collect_struct_temps(g, n->items[i], frame);
 }
 
-/* ---------- การวิเคราะห์การเข้าถึงได้ (reachability) สำหรับตัดฟังก์ชันที่ไม่ถูกใช้ ---------- */
+/* ---------- reachability analysis for dropping unused functions ---------- */
 
-/* หาดัชนีของฟังก์ชันในตาราง funcs (คืน -1 ถ้าไม่พบ) */
+/* Find a function's index in the funcs table (returns -1 if not found) */
 int func_index(Gen *g, Node *f) {
     if (!f) return -1;
     for (int i = 0; i < g->nfuncs; i++) if (g->funcs[i] == f) return i;
@@ -456,7 +456,7 @@ int func_index(Gen *g, Node *f) {
 
 void reach_node(Gen *g, Node *n, const char *ns, char *reached);
 
-/* มาร์กฟังก์ชันว่าเข้าถึงได้ แล้วไล่สแกน body หาการเรียกต่อ (DFS, กันวนด้วย reached) */
+/* Mark a function reachable, then scan its body for further calls (DFS; cycles guarded by reached) */
 void reach_func(Gen *g, int idx, char *reached) {
     if (idx < 0 || reached[idx]) return;
     reached[idx] = 1;
@@ -464,22 +464,22 @@ void reach_func(Gen *g, int idx, char *reached) {
     reach_node(g, f->body, f->mod ? f->mod : "", reached);
 }
 
-/* สแกนโหนดหาการเรียกฟังก์ชัน แล้วมาร์กเป้าหมายว่าเข้าถึงได้ (เดินลูกทุกตัวแบบ recursive) */
+/* Scan a node for function calls and mark the targets reachable (recursively visits every child) */
 void reach_node(Gen *g, Node *n, const char *ns, char *reached) {
     if (!n) return;
     if (n->kind == ND_CALL) {
         Node *callee = n->operand;
         if (callee->kind == ND_MEMBER && callee->operand->kind == ND_IDENT &&
             strcmp(callee->operand->name, "io") == 0 && strcmp(callee->name, "out") == 0) {
-            reach_func(g, func_index(g, find_func(g, "", "printf")), reached); /* io.out ใช้ printf */
+            reach_func(g, func_index(g, find_func(g, "", "printf")), reached); /* io.out uses printf */
         } else if (callee->kind == ND_IDENT) {
             Node *t = find_func(g, ns, callee->name);
             if (!t) t = find_func(g, "", callee->name);
             reach_func(g, func_index(g, t), reached);
         } else if (callee->kind == ND_MEMBER) {
-            /* การเรียกผ่าน . อาจเป็น namespace ของโมดูล หรือ method ของ struct
-             * (ระยะ reachability ยังไม่มีข้อมูลชนิดของตัวแปร จึง over-approximate:
-             *  มาร์ก method ทุกตัวที่ชื่อตรงกัน รวมถึงฟังก์ชันใน namespace ของ base) */
+            /* A call through . may be a module namespace or a struct method.
+             * (The reachability pass has no variable type info yet, so over-approximate:
+             *  mark every method with a matching name, plus functions in the base's namespace) */
             if (callee->operand->kind == ND_IDENT)
                 reach_func(g, func_index(g, find_func(g, callee->operand->name, callee->name)), reached);
             for (int k = 0; k < g->nfuncs; k++)
@@ -487,8 +487,8 @@ void reach_node(Gen *g, Node *n, const char *ns, char *reached) {
                     reach_func(g, k, reached);
         }
     }
-    /* ชื่อฟังก์ชันที่ถูกใช้เป็น "ค่า" (function pointer) เช่น `let h = handler;` หรือส่งเป็น argument
-     * ต้องถือว่าเข้าถึงได้ด้วย ไม่งั้น tree-shaking ตัดทิ้งแล้ว lea อ้าง label ที่ไม่มี */
+    /* A function name used as a "value" (function pointer), e.g. `let h = handler;` or passed as an argument,
+     * must also count as reachable, otherwise tree-shaking drops it and lea references a missing label */
     if (n->kind == ND_IDENT) {
         Node *t = find_func(g, ns, n->name);
         if (!t) t = find_func(g, "", n->name);

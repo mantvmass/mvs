@@ -1,15 +1,16 @@
 /*
- * codegen.c - ตัวขับการสร้างโค้ด เลือก backend ตามสถาปัตยกรรมเป้าหมาย
+ * codegen.c - code generation driver; picks the backend for the target architecture
  *
- * ชั้นนี้บางมากโดยตั้งใจ: หน้าที่เดียวคือเปิดไฟล์เอาต์พุตและส่งต่อ AST
- * ไปยัง backend ที่ถูกต้อง ทำให้ส่วนอื่นของคอมไพเลอร์ไม่ผูกกับสถาปัตยกรรมใด ๆ
+ * This layer is intentionally very thin: its only job is to open the output file
+ * and hand the AST to the right backend, keeping the rest of the compiler
+ * unbound from any particular architecture.
  */
 #include <stdio.h>
 #include "codegen.h"
 #include "arch/x86_64/win.h"
 
 int codegen_generate(Node *program, const char *asm_path, TargetArch arch) {
-    /* เปิดไฟล์สำหรับเขียนแอสเซมบลี */
+    /* open the file for writing assembly */
     FILE *out = fopen(asm_path, "w");
     if (!out) {
         fprintf(stderr, "error: cannot open output file '%s'\n", asm_path);

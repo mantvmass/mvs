@@ -1,29 +1,29 @@
 /*
- * generic.h - การทำ monomorphization ของ generic function
+ * generic.h - monomorphization of generic functions
  *
- * แปลง `func max<T>(a: T, b: T) -> T` ให้กลายเป็นสำเนาเฉพาะชนิดที่ถูกเรียกจริง
- * (เช่น max__i32, max__f64) แล้วเปลี่ยนจุดเรียกให้ชี้ไปยังสำเนานั้น
- * ทำงานเป็น pass บน AST ก่อนส่งให้ codegen — codegen จึงเห็นแต่ฟังก์ชันชนิดเดียว (concrete)
+ * Turns `func max<T>(a: T, b: T) -> T` into type-specific copies for the types actually called
+ * (e.g. max__i32, max__f64), then rewrites the call sites to point at those copies.
+ * Runs as an AST pass before codegen, so codegen only ever sees concrete (single-type) functions.
  */
 #ifndef MVS_GENERIC_H
 #define MVS_GENERIC_H
 
 #include "ast.h"
 
-/* แทนที่การเรียก generic ด้วย instance เฉพาะชนิด แล้วเพิ่ม instance เข้าโปรแกรม
- * คืนจำนวน error จากการละเมิด trait bound (`<T: Trait>` ที่ชนิดจริงไม่ impl) — 0 = ผ่าน */
+/* Replace generic calls with type-specific instances and append those instances to the program.
+ * Returns the number of trait bound violations (`<T: Trait>` whose concrete type lacks the impl); 0 = pass */
 int monomorphize(Node *program);
 
-/* แก้ฟังก์ชัน overload (ชื่อซ้ำต่างชนิดพารามิเตอร์): เปลี่ยนชื่อแต่ละตัวตาม signature
- * แล้ว resolve จุดเรียกให้ชี้ตัวที่ชนิด argument ตรงกัน */
+/* Resolve overloaded functions (same name, different parameter types): rename each definition by its
+ * signature, then resolve call sites to the definition whose argument types match */
 void resolve_overloads(Node *program);
 
-/* ตรวจชนิดเวลาคอมไพล์: จับการผสมชนิดที่ผิด (เช่น 50 + "50", u8 = str)
- * คืนจำนวน error ที่พบ (0 = ผ่าน). เรียกหลัง monomorphize + resolve_overloads */
+/* Compile-time type checking: catches invalid type mixes (e.g. 50 + "50", u8 = str).
+ * Returns the number of errors found (0 = pass). Call after monomorphize + resolve_overloads */
 int typecheck(Node *program);
 
-/* ตรวจชื่อซ้ำระดับบน (struct/trait/ฟังก์ชันที่ ns+ชื่อ+signature เดียวกัน) — เรียกก่อน monomorphize
- * คืนจำนวน error (0 = ผ่าน) */
+/* Check top-level duplicate names (structs/traits/functions with the same ns+name+signature).
+ * Call before monomorphize. Returns the number of errors (0 = pass) */
 int check_duplicates(Node *program);
 
 #endif /* MVS_GENERIC_H */

@@ -1,10 +1,10 @@
 # MVS Compiler
 
 A compiler for **MVS**, a small low-level language at roughly C's level but with a friendlier,
-Rust-flavored syntax. It's written in plain C — **no LLVM, no flex, no bison** — and emits
+Rust-flavored syntax. It's written in plain C, **no LLVM, no flex, no bison**, and emits
 **x86-64 (Windows) assembly** directly, which is then assembled with `nasm` and linked with `clang`.
 
-> **For education.** This project exists to show how a real compiler works end to end — a
+> **For education.** This project exists to show how a real compiler works end to end: a
 > hand-written lexer and parser, a small type system, and a code generator that produces actual
 > x86-64 assembly you can read. It is a learning subset, not a production toolchain.
 
@@ -14,8 +14,8 @@ file.mvs ──> lexer ──> parser ──> AST ──> codegen ──> .asm �
 
 ## What you need
 
-- **clang** — builds the compiler and also acts as the linker
-- **nasm** — assembles the generated `.asm` into a `.obj`
+- **clang**: builds the compiler and also acts as the linker
+- **nasm**: assembles the generated `.asm` into a `.obj`
 
 ```powershell
 clang --version
@@ -24,7 +24,7 @@ nasm --version
 
 ## Building the compiler
 
-`make` builds `mvs.exe`. If you don't have `make`, run the compile command directly — it's a single
+`make` builds `mvs.exe`. If you don't have `make`, run the compile command directly. It's a single
 clang invocation over the sources:
 
 ```powershell
@@ -59,10 +59,10 @@ Useful flags:
 
 ## Where to look next
 
-- [GUIDE.md](GUIDE.md) — the language reference, the memory model, the real assembly the compiler
+- [GUIDE.md](GUIDE.md): the language reference, the memory model, the real assembly the compiler
   emits, and the project's status and roadmap.
-- [RULES.md](RULES.md) — the design rules and gotchas for working on the compiler itself.
-- [examples/](examples/) — sample programs grouped by topic (`01_language` … `08_stdlib`); each file
+- [RULES.md](RULES.md): the design rules and gotchas for working on the compiler itself.
+- [examples/](examples/): sample programs grouped by topic (`01_language` … `08_stdlib`); each file
   has a header with its build/run command.
 
 ## Project layout

@@ -1,21 +1,20 @@
-# Makefile สำหรับคอมไพเลอร์ MVS (เขียนด้วย C ล้วน ไม่พึ่ง LLVM/flex/bison)
+# Makefile for the MVS compiler (written in pure C, no LLVM/flex/bison)
 #
-# ต้องมีบน PATH: clang (build คอมไพเลอร์ + เป็น linker), nasm (ประกอบ .asm)
-#   ถ้า clang ติดตั้งไว้คนละที่ ให้เพิ่มโฟลเดอร์ bin เข้า PATH ก่อน (mvs.exe จะแจ้งถ้าหาไม่เจอ)
+# Required on PATH: clang (builds the compiler + acts as linker), nasm (assembles .asm)
+#   If clang is installed elsewhere, add its bin folder to PATH first (mvs.exe reports if not found)
 #
-# เป้าหมายที่ใช้บ่อย:
-#   make            - build คอมไพเลอร์เป็น mvs.exe
-#   make examples   - คอมไพล์ตัวอย่างทั้งหมดใน examples/ (ทุกกลุ่ม)
-#   make framework  - build เฟรมเวิร์กตัวอย่าง vmass/
-#   make clean      - ลบไฟล์ที่สร้างขึ้น
+# Common targets:
+#   make            - build the compiler as mvs.exe
+#   make examples   - compile all examples in examples/ (every group)
+#   make clean      - remove generated files
 
 CC      = clang
-# _CRT_SECURE_NO_WARNINGS: ปิดคำเตือน fopen/strcpy/strdup ของ MSVC runtime
-# -Wextra: เปิดคำเตือนเพิ่ม (unused/dead code) เพื่อให้โค้ดสะอาด
+# _CRT_SECURE_NO_WARNINGS: silence MSVC runtime warnings for fopen/strcpy/strdup
+# -Wextra: enable extra warnings (unused/dead code) to keep the code clean
 CFLAGS  = -Wall -Wextra -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc
 TARGET  = mvs.exe
 
-# ไฟล์ซอร์สของตัวคอมไพเลอร์
+# source files of the compiler itself
 SRC = src/main.c \
       src/lexer.c \
       src/ast.c \
@@ -29,7 +28,7 @@ SRC = src/main.c \
 HDR = src/token.h src/lexer.h src/ast.h src/parser.h src/module.h src/generic.h src/codegen.h \
       src/arch/common.h src/arch/x86_64/win.h
 
-# ตัวอย่างที่คอมไพล์เป็น .exe ได้ (แบ่งเป็นกลุ่ม 01_language .. 08_stdlib)
+# examples that compile to .exe (organized into groups 01_language .. 08_stdlib)
 EXAMPLES = examples/demo \
            examples/01_language/hello examples/01_language/types examples/01_language/operators \
            examples/01_language/casts examples/01_language/control examples/01_language/bitwise \
@@ -44,32 +43,25 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/io_demo examples/08_stdlib/floats examples/08_stdlib/files \
            examples/08_stdlib/net_client examples/08_stdlib/net_server
 
-# เป้าหมายปริยาย: build คอมไพเลอร์
+# default target: build the compiler
 $(TARGET): $(SRC) $(HDR)
 	$(CC) $(CFLAGS) $(SRC) -o $(TARGET)
 	@echo "Built $(TARGET)"
 
-# คอมไพล์ตัวอย่างทั้งหมด (ต้อง build คอมไพเลอร์ก่อน)
+# compile all examples (the compiler must be built first)
 examples: $(TARGET)
 	@for f in $(EXAMPLES); do ./$(TARGET) $$f.mvs || exit 1; done
-	@# กลุ่มที่ต้องใช้แฟล็กพิเศษ (ผลิต .obj สำหรับ C interop / freestanding)
+	@# groups that need special flags (produce .obj for C interop / freestanding)
 	./$(TARGET) examples/07_c_interop/export_lib.mvs -c
 	./$(TARGET) examples/07_c_interop/use_c.mvs -c
 	./$(TARGET) examples/07_c_interop/freestanding.mvs --nostd
 	@echo "All examples compiled"
 
-# build เฟรมเวิร์ก vmass (entry lib = vmass.mvs; โครงสร้าง modular: core/http/vmass + examples/)
-framework: $(TARGET)
-	./$(TARGET) vmass/examples/hello.mvs -o vmass/hello.exe
-	./$(TARGET) vmass/examples/api.mvs -o vmass/api.exe
-	@echo "Built vmass/hello.exe + vmass/api.exe (run one, then: curl http://127.0.0.1:8080/)"
-
-# ลบไฟล์ที่สร้างขึ้นทั้งหมด (รวมโฟลเดอร์ย่อยของ examples และ vmass)
+# remove all generated files (including subfolders of examples)
 clean:
 	rm -f $(TARGET) *.asm *.obj *.exe
 	rm -f examples/*.asm examples/*.obj examples/*.exe
 	rm -f examples/*/*.asm examples/*/*.obj examples/*/*.exe
-	rm -f vmass/*.asm vmass/*.obj vmass/*.exe vmass/examples/*.asm vmass/examples/*.obj
 	@echo "Cleaned"
 
-.PHONY: examples framework clean
+.PHONY: examples clean

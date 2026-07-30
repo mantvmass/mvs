@@ -1,27 +1,27 @@
 /*
- * generic.c - monomorphization ของ generic function (ดูภาพรวมใน generic.h)
+ * generic.c - monomorphization of generic functions (see generic.h for the overview)
  *
- * อัลกอริทึม:
- *   1. รวบรวม generic template (ngen > 0) จากโปรแกรม
- *   2. สแกนทุกฟังก์ชัน concrete หาจุดเรียก generic
- *   3. อนุมานชนิดจริงจาก argument -> สร้าง instance (clone + แทนชนิด) ถ้ายังไม่มี
- *   4. เปลี่ยนชื่อที่จุดเรียกให้ชี้ instance นั้น
- *   5. instance ใหม่ก็ถูกสแกนต่อ (รองรับ generic เรียก generic) จนไม่มีของใหม่
+ * Algorithm:
+ *   1. Collect the generic templates (ngen > 0) from the program
+ *   2. Scan every concrete function for calls to generics
+ *   3. Infer the concrete types from the arguments -> create an instance (clone + substitute types) if missing
+ *   4. Rename the call site to point at that instance
+ *   5. New instances get scanned too (supports generics calling generics) until nothing new appears
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "generic.h"
 
-/* ชนิดจริงที่อนุมานได้ (base + ความลึก pointer + ชื่อ struct + ลายเซ็นถ้าเป็น function pointer) */
+/* Inferred concrete type (base + pointer depth + struct name + signature if it is a function pointer) */
 typedef struct { DataType base; int ptr; char *sname; Node *sig; } CType;
 
-/* รายการแมป ชื่อ -> ชนิด (ใช้เป็น var-type map ต่อฟังก์ชัน และ generic-param map) */
+/* Mapping entry, name -> type (used as the per-function var-type map and the generic-param map) */
 typedef struct { char *name; CType t; } Bind;
 
-/* ---------- ตัวช่วยค้นหาในโปรแกรม ---------- */
+/* ---------- program lookup helpers ---------- */
 
-/* ตรวจว่า type (ชื่อ struct) impl trait ที่ระบุหรือไม่ (มีเครื่องหมาย ND_TRAIT_IMPL) */
+/* Check whether a type (struct name) impls the given trait (an ND_TRAIT_IMPL marker exists) */
 static int type_impls_trait(Node *prog, const char *sname, const char *trait) {
     if (!sname || !trait) return 0;
     for (int i = 0; i < prog->nitems; i++) {
@@ -32,16 +32,16 @@ static int type_impls_trait(Node *prog, const char *sname, const char *trait) {
     return 0;
 }
 
-static int mono_err; /* จำนวน error จาก trait bound ที่ละเมิด (รีเซ็ตใน monomorphize) */
+static int mono_err; /* number of trait bound violation errors (reset in monomorphize) */
 
-/* หา trait declaration ตามชื่อ */
+/* Find a trait declaration by name */
 static Node *find_trait(Node *prog, const char *name) {
     for (int i = 0; i < prog->nitems; i++)
         if (prog->items[i]->kind == ND_TRAIT && strcmp(prog->items[i]->name, name) == 0) return prog->items[i];
     return NULL;
 }
 
-/* มีฟังก์ชัน (method/associated) ชื่อ mname ที่อยู่ใน namespace = type หรือไม่ */
+/* Does a function (method/associated) named mname exist in namespace = type */
 static int type_has_method(Node *prog, const char *type, const char *mname) {
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
@@ -50,7 +50,7 @@ static int type_has_method(Node *prog, const char *type, const char *mname) {
     return 0;
 }
 
-/* ตรวจทุก `impl Trait for Type`: trait ต้องมีจริง และ Type ต้องมีครบทุก method ของ trait */
+/* Check every `impl Trait for Type`: the trait must exist and Type must have every trait method */
 static void check_trait_impls(Node *prog) {
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
@@ -72,7 +72,7 @@ static void check_trait_impls(Node *prog) {
     }
 }
 
-/* หา generic template ตามชื่อ (ngen > 0) */
+/* Find a generic template by name (ngen > 0) */
 static Node *find_template(Node *prog, const char *name) {
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
@@ -81,7 +81,7 @@ static Node *find_template(Node *prog, const char *name) {
     return NULL;
 }
 
-/* หา ND_FUNC ตามชื่อ (ไม่ว่า generic หรือไม่) คืนชนิดที่คืนค่า */
+/* Find an ND_FUNC by name (generic or not) and return its return type */
 static int func_ret_type(Node *prog, const char *name, CType *out) {
     for (int i = 0; i < prog->nitems; i++) {
         Node *d = prog->items[i];
@@ -92,7 +92,7 @@ static int func_ret_type(Node *prog, const char *name, CType *out) {
     return 0;
 }
 
-/* หาชนิดของฟิลด์ใน struct (ใช้อนุมาน a.b) */
+/* Find the type of a struct field (used to infer a.b) */
 static int struct_field_type(Node *prog, const char *sname, const char *field, CType *out) {
     if (!sname) return 0;
     for (int i = 0; i < prog->nitems; i++) {
@@ -109,7 +109,7 @@ static int struct_field_type(Node *prog, const char *sname, const char *field, C
     return 0;
 }
 
-/* อันดับความกว้างของชนิดจำนวนเต็ม (ไบต์) ใช้เลื่อนชนิดผลลัพธ์ของเลขคณิตให้ order-independent */
+/* Width rank of an integer type (bytes); used to widen arithmetic result types order-independently */
 static int int_rank(DataType t) {
     switch (t) {
         case TYPE_I8: case TYPE_U8: case TYPE_BOOL: case TYPE_CHAR: return 1;
@@ -121,7 +121,7 @@ static int int_rank(DataType t) {
     }
 }
 
-/* ---------- การอนุมานชนิดของนิพจน์ (ใช้ var-type map ที่สร้างจากชนิดที่ประกาศไว้) ---------- */
+/* ---------- expression type inference (uses the var-type map built from declared types) ---------- */
 
 static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
     CType r = { TYPE_I64, 0, NULL, NULL };
@@ -136,7 +136,7 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
         case ND_IDENT:
             for (int i = nmap - 1; i >= 0; i--)
                 if (strcmp(map[i].name, n->name) == 0) return map[i].t;
-            /* ไม่ใช่ตัวแปร: อาจเป็น "ชื่อฟังก์ชันใช้เป็นค่า" -> function pointer (ลายเซ็น = โหนดฟังก์ชัน) */
+            /* not a variable: may be a "function name used as a value" -> function pointer (sig = func node) */
             for (int i = 0; i < prog->nitems; i++) {
                 Node *d = prog->items[i];
                 if (d->kind == ND_FUNC && !d->is_method && d->ngen == 0 && d->name && strcmp(d->name, n->name) == 0) {
@@ -167,7 +167,7 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
                 int lf = (lt.base==TYPE_F32||lt.base==TYPE_F64)&&lt.ptr==0;
                 int rf = (rt.base==TYPE_F32||rt.base==TYPE_F64)&&rt.ptr==0;
                 if (lf || rf) { r.base = (lt.base==TYPE_F64||rt.base==TYPE_F64)?TYPE_F64:TYPE_F32; break; }
-                /* int-int: เลื่อนเป็นชนิดที่กว้างกว่า (order-independent) เพื่อให้เลือก overload เหมือนกันไม่ว่าลำดับ */
+                /* int-int: widen to the wider type (order-independent) so overload choice matches either order */
                 r = (int_rank(rt.base) > int_rank(lt.base)) ? rt : lt;
             }
             break;
@@ -176,8 +176,8 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
         case ND_CALL: {
             Node *callee = n->operand;
             if (!callee) break;
-            /* การเรียกผ่าน function pointer (indirect): callee เป็นค่าชนิด TYPE_FUNC
-             * (ตัวแปร/พารามิเตอร์ หรือ ฟิลด์ struct) -> ชนิดผลลัพธ์ = ชนิดคืนค่าของลายเซ็น */
+            /* Call through a function pointer (indirect): the callee is a TYPE_FUNC value
+             * (a variable/parameter or a struct field) -> result type = the signature's return type */
             {
                 CType cc = infer(prog, callee, map, nmap);
                 if (cc.base == TYPE_FUNC && cc.sig) {
@@ -185,12 +185,12 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
                     return ct;
                 }
             }
-            if (callee->kind == ND_IDENT) {              /* f(...) เรียกตรง */
+            if (callee->kind == ND_IDENT) {              /* direct call f(...) */
                 CType ct; if (func_ret_type(prog, callee->name, &ct)) return ct;
-            } else if (callee->kind == ND_MEMBER) {      /* ns.f(...) หรือ obj.method(...) */
-                /* หา "ขอบเขต" (scope): ถ้า base เป็น struct ใช้ชื่อ struct (method),
-                 * ถ้า base เป็นชื่อเปล่าใช้เป็น namespace (เช่น net) — เพื่อเลือกฟังก์ชันที่ ns ตรง
-                 * ก่อน (กันชนชื่อกับ extern C เช่น method accept กับ Winsock accept) */
+            } else if (callee->kind == ND_MEMBER) {      /* ns.f(...) or obj.method(...) */
+                /* Find the "scope": if the base is a struct, use the struct name (method);
+                 * if the base is a bare name, use it as a namespace (e.g. net) so functions with a
+                 * matching ns win first (avoids clashes with extern C, e.g. method accept vs Winsock accept) */
                 const char *scope = NULL;
                 CType bt = infer(prog, callee->operand, map, nmap);
                 if (bt.base == TYPE_STRUCT && bt.sname) scope = bt.sname;
@@ -211,8 +211,8 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
     return r;
 }
 
-/* เพิ่มตัวแปร/พารามิเตอร์เข้า var-type map (scope stack) — มองเห็นได้หลังจุดประกาศ
- * ใช้ร่วมกันทั้ง monomorphize/overload/typecheck เพื่อให้อนุมานชนิดถูกเมื่อมี shadowing */
+/* Add a variable/parameter to the var-type map (scope stack); visible after its declaration point.
+ * Shared by monomorphize/overload/typecheck so type inference stays correct under shadowing */
 static void add_bind(Bind *map, int *nmap, Node *d) {
     if (*nmap >= 512 || !d->name) return;
     map[*nmap].name = d->name;
@@ -220,16 +220,16 @@ static void add_bind(Bind *map, int *nmap, Node *d) {
     (*nmap)++;
 }
 
-/* ใส่ตัวแปร global (top-level let/const) ลง scope ฐาน เพื่อให้อนุมานชนิดของ global ถูก
- * (ต้องเรียกก่อนใส่ params — params/locals จะ shadow ทับได้ถูกต้อง) */
+/* Seed global variables (top-level let/const) into the base scope so global types infer correctly.
+ * (Must be called before adding params; params/locals then shadow them correctly) */
 static void seed_globals(Node *prog, Bind *map, int *nmap) {
     for (int i = 0; i < prog->nitems; i++)
         if (prog->items[i]->kind == ND_VAR_DECL) add_bind(map, nmap, prog->items[i]);
 }
 
-/* ---------- การแทนชนิดและตั้งชื่อ instance ---------- */
+/* ---------- type substitution and instance naming ---------- */
 
-/* เขียนรหัสชนิดสำหรับตั้งชื่อ instance (เช่น i32, pi32, Foo) */
+/* Write the type code used for instance names (e.g. i32, pi32, Foo) */
 static void type_code(CType t, char *buf) {
     char *p = buf;
     for (int i = 0; i < t.ptr; i++) *p++ = 'p';
@@ -237,7 +237,7 @@ static void type_code(CType t, char *buf) {
     strcpy(p, base);
 }
 
-/* แทน generic type parameter ในทุกโหนดของ instance ด้วยชนิดจริง */
+/* Substitute the generic type parameters with concrete types in every node of the instance */
 static void substitute(Node *n, Bind *gmap, int ngmap) {
     if (!n) return;
     if (n->type == TYPE_STRUCT && n->type_name) {
@@ -247,8 +247,9 @@ static void substitute(Node *n, Bind *gmap, int ngmap) {
                 n->ptr += gmap[i].t.ptr;                 /* *T + (T=*i32) -> **i32 */
                 free(n->type_name);
                 n->type_name = gmap[i].t.sname ? strdup(gmap[i].t.sname) : NULL;
-                /* ถ้า T ผูกกับ "ค่า function" (TYPE_FUNC) ต้องพาลายเซ็นมาด้วย ไม่งั้นเรียก f(...) ไม่ได้
-                 * clone กันแก้ไขโครงสร้างที่ใช้ร่วม (ลายเซ็นของฟังก์ชันจริงไม่มี generic param อยู่แล้ว) */
+                /* If T is bound to a "function value" (TYPE_FUNC) the signature must come along,
+                 * or calling f(...) fails. Clone to avoid mutating shared structure
+                 * (a real function's signature has no generic params anyway) */
                 if (n->type == TYPE_FUNC) n->sig = gmap[i].t.sig ? node_clone(gmap[i].t.sig) : NULL;
                 break;
             }
@@ -259,18 +260,18 @@ static void substitute(Node *n, Bind *gmap, int ngmap) {
     substitute(n->then_branch, gmap, ngmap); substitute(n->else_branch, gmap, ngmap);
     substitute(n->init, gmap, ngmap);  substitute(n->step, gmap, ngmap);
     substitute(n->body, gmap, ngmap);
-    substitute(n->sig, gmap, ngmap);   /* generic param ที่อยู่ในลายเซ็น func-ptr เช่น f: func(T) -> T */
+    substitute(n->sig, gmap, ngmap);   /* generic params inside func-ptr signatures, e.g. f: func(T) -> T */
     for (int i = 0; i < n->nitems; i++) substitute(n->items[i], gmap, ngmap);
 }
 
-/* ---------- ตัวขับหลัก ---------- */
+/* ---------- main driver ---------- */
 
-/* สแกนโหนดในฟังก์ชัน concrete หาการเรียก generic แล้ว instantiate + เปลี่ยนชื่อจุดเรียก
- * scope-aware (map/nmap โตตามการประกาศ) เพื่ออนุมานชนิด argument ถูกเมื่อมี shadowing
- * คืนจำนวน instance ใหม่ที่สร้าง (ใช้ตรวจ fixpoint) */
+/* Scan nodes in a concrete function for generic calls, then instantiate + rename the call sites.
+ * Scope-aware (map/nmap grows with declarations) so argument types infer correctly under shadowing.
+ * Returns the number of new instances created (used for the fixpoint check) */
 static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
     if (!n) return *made;
-    switch (n->kind) {                          /* จัดการ scope ก่อน */
+    switch (n->kind) {                          /* handle scopes first */
         case ND_BLOCK: { int s = *nmap; for (int i=0;i<n->nitems;i++) scan_calls(prog,n->items[i],map,nmap,made); *nmap=s; return *made; }
         case ND_VAR_DECL: { scan_calls(prog,n->operand,map,nmap,made); add_bind(map,nmap,n); return *made; }
         case ND_FOR: { int s=*nmap; scan_calls(prog,n->init,map,nmap,made); scan_calls(prog,n->cond,map,nmap,made); scan_calls(prog,n->step,map,nmap,made); scan_calls(prog,n->body,map,nmap,made); *nmap=s; return *made; }
@@ -280,8 +281,8 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
         case ND_CASE: { scan_calls(prog,n->operand,map,nmap,made); int s=*nmap; for (int i=0;i<n->nitems;i++) scan_calls(prog,n->items[i],map,nmap,made); *nmap=s; return *made; }
         default: break;
     }
-    /* เดินลูกก่อน (children-first) — สำคัญสำหรับ generic ซ้อน เช่น f(g(x)):
-     * inner call ต้องถูก instantiate+rename เป็น instance concrete ก่อน outer จะอนุมานชนิด argument */
+    /* Walk children first; matters for nested generics such as f(g(x)): the inner call must be
+     * instantiated+renamed to a concrete instance before the outer call infers its argument type */
     scan_calls(prog, n->lhs, map, nmap, made);   scan_calls(prog, n->rhs, map, nmap, made);
     scan_calls(prog, n->operand, map, nmap, made); scan_calls(prog, n->cond, map, nmap, made);
     scan_calls(prog, n->then_branch, map, nmap, made); scan_calls(prog, n->else_branch, map, nmap, made);
@@ -289,24 +290,24 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
     scan_calls(prog, n->body, map, nmap, made);
     for (int i = 0; i < n->nitems; i++) scan_calls(prog, n->items[i], map, nmap, made);
 
-    /* การเรียก generic: ทั้ง f(...) (ND_IDENT) และ ns.f(...) (ND_MEMBER ที่ base เป็น namespace ไม่ใช่ struct)
-     * — เพื่อให้ generic helper ใน std เรียกแบบ module.func ได้ (กันชนกับ method โดยเช็คว่า base ไม่ใช่ struct) */
+    /* Generic calls: both f(...) (ND_IDENT) and ns.f(...) (ND_MEMBER whose base is a namespace, not a struct)
+     * - lets generic helpers in std be called as module.func (checking the base is not a struct avoids methods) */
     int is_gcall = 0;
     if (n->kind == ND_CALL && n->operand) {
         if (n->operand->kind == ND_IDENT) is_gcall = 1;
         else if (n->operand->kind == ND_MEMBER) {
             CType bt = infer(prog, n->operand->operand, map, *nmap);
-            if (bt.base != TYPE_STRUCT) is_gcall = 1; /* ns.f(...) ไม่ใช่ obj.method() */
+            if (bt.base != TYPE_STRUCT) is_gcall = 1; /* ns.f(...), not obj.method() */
         }
     }
     if (is_gcall) {
         Node *tmpl = find_template(prog, n->operand->name);
         if (tmpl) {
-            /* อนุมานชนิดของ generic parameter แต่ละตัวจาก argument */
+            /* Infer each generic parameter's type from the arguments */
             Bind gmap[4];
             for (int gi = 0; gi < tmpl->ngen; gi++) {
                 CType concrete = { TYPE_I64, 0, NULL, NULL };
-                /* หา parameter ตัวแรกที่ชนิดอ้างถึง generic param นี้ */
+                /* Find the first parameter whose type refers to this generic param */
                 for (int pi = 0; pi < tmpl->nitems && pi < n->nitems; pi++) {
                     Node *pp = tmpl->items[pi];
                     if (pp->type == TYPE_STRUCT && pp->type_name &&
@@ -319,7 +320,7 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                 }
                 gmap[gi].name = tmpl->gen[gi]; gmap[gi].t = concrete;
             }
-            /* ตรวจ trait bound: ถ้า <T: Trait> ชนิดจริงต้อง impl trait นั้น (เป็น struct ที่มีเครื่องหมาย) */
+            /* Check trait bounds: with <T: Trait> the concrete type must impl that trait (a marked struct) */
             for (int gi = 0; gi < tmpl->ngen; gi++) {
                 if (!tmpl->gen_bound[gi]) continue;
                 CType ct = gmap[gi].t;
@@ -330,15 +331,15 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                     mono_err++;
                 }
             }
-            /* ตั้งชื่อ instance จากรหัสชนิด */
-            char mangled[600]; size_t ml = 0;   /* ชื่อ instance (ชื่อ template + รหัสชนิด) — มีขอบเขต */
+            /* Build the instance name from the type codes */
+            char mangled[600]; size_t ml = 0;   /* instance name (template name + type codes), bounded */
             ml = snprintf(mangled, sizeof(mangled), "%s", tmpl->name);
             for (int gi = 0; gi < tmpl->ngen; gi++) {
                 char code[128]; type_code(gmap[gi].t, code);
                 ml += snprintf(mangled + ml, sizeof(mangled) - ml, "__%s", code);
                 if (ml >= sizeof(mangled)) { ml = sizeof(mangled) - 1; break; }
             }
-            /* สร้าง instance ถ้ายังไม่มี (dedup ด้วยการค้นชื่อ mangled ในโปรแกรม) */
+            /* Create the instance if missing (dedup by searching the program for the mangled name) */
             {
                 int exists = 0;
                 for (int i = 0; i < prog->nitems; i++)
@@ -346,23 +347,23 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
                 if (!exists) {
                     Node *inst = node_clone(tmpl);
                     free(inst->name); inst->name = strdup(mangled);
-                    inst->ngen = 0;                 /* concrete แล้ว */
+                    inst->ngen = 0;                 /* now concrete */
                     substitute(inst, gmap, tmpl->ngen);
                     node_add_item(prog, inst);
                     (*made)++;
                 }
             }
-            /* เปลี่ยนจุดเรียกให้ชี้ instance */
+            /* Rewrite the call site to point at the instance */
             free(n->operand->name); n->operand->name = strdup(mangled);
         }
     }
     return *made;
 }
 
-/* ---------- การแก้ฟังก์ชัน overload (ชื่อซ้ำต่างชนิดพารามิเตอร์) ---------- */
+/* ---------- overload resolution (same name, different parameter types) ---------- */
 
-/* รหัส "หมวด" ของชนิด (int/float/str/char/bool/pointer/struct) — ใช้เป็น fallback ตอนจับคู่
- * pointer นำหน้าด้วย 'p' ตามความลึก แล้วตามด้วยหมวดของ pointee (กันชนระหว่าง *i32 กับ *Point) */
+/* "Category" code of a type (int/float/str/char/bool/pointer/struct), used as a fallback when matching.
+ * Pointers get a 'p' prefix per depth, then the pointee's category (keeps *i32 and *Point apart) */
 static void cat_code(CType t, char *buf) {
     char *p = buf;
     for (int i = 0; i < t.ptr; i++) *p++ = 'p';
@@ -379,8 +380,8 @@ static void cat_code(CType t, char *buf) {
     }
 }
 
-/* รหัสชนิด "ละเอียด" แยกความกว้าง int/float และ "ความลึก+ชนิด pointee" — ใช้จับคู่ overload แบบเป๊ะ
- * เช่น *i32 -> "pi32", *u8 -> "pu8", **i32 -> "ppi32" (กันชน/false-duplicate ของ pointer overload) */
+/* "Exact" type code: distinguishes int/float widths and "depth + pointee type"; used for exact matching.
+ * e.g. *i32 -> "pi32", *u8 -> "pu8", **i32 -> "ppi32" (avoids clashes/false duplicates of pointer overloads) */
 static void width_code(CType t, char *buf) {
     char *p = buf;
     for (int i = 0; i < t.ptr; i++) *p++ = 'p';
@@ -393,17 +394,17 @@ static void width_code(CType t, char *buf) {
     }
 }
 
-#define SIGCAP 256  /* ขนาดบัฟเฟอร์ signature (กันล้นเมื่อมีพารามิเตอร์/ชื่อ struct จำนวนมาก) */
+#define SIGCAP 256  /* signature buffer size (guards against overflow with many params/struct names) */
 
-/* ต่อรหัสชนิดเข้า buf แบบมีขอบเขต (cap=SIGCAP) — คืนความยาวใหม่ */
+/* Append a type code to buf with bounds checking (cap=SIGCAP); updates the length in place */
 static void sig_append(char *buf, size_t *len, int first, const char *code) {
     size_t add = (first ? 0 : 1) + strlen(code);
-    if (*len + add + 1 >= SIGCAP) return;   /* เต็ม: หยุด (ไม่ล้น) */
+    if (*len + add + 1 >= SIGCAP) return;   /* full: stop (no overflow) */
     if (!first) buf[(*len)++] = '_';
     strcpy(buf + *len, code); *len += strlen(code);
 }
 
-/* สร้าง signature ของฟังก์ชันจากชนิดพารามิเตอร์ (exact=1 -> width_code, 0 -> cat_code) */
+/* Build a function's signature from its parameter types (exact=1 -> width_code, 0 -> cat_code) */
 static void sig_func(Node *fn, char *buf, int exact) {
     buf[0] = '\0';
     if (fn->nitems == 0) { strcpy(buf, "void"); return; }
@@ -415,7 +416,7 @@ static void sig_func(Node *fn, char *buf, int exact) {
     }
 }
 
-/* สร้าง signature ของจุดเรียกจากชนิด argument (อนุมานด้วย var-type map) */
+/* Build a call site's signature from the argument types (inferred via the var-type map) */
 static void sig_call(Node *prog, Node *call, Bind *map, int nmap, char *buf, int exact) {
     buf[0] = '\0';
     if (call->nitems == 0) { strcpy(buf, "void"); return; }
@@ -427,20 +428,20 @@ static void sig_call(Node *prog, Node *call, Bind *map, int nmap, char *buf, int
     }
 }
 
-/* กลุ่มฟังก์ชันที่ชื่อซ้ำกัน (overload set): sig = ละเอียด (exact), catsig = หมวด (fallback) */
+/* Group of functions sharing a name (overload set): sig = exact, catsig = category (fallback) */
 typedef struct { char *orig; Node *defs[16]; char sig[16][SIGCAP]; char catsig[16][SIGCAP]; int n; } OvSet;
 
-/* ตรวจว่าฟังก์ชันนี้เข้าเกณฑ์ overload หรือไม่ (ฟังก์ชันธรรมดาระดับ global) */
+/* Is this function eligible for overloading (a plain global function) */
 static int ov_eligible(Node *f) {
     return f->kind == ND_FUNC && f->body && f->ngen == 0 &&
            !f->is_export && !f->is_method && !f->is_extern &&
            (f->ns == NULL || f->ns[0] == 0) && strcmp(f->name, "main") != 0;
 }
 
-/* สแกนหาจุดเรียกฟังก์ชัน overload แล้วเปลี่ยนชื่อให้ตรง signature ของ argument (scope-aware) */
+/* Scan for calls to overloaded functions and rename them to match the argument signature (scope-aware) */
 static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int nsets) {
     if (!n) return;
-    switch (n->kind) {                          /* จัดการ scope ก่อน (รองรับ shadowing) */
+    switch (n->kind) {                          /* handle scopes first (supports shadowing) */
         case ND_BLOCK: { int s=*nmap; for (int i=0;i<n->nitems;i++) scan_ov(prog,n->items[i],map,nmap,sets,nsets); *nmap=s; return; }
         case ND_VAR_DECL: { scan_ov(prog,n->operand,map,nmap,sets,nsets); add_bind(map,nmap,n); return; }
         case ND_FOR: { int s=*nmap; scan_ov(prog,n->init,map,nmap,sets,nsets); scan_ov(prog,n->cond,map,nmap,sets,nsets); scan_ov(prog,n->step,map,nmap,sets,nsets); scan_ov(prog,n->body,map,nmap,sets,nsets); *nmap=s; return; }
@@ -450,8 +451,8 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
         case ND_CASE: { scan_ov(prog,n->operand,map,nmap,sets,nsets); int s=*nmap; for (int i=0;i<n->nitems;i++) scan_ov(prog,n->items[i],map,nmap,sets,nsets); *nmap=s; return; }
         default: break;
     }
-    /* แก้ลูกก่อน (resolve การเรียกซ้อนใน argument) เพื่อให้อนุมานชนิดของ argument ที่เป็น
-     * การเรียก overload ได้ถูก — เช่น outer(inner(x)) ต้อง resolve inner ก่อน */
+    /* Resolve children first (nested calls in arguments) so argument types that are themselves
+     * overloaded calls infer correctly, e.g. outer(inner(x)) must resolve inner first */
     scan_ov(prog, n->lhs, map, nmap, sets, nsets);   scan_ov(prog, n->rhs, map, nmap, sets, nsets);
     scan_ov(prog, n->operand, map, nmap, sets, nsets); scan_ov(prog, n->cond, map, nmap, sets, nsets);
     scan_ov(prog, n->then_branch, map, nmap, sets, nsets); scan_ov(prog, n->else_branch, map, nmap, sets, nsets);
@@ -463,20 +464,20 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
         for (int s = 0; s < nsets; s++) {
             if (sets[s].n < 2 || strcmp(sets[s].orig, n->operand->name) != 0) continue;
             char wx[SIGCAP], wc[SIGCAP];
-            sig_call(prog, n, map, *nmap, wx, 1);   /* signature ละเอียด */
-            sig_call(prog, n, map, *nmap, wc, 0);   /* signature หมวด (fallback) */
+            sig_call(prog, n, map, *nmap, wx, 1);   /* exact signature */
+            sig_call(prog, n, map, *nmap, wc, 0);   /* category signature (fallback) */
             int found = -1;
-            /* 1) จับคู่แบบเป๊ะตามความกว้างก่อน (เช่น i32 ตรง i32) */
+            /* 1) exact width match first (e.g. i32 matches i32) */
             for (int d = 0; d < sets[s].n; d++)
                 if (strcmp(sets[s].sig[d], wx) == 0) { found = d; break; }
-            /* 2) ถ้าไม่เจอ ใช้หมวด — ต้องมีตัวเดียวเท่านั้น (เช่น literal i64 -> show(i32) ที่มีตัวเดียว) */
+            /* 2) if not found, use the category; must match exactly one (e.g. literal i64 -> the sole show(i32)) */
             if (found < 0) {
                 int cnt = 0, cd = -1;
                 for (int d = 0; d < sets[s].n; d++)
                     if (strcmp(sets[s].catsig[d], wc) == 0) { cnt++; cd = d; }
                 if (cnt == 1) found = cd;
                 else if (cnt > 1) {
-                    fprintf(stderr, "codegen error: ambiguous call to '%s' with argument types (%s) — multiple width overloads match; use 'as' to disambiguate\n", sets[s].orig, wx);
+                    fprintf(stderr, "codegen error: ambiguous call to '%s' with argument types (%s): multiple width overloads match; use 'as' to disambiguate\n", sets[s].orig, wx);
                     break;
                 }
             }
@@ -487,15 +488,15 @@ static void scan_ov(Node *prog, Node *n, Bind *map, int *nmap, OvSet *sets, int 
     }
 }
 
-/* เทียบ namespace (NULL ถือเป็น "") */
+/* Compare namespaces (NULL counts as "") */
 static int ns_eq(const char *a, const char *b) {
     if (!a) a = ""; if (!b) b = "";
     return strcmp(a, b) == 0;
 }
 
-/* ตรวจชื่อซ้ำระดับบน: struct/trait ชื่อซ้ำ, ฟังก์ชัน (ns+ชื่อ+ชนิดพารามิเตอร์เป๊ะ) ซ้ำ
- * — overload (ชื่อเดียวต่างชนิด) ไม่ถือว่าซ้ำ; extern ซ้ำได้ (เป็นการประกาศ ถูก dedup ภายหลัง)
- * เรียกก่อน monomorphize เพื่อจับ error ทันที คืนจำนวน error */
+/* Check top-level duplicates: repeated struct/trait names, and functions with the same ns+name+exact
+ * parameter types. Overloads (same name, different types) are not duplicates; externs may repeat
+ * (they are declarations, deduped later). Called before monomorphize to catch errors early. Returns the count */
 int check_duplicates(Node *prog) {
     int errc = 0;
     for (int i = 0; i < prog->nitems; i++) {
@@ -512,7 +513,7 @@ int check_duplicates(Node *prog) {
                 if (a->is_extern || b->is_extern || a->ngen > 0 || b->ngen > 0) continue;
                 if (!ns_eq(a->ns, b->ns)) continue;
                 char sa[SIGCAP], sb[SIGCAP]; sig_func(a, sa, 1); sig_func(b, sb, 1);
-                if (strcmp(sa, sb) != 0) continue; /* คนละ signature = overload ไม่ใช่ซ้ำ */
+                if (strcmp(sa, sb) != 0) continue; /* different signature = overload, not a duplicate */
                 if (a->ns && a->ns[0])
                     fprintf(stderr, "error: duplicate function '%s.%s' with the same parameter types (%s)\n", a->ns, a->name, sa);
                 else
@@ -526,7 +527,7 @@ int check_duplicates(Node *prog) {
 
 void resolve_overloads(Node *prog) {
     static OvSet sets[128]; int nsets = 0;
-    /* 1) จัดกลุ่มฟังก์ชันตามชื่อเดิม */
+    /* 1) group functions by their original name */
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
         if (!ov_eligible(f)) continue;
@@ -538,14 +539,14 @@ void resolve_overloads(Node *prog) {
         }
         if (sets[si].n < 16) {
             sets[si].defs[sets[si].n] = f;
-            sig_func(f, sets[si].sig[sets[si].n], 1);     /* ละเอียด */
-            sig_func(f, sets[si].catsig[sets[si].n], 0);  /* หมวด */
+            sig_func(f, sets[si].sig[sets[si].n], 1);     /* exact */
+            sig_func(f, sets[si].catsig[sets[si].n], 0);  /* category */
             sets[si].n++;
         }
         else fprintf(stderr, "codegen error: too many overloads of '%s' (max 16)\n", f->name);
     }
-    /* 2) เปลี่ยนชื่อสมาชิกของกลุ่มที่มีมากกว่า 1 (overloaded) ตาม signature ละเอียด
-     *    (การนิยามซ้ำ signature เดียวกันถูกจับไปแล้วใน check_duplicates ก่อน monomorphize) */
+    /* 2) rename members of every group with more than 1 entry (overloaded) using the exact signature
+     *    (identical-signature redefinitions were already caught by check_duplicates before monomorphize) */
     for (int s = 0; s < nsets; s++) {
         if (sets[s].n < 2) continue;
         for (int d = 0; d < sets[s].n; d++) {
@@ -553,8 +554,8 @@ void resolve_overloads(Node *prog) {
             free(sets[s].defs[d]->name); sets[s].defs[d]->name = strdup(mangled);
         }
     }
-    /* 3) resolve จุดเรียกทุกที่ (ในทุกฟังก์ชัน concrete + ค่าเริ่มต้นของ global)
-     *    ข้าม generic template (ngen>0) เพราะชนิดยังไม่ระบุ — instance ของมันถูกสแกนแยก */
+    /* 3) resolve call sites everywhere (every concrete function + global initializers)
+     *    skip generic templates (ngen>0): their types are unresolved; their instances are scanned separately */
     for (int i = 0; i < prog->nitems; i++) {
         Node *f = prog->items[i];
         if (f->kind == ND_FUNC && f->body && f->ngen == 0) {
@@ -563,22 +564,22 @@ void resolve_overloads(Node *prog) {
             for (int j = 0; j < f->nitems; j++) if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
             scan_ov(prog, f->body, map, &nmap, sets, nsets);
         } else if (f->kind == ND_VAR_DECL && f->operand) {
-            Bind map[512]; int nmap = 0;   /* ใช้ map จริง (กัน NULL-deref ถ้า init มี block/decl) */
+            Bind map[512]; int nmap = 0;   /* use a real map (avoids NULL deref if the init has a block/decl) */
             seed_globals(prog, map, &nmap);
             scan_ov(prog, f->operand, map, &nmap, sets, nsets);
         }
     }
 }
 
-/* ---------- ตัวตรวจชนิดเวลาคอมไพล์ (compile-time type checking) ----------
+/* ---------- compile-time type checker ----------
  *
- * จุดประสงค์: จับ "ชนิดมั่ว" ตั้งแต่ตอนคอมไพล์ (ไม่ปล่อยให้ไปพังตอนรัน) เช่น
- *   50 + "50"           -> error (บวกตัวเลขกับสตริงไม่ได้)
- *   let x: u8 = "hi"    -> error (กำหนดสตริงให้ตัวแปรตัวเลขไม่ได้)
- * ออกแบบให้ "เข้มเฉพาะที่ผิดชัดเจน" เพื่อไม่ false-positive กับโค้ดระดับล่างที่ถูกต้อง
- * (เช่น pointer +/- int, เทียบ pointer กับ 0 เพื่อเช็ค null, ผสมความกว้าง int) */
+ * Purpose: catch type nonsense at compile time (instead of letting it break at runtime), e.g.
+ *   50 + "50"           -> error (cannot add a number and a string)
+ *   let x: u8 = "hi"    -> error (cannot assign a string to a numeric variable)
+ * Designed to be "strict only where clearly wrong" to avoid false positives on valid low-level code
+ * (e.g. pointer +/- int, comparing a pointer with 0 for a null check, mixing int widths) */
 
-static int tc_numeric(CType t) {            /* ตัวเลข (int/float/char/bool) ที่ไม่ใช่ pointer */
+static int tc_numeric(CType t) {            /* numeric (int/float/char/bool), not a pointer */
     if (t.ptr) return 0;
     switch (t.base) {
         case TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64: case TYPE_I128: case TYPE_ISIZE:
@@ -587,7 +588,7 @@ static int tc_numeric(CType t) {            /* ตัวเลข (int/float/cha
         default: return 0;
     }
 }
-static int tc_integer(CType t) {            /* จำนวนเต็ม/char/bool (ใช้กับ bitwise/shift) */
+static int tc_integer(CType t) {            /* integer/char/bool (used for bitwise/shift) */
     if (t.ptr) return 0;
     switch (t.base) {
         case TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64: case TYPE_I128: case TYPE_ISIZE:
@@ -601,7 +602,7 @@ static int tc_isstr(CType t)    { return t.ptr == 0 && t.base == TYPE_STR; }
 static int tc_isstruct(CType t) { return t.ptr == 0 && t.base == TYPE_STRUCT; }
 static int tc_isvoid(CType t)   { return t.ptr == 0 && t.base == TYPE_VOID; }
 
-/* เขียนชื่อชนิดอ่านง่ายลง buf (เช่น "u8", "*i32", "str", "Point") */
+/* Write a readable type name into buf (e.g. "u8", "*i32", "str", "Point") */
 static void tc_name(CType t, char *buf) {
     char *p = buf;
     for (int i = 0; i < t.ptr; i++) *p++ = '*';
@@ -609,18 +610,18 @@ static void tc_name(CType t, char *buf) {
     strcpy(p, b);
 }
 
-/* ตรวจว่า value (s) กำหนดให้ target (d) ได้ไหม */
+/* Check whether a value (s) can be assigned to a target (d) */
 static int tc_assignable(CType d, CType s) {
     if (tc_isstruct(d)) return tc_isstruct(s) && d.sname && s.sname && strcmp(d.sname, s.sname) == 0;
-    if (tc_isstruct(s)) return 0;                       /* struct ให้ค่าที่ไม่ใช่ struct ชนิดเดียวกันไม่ได้ */
-    if (tc_isptr(d) || tc_isstr(d))                     /* target เป็น pointer/str: รับ pointer/str/integer (address/null) */
+    if (tc_isstruct(s)) return 0;                       /* a struct value only fits the same struct type */
+    if (tc_isptr(d) || tc_isstr(d))                     /* pointer/str target: accepts pointer/str/integer (address/null) */
         return tc_isptr(s) || tc_isstr(s) || tc_integer(s);
-    if (tc_numeric(d)) return tc_numeric(s);            /* target เป็นตัวเลข: ห้าม str/pointer/struct */
-    return 1;                                           /* void ฯลฯ: ไม่เข้มงวด */
+    if (tc_numeric(d)) return tc_numeric(s);            /* numeric target: no str/pointer/struct */
+    return 1;                                           /* void etc.: not strict */
 }
 
-/* บริบทของฟังก์ชันที่กำลังตรวจ — map/nmap เป็น scope stack ที่โตขึ้นตามการประกาศ (push/pop ต่อ block)
- * เพื่อให้อนุมานชนิดของตัวแปรถูกต้องเมื่อมี shadowing (ใช้ตัวที่ประกาศก่อนและอยู่ใน scope) */
+/* Context of the function being checked. map/nmap is a scope stack that grows with declarations
+ * (push/pop per block) so variable types infer correctly under shadowing (nearest in-scope declaration wins) */
 typedef struct { Node *prog; Bind *map; int *nmap; CType ret; int *errc; } TcCtx;
 
 static void tc_err(TcCtx *c, Node *n, const char *msg, CType a, CType b) {
@@ -629,7 +630,7 @@ static void tc_err(TcCtx *c, Node *n, const char *msg, CType a, CType b) {
     (*c->errc)++;
 }
 
-/* เพิ่มตัวแปรเข้า scope ปัจจุบัน (มองเห็นได้หลังจุดประกาศ) */
+/* Add a variable to the current scope (visible after its declaration point) */
 static void tc_add(TcCtx *c, Node *d) {
     if (*c->nmap >= 512 || !d->name) return;
     c->map[*c->nmap].name = d->name;
@@ -643,13 +644,13 @@ static void tc_add(TcCtx *c, Node *d) {
 static void tc_check(TcCtx *c, Node *n) {
     if (!n) return;
     switch (n->kind) {
-        case ND_BLOCK: {                       /* เปิด scope ใหม่: ตัวแปรในบล็อกหายไปเมื่อจบ */
+        case ND_BLOCK: {                       /* open a new scope: block variables vanish at its end */
             int save = *c->nmap;
             for (int i = 0; i < n->nitems; i++) tc_check(c, n->items[i]);
             *c->nmap = save;
             return;
         }
-        case ND_VAR_DECL: {                    /* ตรวจค่าเริ่มต้นด้วย scope ปัจจุบันก่อน แล้วค่อยเพิ่มตัวแปร */
+        case ND_VAR_DECL: {                    /* check the initializer in the current scope, then add the var */
             if (n->operand) {
                 tc_check(c, n->operand);
                 CType dt = { n->type, n->ptr, n->type_name, NULL };
@@ -659,7 +660,7 @@ static void tc_check(TcCtx *c, Node *n) {
             tc_add(c, n);
             return;
         }
-        case ND_FOR: {                         /* ตัวแปรใน for-init มี scope แค่ในลูป */
+        case ND_FOR: {                         /* variables in for-init are scoped to the loop */
             int save = *c->nmap;
             tc_check(c, n->init); tc_check(c, n->cond); tc_check(c, n->step); tc_check(c, n->body);
             *c->nmap = save;
@@ -678,7 +679,7 @@ static void tc_check(TcCtx *c, Node *n) {
         }
         case ND_SWITCH: {
             tc_check(c, n->cond);
-            /* switch เทียบด้วยจำนวนเต็ม (je) — ค่าที่เทียบต้องเป็น integer/char/bool ไม่งั้นผลผิดเงียบ ๆ */
+            /* switch compares as integers (je): the value must be integer/char/bool or it silently misbehaves */
             CType ct = infer(c->prog, n->cond, c->map, *c->nmap);
             if (!tc_integer(ct)) {
                 char tn[128]; tc_name(ct, tn);
@@ -698,7 +699,7 @@ static void tc_check(TcCtx *c, Node *n) {
             return;
         }
         case ND_STRUCT_LIT: {
-            /* รายการ item เป็น ND_ASSIGN (field = value) — ตรวจชนิดค่าเทียบชนิดฟิลด์ที่ประกาศ */
+            /* items are ND_ASSIGN (field = value); check each value against the declared field type */
             for (int i = 0; i < n->nitems; i++) {
                 Node *fi = n->items[i];
                 if (!fi || !fi->rhs) continue;
@@ -715,7 +716,7 @@ static void tc_check(TcCtx *c, Node *n) {
         default: break;
     }
 
-    /* นิพจน์ทั่วไป: เดินลูกก่อน แล้วตรวจตัวดำเนินการ */
+    /* general expressions: walk the children first, then check the operator */
     tc_check(c, n->lhs); tc_check(c, n->rhs); tc_check(c, n->operand);
     tc_check(c, n->cond); tc_check(c, n->then_branch); tc_check(c, n->else_branch);
     tc_check(c, n->init); tc_check(c, n->step); tc_check(c, n->body);
@@ -727,9 +728,9 @@ static void tc_check(TcCtx *c, Node *n) {
         TokenType op = n->op;
         if (op == TK_PLUS || op == TK_MINUS) {
             int lp = tc_isptr(lt), rp = tc_isptr(rt);
-            if (lp && rp) {                                  /* ptr - ptr ได้, ptr + ptr ไม่ได้ */
+            if (lp && rp) {                                  /* ptr - ptr is allowed, ptr + ptr is not */
                 if (op == TK_PLUS) tc_err(c, n, "cannot add two pointers:", lt, rt);
-            } else if (lp || rp) {                           /* ptr +/- int เท่านั้น */
+            } else if (lp || rp) {                           /* only ptr +/- int */
                 if (!((lp && tc_numeric(rt)) || (rp && tc_numeric(lt) && op == TK_PLUS)))
                     tc_err(c, n, "invalid pointer arithmetic between", lt, rt);
             } else if (!(tc_numeric(lt) && tc_numeric(rt))) {
@@ -738,7 +739,7 @@ static void tc_check(TcCtx *c, Node *n) {
         } else if (op == TK_STAR || op == TK_SLASH || op == TK_STARSTAR) {
             if (!(tc_numeric(lt) && tc_numeric(rt))) tc_err(c, n, "cannot apply arithmetic to", lt, rt);
         } else if (op == TK_PERCENT) {
-            /* modulo ใช้กับจำนวนเต็มเท่านั้น (float ต้องใช้ fmod) — กันผลผิดเงียบ ๆ */
+            /* modulo is integer-only (floats need fmod); avoids silently wrong results */
             if (!(tc_integer(lt) && tc_integer(rt))) tc_err(c, n, "modulo '%' requires integer operands, got", lt, rt);
         } else if (op == TK_AMP || op == TK_PIPE || op == TK_CARET || op == TK_SHL || op == TK_SHR) {
             if (!(tc_integer(lt) && tc_integer(rt))) tc_err(c, n, "bitwise/shift requires integer operands, got", lt, rt);
@@ -757,7 +758,7 @@ static void tc_check(TcCtx *c, Node *n) {
         CType vt = infer(c->prog, n->operand, c->map, *c->nmap);
         if (!tc_assignable(c->ret, vt)) tc_err(c, n, "return type mismatch between", c->ret, vt);
     } else if (n->kind == ND_UNARY && n->op == TK_STAR) {
-        /* dereference `*x` ต้องใช้กับ pointer เท่านั้น (กัน segfault เงียบ ๆ) */
+        /* dereference `*x` only works on a pointer (avoids silent segfaults) */
         CType ot = infer(c->prog, n->operand, c->map, *c->nmap);
         if (ot.ptr == 0) {
             char on[128]; tc_name(ot, on);
@@ -765,8 +766,8 @@ static void tc_check(TcCtx *c, Node *n) {
             (*c->errc)++;
         }
     } else if (n->kind == ND_CALL && n->operand) {
-        /* ตรวจชนิด argument ของการเรียก: ฟังก์ชันตรง f(...) และ method obj.m(...) ของผู้ใช้
-         * (เว้น extern/generic/namespaced — ดูชนิดไม่ครบ/variadic). argoff=1 = ข้าม self ของ method */
+        /* Check call argument types: direct calls f(...) and user method calls obj.m(...).
+         * (Skips extern/generic/namespaced: incomplete type info or variadic.) argoff=1 skips the method's self */
         Node *callee = n->operand, *fn = NULL;
         int argoff = 0;
         if (callee->kind == ND_IDENT) {
@@ -777,7 +778,7 @@ static void tc_check(TcCtx *c, Node *n) {
             }
         } else if (callee->kind == ND_MEMBER) {
             CType bt = infer(c->prog, callee->operand, c->map, *c->nmap);
-            if (bt.base == TYPE_STRUCT && bt.sname) {       /* method call obj.m(...) */
+            if (bt.base == TYPE_STRUCT && bt.sname) {       /* a method call obj.m(...) */
                 for (int i = 0; i < c->prog->nitems; i++) {
                     Node *d = c->prog->items[i];
                     if (d->kind == ND_FUNC && d->is_method && d->ngen == 0 && d->ns && callee->name &&
@@ -805,7 +806,7 @@ static void tc_check(TcCtx *c, Node *n) {
             }
         }
     }
-    /* หมายเหตุ: ND_VAR_DECL ถูกจัดการใน switch ด้านบนแล้ว (ตรวจ init + เพิ่มตัวแปรเข้า scope) */
+    /* note: ND_VAR_DECL is handled in the switch above (checks the init + adds the variable to scope) */
 }
 
 int typecheck(Node *prog) {
@@ -816,11 +817,11 @@ int typecheck(Node *prog) {
             Bind map[512]; int nmap = 0;
             CType ret = { f->type, f->ptr, f->type_name, NULL };
             TcCtx c = { prog, map, &nmap, ret, &errc };
-            seed_globals(prog, map, &nmap);            /* global อยู่ใน scope ฐาน */
-            for (int j = 0; j < f->nitems; j++)        /* พารามิเตอร์ shadow ทับ global ได้ */
+            seed_globals(prog, map, &nmap);            /* globals live in the base scope */
+            for (int j = 0; j < f->nitems; j++)        /* parameters may shadow globals */
                 if (f->items[j]->kind == ND_PARAM) tc_add(&c, f->items[j]);
             tc_check(&c, f->body);
-        } else if (f->kind == ND_VAR_DECL && f->operand) {  /* ตรวจค่าเริ่มต้นของ global ด้วย */
+        } else if (f->kind == ND_VAR_DECL && f->operand) {  /* also check global initializers */
             Bind map[512]; int nmap = 0;
             CType ret = { TYPE_VOID, 0, NULL, NULL };
             TcCtx c = { prog, map, &nmap, ret, &errc };
@@ -834,10 +835,10 @@ int typecheck(Node *prog) {
     return errc;
 }
 
-/* เติม default method ของ trait ให้ type ที่ impl แต่ไม่ได้เขียน method นั้นเอง
- * (clone body จาก trait แล้วแทน Self -> ชื่อ type) — ทำก่อนตรวจความครบ */
+/* Fill in trait default methods for types that impl the trait but did not write the method themselves
+ * (clone the body from the trait, then substitute Self -> the type name). Runs before the completeness check */
 static void apply_trait_defaults(Node *prog) {
-    int n = prog->nitems; /* เฉพาะ marker ที่มีตอนเริ่ม (method ใหม่ที่ append ไม่ต้องวนซ้ำ) */
+    int n = prog->nitems; /* only markers present at the start (newly appended methods need no re-scan) */
     for (int i = 0; i < n; i++) {
         Node *d = prog->items[i];
         if (d->kind != ND_TRAIT_IMPL) continue;
@@ -845,15 +846,15 @@ static void apply_trait_defaults(Node *prog) {
         if (!tr) continue;
         for (int j = 0; j < tr->nitems; j++) {
             Node *sig = tr->items[j];
-            if (sig->kind != ND_FUNC || !sig->body) continue;           /* ไม่มี default */
-            if (type_has_method(prog, d->type_name, sig->name)) continue;/* type เขียนเองแล้ว */
+            if (sig->kind != ND_FUNC || !sig->body) continue;           /* no default */
+            if (type_has_method(prog, d->type_name, sig->name)) continue;/* the type wrote its own */
             Node *m = node_clone(sig);
             m->is_method = 1;
             free(m->ns); m->ns = strdup(d->type_name);
             Bind self_map[1];
             self_map[0].name = "Self";
             self_map[0].t.base = TYPE_STRUCT; self_map[0].t.ptr = 0; self_map[0].t.sname = d->type_name;
-            substitute(m, self_map, 1);                                  /* Self -> type จริง */
+            substitute(m, self_map, 1);                                  /* Self -> the concrete type */
             node_add_item(prog, m);
         }
     }
@@ -861,12 +862,12 @@ static void apply_trait_defaults(Node *prog) {
 
 int monomorphize(Node *prog) {
     mono_err = 0;
-    apply_trait_defaults(prog); /* เติม default method ก่อน แล้วค่อยตรวจความครบ */
-    check_trait_impls(prog);   /* impl Trait for Type ต้องครบและ trait ต้องมีจริง */
-    /* วนจนไม่มี instance ใหม่ (รองรับ generic เรียก generic) */
+    apply_trait_defaults(prog); /* fill in default methods first, then check completeness */
+    check_trait_impls(prog);   /* impl Trait for Type must be complete and the trait must exist */
+    /* loop until no new instances appear (supports generics calling generics) */
     for (int round = 0; round < 64; round++) {
         int made = 0;
-        int nfuncs = prog->nitems; /* สแกนเฉพาะที่มีอยู่ตอนเริ่มรอบ (instance ใหม่รอรอบถัดไป) */
+        int nfuncs = prog->nitems; /* scan only what existed at round start (new instances wait a round) */
         for (int i = 0; i < nfuncs; i++) {
             Node *f = prog->items[i];
             if (f->kind == ND_FUNC && f->ngen == 0 && f->body) {
@@ -874,7 +875,7 @@ int monomorphize(Node *prog) {
                 seed_globals(prog, map, &nmap);
                 for (int j = 0; j < f->nitems; j++) if (f->items[j]->kind == ND_PARAM) add_bind(map, &nmap, f->items[j]);
                 scan_calls(prog, f->body, map, &nmap, &made);
-            } else if (f->kind == ND_VAR_DECL && f->operand) {   /* generic call ในค่าเริ่มต้น global */
+            } else if (f->kind == ND_VAR_DECL && f->operand) {   /* generic calls in global initializers */
                 Bind map[512]; int nmap = 0;
                 seed_globals(prog, map, &nmap);
                 scan_calls(prog, f->operand, map, &nmap, &made);

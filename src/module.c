@@ -1,11 +1,11 @@
 /*
- * module.c - การโหลดและรวมโมดูล (resolve import ข้ามไฟล์)
+ * module.c - module loading and merging (resolves imports across files)
  *
- * แนวคิด: front-end เดิม parse ได้ทีละไฟล์ ระบบโมดูลทำหน้าที่
- *   1. อ่านไฟล์ entry แล้ว parse
- *   2. พบ ND_IMPORT ก็ไปโหลดไฟล์/แพ็กเกจที่อ้างถึง (กันโหลดซ้ำด้วยชุดที่โหลดแล้ว)
- *   3. นำฟังก์ชัน/ตัวแปร/extern จากทุกโมดูลมารวมไว้ใน ND_PROGRAM เดียว
- *      โดยติดป้าย namespace ให้โมดูลที่นำเข้าแบบ package (เช่น io.out)
+ * Idea: the original front end parses one file at a time. The module system:
+ *   1. Reads the entry file and parses it
+ *   2. On ND_IMPORT, loads the referenced file/package (a loaded set prevents reloading)
+ *   3. Merges functions/variables/externs from every module into a single ND_PROGRAM,
+ *      tagging a namespace on modules imported as a package (e.g. io.out)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,31 +15,31 @@
 
 #define MAX_LOADED 256
 
-/* สถานะระหว่างการโหลด รวมผลลัพธ์และรายการไฟล์ที่โหลดแล้ว */
+/* Loading state: the accumulated result plus the list of already loaded files */
 typedef struct {
-    Node       *result;              /* ND_PROGRAM ที่กำลังสะสมผลลัพธ์ */
-    char       *loaded[MAX_LOADED];  /* path (canonical) ของโมดูลที่โหลดแล้ว (กันโหลดซ้ำ/วนลูป) */
-    char       *defs[MAX_LOADED];    /* รายชื่อสัญลักษณ์ระดับบนของแต่ละโมดูล รูป "|name|name|" (ใช้ตรวจ import) */
-    char       *loaded_ns[MAX_LOADED];/* namespace ที่โมดูลถูก tag ตอนโหลดครั้งแรก (กัน import คนละ ns) */
+    Node       *result;              /* ND_PROGRAM accumulating the result */
+    char       *loaded[MAX_LOADED];  /* canonical paths of loaded modules (prevents reload/loops) */
+    char       *defs[MAX_LOADED];    /* top-level symbol list per module, form "|name|name|" (import checks) */
+    char       *loaded_ns[MAX_LOADED];/* namespace a module was tagged with on first load (guards ns clash) */
     int         nloaded;
-    char       *ns_name[MAX_LOADED]; /* namespace ที่ผูกแล้ว (io, net, alias) — กันผูกชื่อซ้ำคนละโมดูล */
+    char       *ns_name[MAX_LOADED]; /* bound namespaces (io, net, alias); guards rebinding to another module */
     char       *ns_canon[MAX_LOADED];
     int         nns;
-    char       *loading[MAX_LOADED]; /* โมดูลที่กำลังโหลดอยู่ในสายเรียกปัจจุบัน — ใช้จับ circular import */
+    char       *loading[MAX_LOADED]; /* modules currently loading in this call chain; detects circular import */
     int         nloading;
-    const char *stddir;              /* โฟลเดอร์ standard library */
-    int         nostd;               /* 1 = โหมด freestanding (ห้าม import package เช่น std) */
+    const char *stddir;              /* standard library folder */
+    int         nostd;               /* 1 = freestanding mode (package imports like std are forbidden) */
     int         had_error;
 } Loader;
 
-/* อ่านไฟล์ทั้งไฟล์เข้าหน่วยความจำ คืนสตริง (ผู้เรียก free เอง) หรือ NULL */
+/* Read a whole file into memory; returns a string (caller frees) or NULL */
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (size < 0) { fclose(f); return NULL; }     /* ไฟล์อ่านขนาดไม่ได้ */
+    if (size < 0) { fclose(f); return NULL; }     /* could not determine file size */
     char *buf = (char *)malloc((size_t)size + 1);
     if (!buf) { fclose(f); return NULL; }
     size_t got = fread(buf, 1, (size_t)size, f);
@@ -48,14 +48,14 @@ static char *read_file(const char *path) {
     return buf;
 }
 
-/* มีไฟล์นี้ให้เปิดอ่านได้หรือไม่ */
+/* Does this file exist and open for reading? */
 static int read_file_exists(const char *path) {
     FILE *f = fopen(path, "rb");
     if (f) { fclose(f); return 1; }
     return 0;
 }
 
-/* คัดลอกส่วนโฟลเดอร์ของ path ลง out (รองรับทั้ง / และ \) ถ้าไม่มีคืน "." */
+/* Copy the directory part of path into out (handles both / and \); "." if none */
 static void path_dirname(const char *path, char *out) {
     strcpy(out, path);
     char *slash = strrchr(out, '/');
@@ -65,38 +65,38 @@ static void path_dirname(const char *path, char *out) {
     else strcpy(out, ".");
 }
 
-/* ตรวจว่าเป็น path แบบ "package เปล่า" (ชื่อเดียว ไม่มี / \ หรือ .) เช่น "std"
- * รูปนี้ = namespace import (ชื่อใน {} คือ submodule ที่จะโหลดเป็น namespace) */
+/* Check for a "bare package" path (single name, no / \ or .) such as "std".
+ * This form = namespace import (names in {} are submodules loaded as namespaces) */
 static int is_package_path(const char *p) {
     return strchr(p, '/') == NULL && strchr(p, '\\') == NULL && strchr(p, '.') == NULL;
 }
 
-/* ตรวจว่าเป็น path สัมบูรณ์ (ขึ้นต้นด้วย / \ หรือ "X:") */
+/* Check for an absolute path (starts with / \ or "X:") */
 static int is_absolute(const char *p) {
     if (p[0] == '/' || p[0] == '\\') return 1;
-    if (p[0] && p[1] == ':') return 1; /* รูปแบบ Windows เช่น C:\ */
+    if (p[0] && p[1] == ':') return 1; /* Windows form such as C:\ */
     return 0;
 }
 
-/* ลงท้ายด้วย ".mvs" หรือไม่ (path ไฟล์ relative ต้องระบุนามสกุล) */
+/* Ends with ".mvs"? (relative file paths must include the extension) */
 static int ends_with_mvs(const char *p) {
     size_t n = strlen(p);
     return n >= 4 && strcmp(p + n - 4, ".mvs") == 0;
 }
 
-/* ทำให้เป็น path สัมบูรณ์ (canonical) เพื่อเทียบความเป็นไฟล์เดียวกัน */
+/* Make an absolute (canonical) path so identical files compare equal */
 static void canonicalize(const char *path, char *out, size_t n) {
     if (!_fullpath(out, path, (int)n)) snprintf(out, n, "%s", path);
 }
 
-/* คืนดัชนีของโมดูลที่โหลดแล้ว (เทียบ canonical path) หรือ -1 */
+/* Return the index of an already loaded module (canonical path compare) or -1 */
 static int find_loaded(Loader *L, const char *canon) {
     for (int i = 0; i < L->nloaded; i++)
         if (strcmp(L->loaded[i], canon) == 0) return i;
     return -1;
 }
 
-/* รวบรวมชื่อสัญลักษณ์ระดับบนของโมดูล (struct/trait/ฟังก์ชันที่ไม่ใช่ method) เป็น "|a|b|c|" */
+/* Collect a module's top-level symbol names (struct/trait/non-method functions) as "|a|b|c|" */
 static char *collect_defs(Node *prog) {
     size_t cap = 256, len = 1;
     char *s = (char *)malloc(cap);
@@ -115,7 +115,7 @@ static char *collect_defs(Node *prog) {
     return s;
 }
 
-/* โมดูลมีสัญลักษณ์ชื่อนี้หรือไม่ (เทียบกับ "|name|" ในสตริง defs) */
+/* Does the module define this symbol? (matches "|name|" within the defs string) */
 static int defs_has(const char *defs, const char *name) {
     if (!defs) return 0;
     char pat[300];
@@ -125,7 +125,7 @@ static int defs_has(const char *defs, const char *name) {
 
 static void load_module(Loader *L, const char *path, const char *ns);
 
-/* ผูก namespace ชื่อ name เข้ากับโมดูล canon — ถ้าชื่อนี้ถูกผูกกับโมดูลอื่นแล้ว = error */
+/* Bind namespace name to module canon; if already bound to another module, error */
 static void register_ns(Loader *L, const char *name, const char *canon) {
     for (int i = 0; i < L->nns; i++) {
         if (strcmp(L->ns_name[i], name) != 0) continue;
@@ -133,7 +133,7 @@ static void register_ns(Loader *L, const char *name, const char *canon) {
             fprintf(stderr, "error: namespace '%s' is already bound to a different module\n", name);
             L->had_error = 1;
         }
-        return; /* ผูกซ้ำกับโมดูลเดิม = ไม่เป็นไร */
+        return; /* rebinding to the same module is fine */
     }
     if (L->nns < MAX_LOADED) {
         L->ns_name[L->nns] = strdup(name);
@@ -142,10 +142,10 @@ static void register_ns(Loader *L, const char *name, const char *canon) {
     }
 }
 
-/* resolve "module path" (ไม่ใช่ bare package) ให้เป็นไฟล์จริง คืน 1 ถ้าสำเร็จ
- *   absolute            -> ตามเดิม
- *   ลงท้าย .mvs         -> ไฟล์ relative เทียบ base_dir (เช่น ./lib.mvs)
- *   อื่น ๆ (มี '/')      -> package submodule เช่น "std/string" -> <stddir>/string.mvs */
+/* Resolve a "module path" (not a bare package) to a real file; returns 1 on success
+ *   absolute            -> use as is
+ *   ends in .mvs        -> relative file against base_dir (e.g. ./lib.mvs)
+ *   otherwise (has '/') -> package submodule, e.g. "std/string" -> <stddir>/string.mvs */
 static int resolve_module_file(Loader *L, const char *path, const char *base_dir, char *out, size_t n) {
     if (is_absolute(path)) { snprintf(out, n, "%s", path); return 1; }
     if (ends_with_mvs(path)) { snprintf(out, n, "%s/%s", base_dir, path); return 1; }
@@ -154,23 +154,23 @@ static int resolve_module_file(Loader *L, const char *path, const char *base_dir
         L->had_error = 1; return 0;
     }
     const char *slash = strchr(path, '/');
-    const char *sub = slash ? slash + 1 : path;       /* ตัด "std/" ออก เหลือ "string" */
+    const char *sub = slash ? slash + 1 : path;       /* strip "std/", leaving "string" */
     snprintf(out, n, "%s/%s.mvs", L->stddir, sub);
     return 1;
 }
 
-/* จัดการคำสั่ง import หนึ่งคำสั่ง โดย base_dir คือโฟลเดอร์ของไฟล์ที่มี import นี้
- * รองรับ 3 รูปแบบ (ดู GUIDE):
- *   A) import { io, net } from "std"            namespace ของ submodule (io.out, net.X)
- *   B) import { String } from "std/string"      ดึงสัญลักษณ์ตรง ๆ + ตรวจว่ามีจริง
+/* Handle one import statement; base_dir is the folder of the file containing the import.
+ * Supports 3 forms (see GUIDE):
+ *   A) import { io, net } from "std"            submodule namespaces (io.out, net.X)
+ *   B) import { String } from "std/string"      pull symbols directly + verify they exist
  *      import { factorial } from "./lib.mvs"
- *   C) import lib from "./lib.mvs"               ทั้งโมดูลเป็น namespace lib (lib.factorial)
+ *   C) import lib from "./lib.mvs"               whole module as namespace lib (lib.factorial)
  *      import str from "std/string" */
 static void handle_import(Loader *L, Node *imp, const char *base_dir) {
     const char *path = imp->str_val;
     if (!path) return;
 
-    /* ── รูปแบบ C: alias import (ไม่มี {}) ── ทั้งโมดูลกลายเป็น namespace = imp->name */
+    /* Form C: alias import (no {}); the whole module becomes namespace = imp->name */
     if (imp->name) {
         if (is_package_path(path)) {
             fprintf(stderr, "error: cannot alias-import a whole package '%s'; use a module path like \"%s/<module>\"\n", path, path);
@@ -183,13 +183,13 @@ static void handle_import(Loader *L, Node *imp, const char *base_dir) {
             L->had_error = 1; return;
         }
         char canon[1024]; canonicalize(file, canon, sizeof(canon));
-        register_ns(L, imp->name, canon);     /* กัน alias ซ้ำชี้คนละโมดูล */
+        register_ns(L, imp->name, canon);     /* guard: same alias must not point to another module */
         load_module(L, file, imp->name);
         return;
     }
 
     if (is_package_path(path)) {
-        /* ── รูปแบบ A: namespace import ของ submodule ── */
+        /* Form A: namespace import of submodules */
         if (L->nostd) {
             fprintf(stderr, "error: cannot import package '%s' in --nostd (freestanding) mode\n", path);
             L->had_error = 1;
@@ -204,11 +204,11 @@ static void handle_import(Loader *L, Node *imp, const char *base_dir) {
                 L->had_error = 1; continue;
             }
             char canon[1024]; canonicalize(file, canon, sizeof(canon));
-            register_ns(L, name, canon);      /* io/net เป็น namespace — กันผูกซ้ำคนละโมดูล */
+            register_ns(L, name, canon);      /* io/net are namespaces; guard against binding another module */
             load_module(L, file, name);
         }
     } else {
-        /* ── รูปแบบ B: symbol import ── ดึงสัญลักษณ์ตรง ๆ (namespace = "") + ตรวจว่ามีจริง */
+        /* Form B: symbol import; pull symbols directly (namespace = "") + verify they exist */
         char file[1024];
         if (!resolve_module_file(L, path, base_dir, file, sizeof(file))) return;
         load_module(L, file, "");
@@ -228,27 +228,28 @@ static void handle_import(Loader *L, Node *imp, const char *base_dir) {
     }
 }
 
-/* โหลดหนึ่งโมดูลจาก path แล้วผนวกนิยามทั้งหมดเข้าผลลัพธ์ (ติดป้าย namespace ถ้ามี) */
+/* Load one module from path and append all its definitions to the result (tag namespace if any) */
 static void load_module(Loader *L, const char *path, const char *ns) {
-    /* ทำให้เป็น path สัมบูรณ์ (canonical) ก่อน เพื่อให้ "./lib.mvs" กับ "lib.mvs"
-     * ถือเป็นไฟล์เดียวกัน — กันโหลดซ้ำและกันวนลูปจากการสะกด path ต่างกัน */
+    /* Canonicalize to an absolute path first so "./lib.mvs" and "lib.mvs" count as
+     * the same file; prevents reloads and loops caused by different path spellings */
     char canon[1024];
     canonicalize(path, canon, sizeof(canon));
 
     int prev = find_loaded(L, canon);
-    if (prev >= 0) {                            /* โหลดเสร็จแล้ว — กันโหลดซ้ำ (รองรับ diamond import) */
-        /* ถ้าถูกผูกเป็น "namespace สองชื่อต่างกัน" (alias ชนกัน) สัญลักษณ์จะอยู่คนละชื่อ → error ชัดเจน
-         * (กรณี ns ว่าง = symbol/direct import ไม่ถือว่าชน เพราะ struct/trait เป็น global อยู่แล้ว) */
+    if (prev >= 0) {                            /* already loaded; skip reload (supports diamond imports) */
+        /* If bound under two different namespaces (alias clash), symbols would live under
+         * different names, so report a clear error. (An empty ns = symbol/direct import does not
+         * clash because struct/trait symbols are global anyway.) */
         const char *prev_ns = L->loaded_ns[prev] ? L->loaded_ns[prev] : "";
         const char *now_ns = ns ? ns : "";
         if (prev_ns[0] && now_ns[0] && strcmp(prev_ns, now_ns) != 0) {
-            fprintf(stderr, "error: module '%s' is already imported as namespace '%s' — cannot also import it as '%s'\n",
+            fprintf(stderr, "error: module '%s' is already imported as namespace '%s'; cannot also import it as '%s'\n",
                     path, prev_ns, now_ns);
             L->had_error = 1;
         }
         return;
     }
-    /* ตรวจ circular import: โมดูลนี้กำลังถูกโหลดอยู่แล้วในสายเรียกปัจจุบัน (A -> B -> A) */
+    /* Circular import check: this module is already being loaded in the current call chain (A -> B -> A) */
     for (int i = 0; i < L->nloading; i++)
         if (strcmp(L->loading[i], canon) == 0) {
             fprintf(stderr, "error: circular import detected involving module '%s'\n", path);
@@ -256,7 +257,7 @@ static void load_module(Loader *L, const char *path, const char *ns) {
             return;
         }
     if (L->nloading >= MAX_LOADED) { fprintf(stderr, "error: import nesting too deep\n"); L->had_error = 1; return; }
-    L->loading[L->nloading++] = strdup(canon);   /* mark: กำลังโหลด */
+    L->loading[L->nloading++] = strdup(canon);   /* mark: currently loading */
 
     char *src = read_file(path);
     if (!src) {
@@ -271,29 +272,29 @@ static void load_module(Loader *L, const char *path, const char *ns) {
     free(src);
     if (err) { L->had_error = 1; free(L->loading[--L->nloading]); return; }
 
-    char *mod_defs = collect_defs(prog); /* จดสัญลักษณ์ระดับบนของโมดูลนี้ ไว้ตรวจ import */
+    char *mod_defs = collect_defs(prog); /* record this module's top-level symbols for import checks */
 
-    /* โฟลเดอร์ของโมดูลนี้ ใช้ resolve import ภายในโมดูลต่อ */
+    /* This module's folder, used to resolve its own nested imports */
     char dir[1024];
     path_dirname(path, dir);
 
     for (int i = 0; i < prog->nitems; i++) {
         Node *it = prog->items[i];
         if (it->kind == ND_IMPORT) {
-            handle_import(L, it, dir);            /* import ซ้อน: โหลดต่อแบบ recursive */
+            handle_import(L, it, dir);            /* nested import: keep loading recursively */
         } else {
             if (ns && ns[0] && it->kind == ND_FUNC && !it->is_extern) {
-                /* ทุกฟังก์ชันที่มี body ในโมดูลนี้สังกัดโมดูล ns (ใช้ resolve การเรียกภายใน) */
+                /* Every function with a body in this module belongs to module ns (resolves internal calls) */
                 it->mod = strdup(ns);
-                /* ป้ายชื่อสัญลักษณ์ (ns) ติดเฉพาะฟังก์ชันธรรมดา (เรียกแบบ ns.func)
-                 * — method ใช้ชื่อ struct เป็น ns อยู่แล้ว, export ใช้ชื่อดิบให้ C */
+                /* The symbol label (ns) is applied only to plain functions (called as ns.func):
+                 * - methods already use the struct name as ns; exports keep the raw name for C */
                 if (!it->is_method && !it->is_export) it->ns = strdup(ns);
             }
             node_add_item(L->result, it);
         }
     }
 
-    /* เสร็จสิ้น: pop ออกจากสายโหลด แล้วลงทะเบียนเป็น "โหลดแล้ว" พร้อมรายชื่อสัญลักษณ์ */
+    /* Done: pop from the loading chain, then register as "loaded" with its symbol list */
     free(L->loading[--L->nloading]);
     if (L->nloaded < MAX_LOADED) {
         L->loaded[L->nloaded] = strdup(canon);
@@ -314,7 +315,7 @@ Node *module_load(const char *entry_path, const char *stddir, int nostd, int *ha
     L.stddir = stddir;
     L.nostd = nostd;
 
-    /* ไฟล์ entry โหลดด้วย namespace ว่าง (ใช้ชื่อฟังก์ชันตรง ๆ และมี main) */
+    /* The entry file loads with an empty namespace (function names used directly, contains main) */
     load_module(&L, entry_path, "");
 
     *had_error = L.had_error;

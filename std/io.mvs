@@ -1,30 +1,30 @@
 /*
- * std/io.mvs - โมดูล io ของ standard library (เขียนด้วยภาษา MVS เอง)
+ * std/io.mvs - the io module of the standard library (written in MVS itself)
  *
- * วิธีใช้:
+ * Usage:
  *     import { io } from "std";
- *     io.out("hello");                       // พิมพ์ข้อความ (ขึ้นบรรทัดใหม่ให้อัตโนมัติ)
- *     io.out("number = {}", 42);             // แทรกค่าแบบ Rust ด้วย {}
- *     io.out("{} + {} = {}", a, b, a + b);   // หลายค่า
- *     io.out("hex = {:x}", 255);             // เลขฐานสิบหก
- *     io.print("no newline");                // พิมพ์ดิบ ไม่ขึ้นบรรทัดใหม่
+ *     io.out("hello");                       // print a message (newline appended automatically)
+ *     io.out("number = {}", 42);             // Rust-style interpolation with {}
+ *     io.out("{} + {} = {}", a, b, a + b);   // multiple values
+ *     io.out("hex = {:x}", 255);             // hexadecimal
+ *     io.print("no newline");                // raw print, no newline
  *
- * หมายเหตุ: io.out เป็น compiler intrinsic (เหมือน println! ของ Rust ที่เป็น macro)
- *           เพราะต้องแยกวิเคราะห์ {} และเลือกชนิดการพิมพ์ตอนคอมไพล์
- *           ส่วนฟังก์ชันอื่น ๆ ด้านล่างเป็น MVS ปกติที่เรียก printf ผ่าน extern
+ * Note: io.out is a compiler intrinsic (like Rust's println!, which is a macro),
+ *       because it must parse {} and pick the print type at compile time.
+ *       The other functions below are plain MVS calling printf via extern.
  */
 
-// foreign functions จาก C runtime
+// foreign functions from the C runtime
 extern func printf(fmt: str) -> i32;
 extern func scanf(fmt: str) -> i32;
 extern func malloc(n: usize) -> *u8;
 
-// พิมพ์สตริงโดยไม่ขึ้นบรรทัดใหม่และไม่มีการ format
+// print a string with no newline and no formatting
 func print(s: str) -> void {
     printf("%s", s);
 }
 
-// แสดงข้อความชวน (prompt) แล้วอ่านคำหนึ่งคำจากผู้ใช้ (ไม่มีช่องว่าง) คืนเป็นสตริง
+// show a prompt, then read one word from the user (no whitespace); returns it as a string
 func in(prompt: str) -> str {
     printf("%s", prompt);
     let buf: *u8 = malloc(256);

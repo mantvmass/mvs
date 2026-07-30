@@ -1,4 +1,4 @@
-# GUIDE — the MVS language, its internals, and project status
+# GUIDE: the MVS language, its internals, and project status
 
 This is the deep reference for **MVS**: syntax, the memory model, the calling convention, and
 the actual assembly the compiler emits. The back half covers project status, roadmap, and the
@@ -24,8 +24,8 @@ Contents:
 
 MVS is a low-level language, roughly C's level but with a friendlier (Rust-ish) syntax. The goals:
 
-- **Manual memory management like C** — no garbage collector, no hidden runtime.
-- **Freestanding by default** — the core depends on no OS/CRT, so you can write an OS or bare-metal
+- **Manual memory management like C**: no garbage collector, no hidden runtime.
+- **Freestanding by default**: the core depends on no OS/CRT, so you can write an OS or bare-metal
   code with it.
 - **Compiles straight to x86-64 assembly** (no LLVM), assembled by `nasm`, linked by `clang`.
 
@@ -102,16 +102,16 @@ A new backend (say `arch/x86_64/sysv.c` for ELF/Linux) reuses `common.c` and onl
 |------|---------|-------------------|---------|
 | `i8` `i16` `i32` `i64` | signed integer (idiv, setl/setg) | 1, 2, 4, 8 | yes |
 | `u8` `u16` `u32` `u64` | unsigned integer (div, setb/seta, real wrap) | 1, 2, 4, 8 | no |
-| `i128` `u128` | 128-bit integer (stored/passed as 16 bytes, computed as 64-bit for now) | 16 | — |
+| `i128` `u128` | 128-bit integer (stored/passed as 16 bytes, computed as 64-bit for now) | 16 | - |
 | `isize` `usize` | pointer-sized | 8 | i/u |
 | `bool` | `true` / `false` | 1 | no |
 | `char` | a character, `'A'` (single quotes only) | 1 | no |
-| `f32` | single precision (stored in a real 4 bytes, computed as double) | 4 | — |
-| `f64` | double precision | 8 | — |
-| `str` | string literal `"..."` (pointer to bytes + 0) | 8 | — |
-| `void` | no value (a function return type) | 0 | — |
-| `*T` | pointer to T | 8 | — |
-| `struct` | a struct | sum of fields | — |
+| `f32` | single precision (stored in a real 4 bytes, computed as double) | 4 | - |
+| `f64` | double precision | 8 | - |
+| `str` | string literal `"..."` (pointer to bytes + 0) | 8 | - |
+| `void` | no value (a function return type) | 0 | - |
+| `*T` | pointer to T | 8 | - |
+| `struct` | a struct | sum of fields | - |
 
 Values are always computed in 64-bit registers, but the real width is respected when **storing**
 (truncate to N bytes) and **loading** (sign/zero-extend back). So `u8` really wraps: `200 + 100 = 44`
@@ -123,7 +123,7 @@ when stored (mid-computation it's still 64-bit).
 |--|------------------|------------------------------|
 | What | a **pointer** to fixed text (null-terminated) | a **heap buffer** that owns its data |
 | Mutable? | no, read-only | yes (`push_str`, `from_int`) |
-| Memory | in `.data`, nothing to manage | malloc'd — you must `drop()` it (no GC) |
+| Memory | in `.data`, nothing to manage | malloc'd; you must `drop()` it (no GC) |
 | Create | `let s: str = "hi";` | `let s: String = String::from("hi");` |
 | With io.out | `io.out("{}", s)` directly | `s.as_str()` → returns `str` |
 
@@ -169,7 +169,7 @@ is both power (`a ** b`) and double-deref (`**ptr`), likewise by position.
 
 #### Compile-time type checking
 
-The language won't let types slide — it catches mismatches at compile time, which matters for
+The language won't let types slide: it catches mismatches at compile time, which matters for
 low-level/OS/embedded work where a type bug can fail silently at runtime. Immediate errors:
 
 ```rust
@@ -183,7 +183,7 @@ f(1, 2, 3);               // error: function 'f' expects N argument(s) but got 3
 
 In short: arithmetic/power needs **numbers**, bitwise/shift needs **integers**, comparison/logic can't
 take **structs**, assignment/return/field must be **compatible**, and call arguments (functions and
-methods) must match in type and count. It stays lenient about correct low-level work, though —
+methods) must match in type and count. It stays lenient about correct low-level work, though:
 `ptr +/- int`, comparing a pointer to `0` for null, mixing int widths, passing `str`↔`*u8`.
 
 #### Explicit cast with `as`
@@ -241,7 +241,7 @@ max(3, 7);       // compiler emits max__i64
 max(2.5, 9.1);   // and max__f64 (type inferred from the argument)
 ```
 
-The compiler infers the real type from arguments and emits a per-type copy (like Rust/C++) — see
+The compiler infers the real type from arguments and emits a per-type copy (like Rust/C++); see
 `src/generic.c`. Works with pointers (`*T`), generics calling generics, and reused instances.
 
 #### Function overloading
@@ -256,7 +256,7 @@ show("hi");     // picks show(str)
 ```
 
 The overload is chosen by the **type category** of the argument (int/float/str/char/bool/pointer/struct),
-then renamed internally by signature (`show__i`, `show__s`) — see `resolve_overloads`.
+then renamed internally by signature (`show__i`, `show__s`); see `resolve_overloads`.
 
 #### Generic + overload = a duck-typed constraint
 
@@ -266,7 +266,7 @@ print_all(1, 2);      // uses show(i32)
 print_all("a", "b");  // uses show(str)
 ```
 
-A generic works with "any type that supports the operations it uses" — an implicit constraint. For an
+A generic works with "any type that supports the operations it uses", an implicit constraint. For an
 explicit, checked constraint, use `trait`.
 
 #### Trait + associated function + generic bound
@@ -289,15 +289,15 @@ func describe<T: Area>(s: T) -> i32 { return s.area(); }   // T must impl Area
 
 let p: Point = Point::new(3, 4);    // call the associated function via ::
 let c: Circle = Circle::new(5);
-describe(p);                         // 12  — Point::area chosen at compile time (static dispatch)
-describe(c);                         // 75  — Circle::area
+describe(p);                         // 12, Point::area chosen at compile time (static dispatch)
+describe(c);                         // 75, Circle::area
 ```
 
 - **Associated function** = a func in `impl` with no `self`, called as `Type::func(...)` (like a constructor).
 - **trait** is a contract; **`impl Trait for Type`** binds a type to it.
-- **`<T: Trait>`** requires the type to implement the trait — otherwise a compile error
+- **`<T: Trait>`** requires the type to implement the trait, otherwise a compile error
   (`type 'X' does not implement trait 'Area'`).
-- Dispatch is **static** (via monomorphization) — no vtable, no runtime overhead. The compiler also checks
+- Dispatch is **static** (via monomorphization): no vtable, no runtime overhead. The compiler also checks
   that an `impl` provides every trait method and that the trait exists.
 - Trait default methods are supported (the body is cloned and `Self` replaced for types that don't override).
 
@@ -333,7 +333,7 @@ let v: i32 = *p;      // read what p points to (= 42)
 
 #### Function pointers
 
-The type `func(P1, P2, ...) -> R` is a value — it points at a function you call through a variable or field.
+The type `func(P1, P2, ...) -> R` is a value: it points at a function you call through a variable or field.
 
 ```rust
 func add(a: i32, b: i32) -> i32 { return a + b; }
@@ -380,10 +380,10 @@ print format per argument. It needs `import { io }`, and it handles structs (exp
 `Name { field: value, ... }`, including nested) and any number of arguments.
 
 Why an intrinsic and not a function in io.mvs? The `{}` form takes an unbounded number and mix of argument
-types, which needs either a macro (compile-time expansion) or runtime type info — neither exists yet. The
+types, which needs either a macro (compile-time expansion) or runtime type info, and neither exists yet. The
 library alternative is the `Display` trait + `fmt.println(x)` (static dispatch) for types you `impl` yourself.
 
-### 4.11 Module system — three forms (the path decides)
+### 4.11 Module system: three forms (the path decides)
 
 ```rust
 // A) submodule namespace: path is a bare package -> names in {} are submodules -> call as io.xxx
@@ -444,10 +444,10 @@ s.drop(); n.drop();                          // free it yourself (no GC)
 
 ## 5. Memory model
 
-This is the heart of a low-level language — MVS manages memory by hand, exactly like C. No garbage
+This is the heart of a low-level language: MVS manages memory by hand, exactly like C. No garbage
 collector, no reference counting, no destructors/RAII. Memory has three regions.
 
-### 5.1 Stack — automatic (locals)
+### 5.1 Stack: automatic (locals)
 
 Every local lives on the function's stack frame, automatically:
 
@@ -458,12 +458,12 @@ Frame size is computed ahead of time (a `collect_locals` pre-pass). Each variabl
 (rounded up to a multiple of 8) at `[rbp - offset]`.
 
 Lifetime: a stack variable lives for the whole function call, then is released on return. So never return
-a pointer to a local (`return &local;`) — that memory is gone (dangling).
+a pointer to a local (`return &local;`): that memory is gone (dangling).
 
-### 5.2 Heap — by hand (extern malloc/free)
+### 5.2 Heap: by hand (extern malloc/free)
 
 For memory that must outlive a function or whose size is unknown, use the heap. MVS has no built-in
-`new`/`malloc` — call the C runtime via `extern`:
+`new`/`malloc`; call the C runtime via `extern`:
 
 ```rust
 extern func malloc(n: usize) -> *u8;
@@ -482,11 +482,11 @@ Heap rules (same as C): every `malloc` needs one matching `free` (else a leak); 
 double-free; no bounds checking (writing past your allocation is undefined behavior).
 
 Some std functions (`io.in`, `fs.read`, `net.*recv`) malloc internally and don't free yet (leaking for
-simplicity in this subset) — real programs should wrap and free.
+simplicity in this subset); real programs should wrap and free.
 
 ### 5.3 Heap under `--nostd`
 
-In freestanding mode there is no `malloc` (no C runtime) — write your own allocator, like in a real
+In freestanding mode there is no `malloc` (no C runtime); write your own allocator, like in a real
 kernel. The basic approach is a bump allocator over memory whose address you know:
 
 ```rust
@@ -507,13 +507,13 @@ In a real OS you own physical/virtual memory and page allocation; nobody frees f
   `main` (not baked into the file).
 - **String constants** live in `.data` (bytes + trailing 0); a `str` variable is a pointer to those bytes.
 
-There is **no array type** — buffers are made with `malloc` + pointer + pointer arithmetic (`*(buf + i)`).
+There is **no array type**: buffers are made with `malloc` + pointer + pointer arithmetic (`*(buf + i)`).
 
 ---
 
 ## 6. Internals, with real assembly
 
-Every snippet below is **real compiler output** — reproduce it with `mvs file.mvs -S`.
+Every snippet below is **real compiler output**; reproduce it with `mvs file.mvs -S`.
 
 ### 6.1 Variables + arithmetic
 
@@ -632,7 +632,7 @@ total 8.
 ```
 
 Takeaways: member access = base address + field offset; a struct larger than 8 bytes uses several stack
-slots; copying a struct (`a = b`) uses a byte loop; returning a struct uses *sret* — the caller reserves
+slots; copying a struct (`a = b`) uses a byte loop; returning a struct uses *sret*: the caller reserves
 space and passes a hidden pointer (rcx) the function writes through.
 
 ### 6.4 Pointers
@@ -743,7 +743,7 @@ let n1: Node;  n1.val = 10;  n1.next = &n2;
 io.out("{} -> {}", n1.val, (*n1.next).val);   // 10 -> 20
 ```
 
-Structs can reference each other freely (layout is computed by fixpoint) — declaration order doesn't matter.
+Structs can reference each other freely (layout is computed by fixpoint); declaration order doesn't matter.
 
 ### Compare strings (not with ==)
 
@@ -773,7 +773,7 @@ mvs.exe lib.mvs -c          # produces lib.obj
 clang main.c lib.obj -o app # link into a C program
 ```
 
-### Freestanding code (no OS — kernel/bare-metal)
+### Freestanding code (no OS: kernel/bare-metal)
 
 ```rust
 // no std import / no io.out in this mode
@@ -853,19 +853,19 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 
 ### Language / types
 
-- **No array type** — use pointer + malloc.
-- Full bitwise (`& | ^ ~ << >>`); power is `**` (e.g. `2 ** 8`, `2.0 ** 10`) — a float base works (repeated
+- **No array type**: use pointer + malloc.
+- Full bitwise (`& | ^ ~ << >>`); power is `**` (e.g. `2 ** 8`, `2.0 ** 10`); a float base works (repeated
   `mulsd` by an integer exponent); a negative exponent isn't supported (returns 1.0).
 - generics + overloading + traits are all present (monomorphization); overloads distinguish int **width**
   (i32 vs i64 are separate), with an integer literal matched by category if there's a single int overload;
-  `trait`/`<T: Trait>`/default methods exist — but it's **static dispatch only** (no `dyn Trait`/vtable, no
+  `trait`/`<T: Trait>`/default methods exist, but it's **static dispatch only** (no `dyn Trait`/vtable, no
   multi-condition `where`).
-- `const` isn't truly enforced yet (writable at the codegen level) — intent only.
+- `const` isn't truly enforced yet (writable at the codegen level), intent only.
 - Default parameter values (`age: u8 = 5`) parse but codegen ignores them.
 
 ### Numbers
 
-- **Math always runs in 64-bit registers** — width is respected at load/store (correct truncate/extend, real
+- **Math always runs in 64-bit registers**: width is respected at load/store (correct truncate/extend, real
   unsigned div/setb, real wrap), but mid-expression overflow is 64-bit. (`let a: u8 = 200; io.out("{}", a + 100)`
   prints 300, but `let c: u8 = a + 100` stores 44; `~` masks to width, e.g. `~(u8)0 = 255`.) The **result type**
   of integer arithmetic is the wider operand (`i32 + i64` → i64).
@@ -875,7 +875,7 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
   compile error.
 - int↔float converts implicitly at edges (assign/return/argument), e.g. `let x: f64 = 5` gives 5.0; `int as bool`
   gives 0/1.
-- A struct containing itself by value (`struct P { n: P; }`) is a compile error (infinite size) — use `*P`.
+- A struct containing itself by value (`struct P { n: P; }`) is a compile error (infinite size); use `*P`.
 - A generic where `T` appears only in the return/body (not a parameter) instantiates as `i64` by default.
 - For floats: `+ - * /`, `**` (float base, integer exponent), comparison, and unary `-` work; but `%`, `++`/`--`,
   and `switch` on a float are compile errors; a negative `**` exponent isn't supported (returns 1.0).
@@ -884,34 +884,34 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 
 - A struct literal with a nested struct field accepts only a literal/lvalue.
 - A bare struct **literal** can't be passed as an argument (use a temp), but a struct **result from a function**
-  works as an rvalue (`g(make())`, `make().field`, `make().method()` — materialized into a temp slot).
-- **Generic methods** (`impl` with `<T>`) aren't supported — use a generic function.
+  works as an rvalue (`g(make())`, `make().field`, `make().method()`, materialized into a temp slot).
+- **Generic methods** (`impl` with `<T>`) aren't supported; use a generic function.
 - Max 64 struct fields; functions/symbols have limits (see `MAX_*` in `common.h`).
 
 ### Common gotchas (not bugs, but worth knowing)
 
-- **`==` on strings compares addresses, not contents** — use `extern strcmp`.
-- **`char + int` yields `char`** (inherits from the left operand) — io.out prints it as a character; cast to i32
+- **`==` on strings compares addresses, not contents**; use `extern strcmp`.
+- **`char + int` yields `char`** (inherits from the left operand); io.out prints it as a character; cast to i32
   for a number.
 - io.out: `%` in text prints literally (no escaping); use `{{` `}}` for literal braces.
 
 ### Memory
 
-- **No automatic memory management** — no GC, no RAII/destructor, you `free` yourself.
-- **No bounds checking** — writing past an allocation is undefined behavior.
+- **No automatic memory management**: no GC, no RAII/destructor, you `free` yourself.
+- **No bounds checking**: writing past an allocation is undefined behavior.
 - Some std functions still malloc without freeing (deliberate leak in the examples).
 
 ### C interop / float
 
-- Floats pass/return through **xmm** per the ABI — C math works for both `f64` (`sqrt`/`pow`) and `f32` (`sqrtf`).
+- Floats pass/return through **xmm** per the ABI; C math works for both `f64` (`sqrt`/`pow`) and `f32` (`sqrtf`).
   Caveat: an `export`ed MVS function with an `f32` parameter, called from C, reads the bits wrong (use `f64` for
   exports).
-- **extern/export names must not collide with NASM reserved words** (`abs`, `rel`, `seg`, `wrt`) — won't assemble.
+- **extern/export names must not collide with NASM reserved words** (`abs`, `rel`, `seg`, `wrt`), or they won't assemble.
 
 ### Target / output format
 
 - Only **x86-64 + win64** + **COFF/PE** (`nasm -f win64`).
-- **No ELF / SysV ABI yet** — GNU ld/ELF OS dev (GRUB multiboot) waits on a new backend (roadmap).
+- **No ELF / SysV ABI yet**: GNU ld/ELF OS dev (GRUB multiboot) waits on a new backend (roadmap).
 - Needs `nasm` + `clang` (linked via `-llegacy_stdio_definitions -lws2_32`).
 
 ### Compiler
@@ -928,7 +928,7 @@ x86-64; `examples/hello.mvs` and `examples/demo.mvs` produce correct results.
 
 ### Done
 
-- Hand-written lexer (keywords, numbers, strings + escapes, chars, 1–2 char operators, `//` and block comments).
+- Hand-written lexer (keywords, numbers, strings + escapes, chars, 1-2 char operators, `//` and block comments).
 - Recursive-descent parser with full operator precedence.
 - `let`/`const` (local + global), arithmetic `+ - * / % **`, comparison, logic `&& || !`, bitwise `& | ^ ~ << >>`.
 - `if/elseif/else`, `while`, `for`, `do-while`, `switch/case/default`, `break`, `continue`.
@@ -953,7 +953,7 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 
 ### Remaining
 
-- **Full 128-bit i128/u128 math** — needs a two-register value model (rdx:rax) plus software 128-bit division
+- **Full 128-bit i128/u128 math**: needs a two-register value model (rdx:rax) plus software 128-bit division
   (x86 has no 128/128 divide). Today the 16 bytes are stored but computed as 64-bit.
 - **Dynamic dispatch (`dyn Trait` / vtable)** and multi-condition `where`. This is also the prerequisite for
   making `io.out`'s `{}` form a real library function (see below).
@@ -961,10 +961,10 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 - **`io.out` as a library** instead of an intrinsic. This needs three things, in order:
   1. trait objects / `dyn Trait` (a fat pointer `{data, vtable}`), with a per-(type, trait) vtable and dynamic
      dispatch through it.
-  2. variadic parameters on the receiving side — gather varargs into a slice `{ptr, len}` and pass one argument
+  2. variadic parameters on the receiving side: gather varargs into a slice `{ptr, len}` and pass one argument
      (avoiding C's va_list).
   3. combine: `func out(fmt: str, args: ...dyn Display)` in io.mvs, plus `impl Display` for the primitives (which
-     in turn needs impl-on-primitive support — today `impl` only binds to structs).
+     in turn needs impl-on-primitive support; today `impl` only binds to structs).
   The existing library path is `fmt.println(x)` / `fmt.print(x)` for single values you `impl Display` on, so
   `io.out` stays an intrinsic for now (like Rust's `println!`).
 - **ELF + SysV ABI backend** (for ELF/GNU OS dev): a new `src/arch/x86_64/sysv.c` reusing `common.c`, changing
@@ -976,8 +976,8 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 ### Known minor limits (low risk, not yet fixed)
 
 - **One module = one namespace:** importing the same file under different names/forms dedups silently the second
-  time — a symbol may not be exposed as expected.
-- An extern C function taking `f32` in stack position ≥4 isn't narrowed double→single yet (registers 0–3 are done).
+  time; a symbol may not be exposed as expected.
+- An extern C function taking `f32` in stack position ≥4 isn't narrowed double→single yet (registers 0-3 are done).
 - A compound assignment whose lvalue base contains a call (`getptr().x += 1`) may evaluate the call twice (rare).
 - `[`/`]` are lexed but there's no array type; generic params beyond 4 are clamped; `-2 ** 2 == 4` (unary binds
   tighter than `**`).
@@ -986,7 +986,7 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
   `extern` taking/returning `f32` won't narrow double↔single (func pointers are meant for MVS functions).
 
 About `--nostd` for OS dev: it currently produces self-contained x86-64 with no undefined symbols and no CRT/OS
-dependency — runnable on bare metal — **but** the object is COFF/PE (`nasm -f win64`) using the win64 calling
+dependency (runnable on bare metal), **but** the object is COFF/PE (`nasm -f win64`) using the win64 calling
 convention, suited to the LLVM/lld side. GNU ld + ELF (e.g. GRUB multiboot) can't link COFF; that waits on the
 ELF/SysV backend above.
 
@@ -1010,41 +1010,41 @@ ELF/SysV backend above.
   in expressions with nested calls.
 - **clang warnings:** you need `-D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations` or MSVC headers flood you
   with warnings (fopen/strdup/strcpy).
-- **Link flags:** `-llegacy_stdio_definitions` (else `scanf` won't link, UCRT inlines it) and `-lws2_32` (net) —
+- **Link flags:** `-llegacy_stdio_definitions` (else `scanf` won't link, UCRT inlines it) and `-lws2_32` (net);
   set in `src/main.c`.
 - **float in printf:** it's variadic, so a float must be placed in both the GPR and `xmm<n>` (see io.out), or it
   prints wrong.
-- **struct return:** a struct-returning function uses a hidden pointer (rcx) — only call it storing the result
+- **struct return:** a struct-returning function uses a hidden pointer (rcx); only call it storing the result
   into a variable (otherwise error).
 - **method `ns` vs `mod`:** a method's `ns` is the struct name (for the label); `mod` is the module (for resolving
-  internal calls). Using ns as cur_ns makes a method call itself in a loop (e.g. `send` calling extern `send`) —
+  internal calls). Using ns as cur_ns makes a method call itself in a loop (e.g. `send` calling extern `send`);
   use `fn->mod`.
 - **NASM keywords:** an extern/export name equal to a nasm reserved word (`abs`, `rel`, `seg`, `wrt`) won't
-  assemble — avoid those names.
+  assemble; avoid those names.
 - **--nostd:** no package imports, no CRT linkage, emits a `.obj`; reachability roots = main + exports.
-- **Don't nest `/*` inside a Thai comment:** clang warns `-Wcomment`.
-- **scope shadowing:** fully supported (codegen uses the visible stack; every type-analysis pass is scope-aware) —
+- **Don't nest `/*` inside a block comment:** clang warns `-Wcomment`.
+- **scope shadowing:** fully supported (codegen uses the visible stack; every type-analysis pass is scope-aware);
   same-named variables of different types/scopes work correctly.
 - **global init:** globals are initialized at the **start of main**, not in `.data`. See the loop in `gen_func`
-  that checks `strcmp(fn->name, "main")` — with no `main`, global init doesn't run.
+  that checks `strcmp(fn->name, "main")`; with no `main`, global init doesn't run.
 - **modules:** io needs `import { io } from "std";` first, else "undefined function 'io.out'".
-- **std dir:** found via `MVS_STD` or `<dir of mvs.exe>/std` — set `MVS_STD` if you run mvs.exe from elsewhere.
+- **std dir:** found via `MVS_STD` or `<dir of mvs.exe>/std`; set `MVS_STD` if you run mvs.exe from elsewhere.
 - **printf variadic:** you can pass more arguments than the `extern` declares (codegen doesn't check arg count
   against the signature).
 - **callee-saved registers (win64):** `rbx, rbp, rdi, rsi, rsp, r12-r15` must not be clobbered without restoring.
   Memory copy uses `gen_memcpy()` (r10/r11 volatile), never `rep movsb` (it uses rsi/rdi). Proven: C sets rsi/rdi,
   calls MVS (struct copy), and rsi/rdi survive.
 - **pointer arithmetic must scale everywhere:** `p+1`, `p+=1`, `p++`, and `p - q` (divide by sizeof) all the same
-  (there used to be a bug where compound/`++`/ptr-ptr didn't scale — fixed).
-- **shift/div/mod signedness follows the left operand only** (not an OR of both sides) — otherwise `signed >> n`
+  (there used to be a bug where compound/`++`/ptr-ptr didn't scale; fixed).
+- **shift/div/mod signedness follows the left operand only** (not an OR of both sides); otherwise `signed >> n`
   becomes a logical shift. Comparison treats "either side unsigned = unsigned" (so a big u64 isn't seen as negative).
 - **struct declaration order is free:** layout is computed by fixpoint (`layout_structs`), supporting fields that
   are structs declared later.
 - **overload:** resolution counts nested-call arguments first (recurse children first); a same-category signature
   clash (i32 vs i64) reports a clear error.
-- **malformed input** (trailing escape, unclosed `{`) must not read past the buffer — guards exist; internal tables
+- **malformed input** (trailing escape, unclosed `{`) must not read past the buffer: guards exist; internal tables
   have bounds checks (`MAX_*`).
-- **No gcc/ld/flex/bison on the machine** — don't write scripts/Makefiles that call them.
+- **No gcc/ld/flex/bison on the machine**: don't write scripts/Makefiles that call them.
 
 ---
 
@@ -1055,17 +1055,17 @@ ELF/SysV backend above.
 | Token | the smallest meaningful unit (keyword, number, operator) |
 | Lexer | turns characters into tokens |
 | Parser | assembles tokens into a syntax tree |
-| AST | Abstract Syntax Tree — the tree representing the program |
+| AST | Abstract Syntax Tree: the tree representing the program |
 | Codegen | turns the AST into assembly |
-| ABI | Application Binary Interface — the function-call contract (registers, stack) |
+| ABI | Application Binary Interface: the function-call contract (registers, stack) |
 | Stack frame | one function call's stack region (where locals live) |
 | Prologue/Epilogue | the function's entry/exit code that reserves/releases the frame |
 | Shadow space | the 32 bytes the caller reserves for the callee (win64 rule) |
-| sret | structure return — returning a struct through a hidden caller-provided pointer |
+| sret | structure return: returning a struct through a hidden caller-provided pointer |
 | rbp / rsp | base / stack pointer |
 | RIP-relative | addressing relative to the instruction pointer (`default rel` in NASM) |
 | Tree-shaking | dropping unreferenced functions from the output |
 | Intrinsic | a feature the compiler handles itself (e.g. `io.out`), not an ordinary function |
-| Freestanding | code with no OS/runtime dependency — for writing an OS / bare-metal |
+| Freestanding | code with no OS/runtime dependency, for writing an OS / bare-metal |
 
 If this doc and the code disagree, trust the code and update the doc.

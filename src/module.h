@@ -1,23 +1,23 @@
 /*
- * module.h - ระบบโมดูล (module system) สำหรับการ import ข้ามไฟล์
+ * module.h - module system for cross-file imports
  *
- * รับไฟล์เริ่มต้น (entry) แล้วไล่ resolve คำสั่ง import ทั้งหมดแบบ recursive
- * รวมฟังก์ชัน/ตัวแปร/extern จากทุกโมดูลเข้าเป็น ND_PROGRAM เดียวเพื่อส่งให้ codegen
+ * Takes an entry file and resolves all import statements recursively,
+ * merging functions/variables/externs from every module into one ND_PROGRAM for codegen.
  *
- * รูปแบบ import ที่รองรับ:
- *   import { factorial } from "./mathlib.mvs";  // นำเข้าจากไฟล์ (ใช้ชื่อตรง ๆ)
- *   import { io } from "std";                    // นำเข้าจาก package เป็น namespace (io.out)
+ * Supported import forms:
+ *   import { factorial } from "./mathlib.mvs";  // import from a file (names used directly)
+ *   import { io } from "std";                    // import from a package as a namespace (io.out)
  */
 #ifndef MVS_MODULE_H
 #define MVS_MODULE_H
 
 #include "ast.h"
 
-/* โหลดไฟล์ entry และ resolve import ทั้งหมด คืน ND_PROGRAM ที่รวมทุกโมดูล
- *   entry_path - ไฟล์ .mvs เริ่มต้น
- *   stddir     - โฟลเดอร์ของ standard library (ใช้ตอน import จาก package เช่น "std")
- *   nostd      - 1 = โหมด freestanding: ห้าม import จาก package (เช่น "std")
- *   had_error  - ตั้งเป็น 1 หากเกิดข้อผิดพลาด
+/* Load the entry file and resolve all imports; returns an ND_PROGRAM merging every module.
+ *   entry_path - the initial .mvs file
+ *   stddir     - standard library folder (used when importing from a package such as "std")
+ *   nostd      - 1 = freestanding mode: package imports (such as "std") are forbidden
+ *   had_error  - set to 1 if an error occurred
  */
 Node *module_load(const char *entry_path, const char *stddir, int nostd, int *had_error);
 

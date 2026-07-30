@@ -1,5 +1,5 @@
 // ============================================================
-//  hello — โปรแกรมแรกสุด
+//  hello: the very first program
 //  build:  mvs.exe examples/01_language/hello.mvs
 //  run:    examples\01_language\hello.exe
 // ============================================================

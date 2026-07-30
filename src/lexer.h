@@ -1,28 +1,28 @@
 /*
- * lexer.h - ส่วนหัวของตัวตัดคำ (Lexical Analyzer / Tokenizer)
+ * lexer.h - Header for the lexical analyzer (Tokenizer)
  *
- * lexer ทำหน้าที่อ่านซอร์สโค้ด (สตริง) แล้วแปลงเป็นชุดของ Token ทีละตัว
- * parser จะเรียก lexer_next() เพื่อขอ token ตัวถัดไปเรื่อย ๆ จนกว่าจะถึง TK_EOF
+ * The lexer reads the source code (a string) and converts it into Tokens one at a time.
+ * The parser calls lexer_next() repeatedly to get the next token until it reaches TK_EOF.
  */
 #ifndef MVS_LEXER_H
 #define MVS_LEXER_H
 
 #include "token.h"
 
-/* สถานะของ lexer ขณะทำงาน */
+/* Lexer state while running */
 typedef struct {
-    const char *src;       /* ตัวชี้ไปยังซอร์สโค้ดทั้งหมด */
-    size_t      pos;       /* ตำแหน่งปัจจุบันในซอร์ส (ดัชนีตัวอักษร) */
-    int         line;      /* บรรทัดปัจจุบัน (เริ่มที่ 1) */
-    int         col;       /* คอลัมน์ปัจจุบัน (เริ่มที่ 1) */
-    const char *filename;  /* ชื่อไฟล์ ใช้รายงาน error */
-    int         had_error; /* ธงบอกว่าพบข้อผิดพลาดระหว่างตัดคำหรือไม่ */
+    const char *src;       /* pointer to the entire source code */
+    size_t      pos;       /* current position in the source (character index) */
+    int         line;      /* current line (starts at 1) */
+    int         col;       /* current column (starts at 1) */
+    const char *filename;  /* file name, used for error reporting */
+    int         had_error; /* flag: whether an error was found during tokenizing */
 } Lexer;
 
-/* เริ่มต้น lexer ด้วยซอร์สโค้ดและชื่อไฟล์ */
+/* Initialize the lexer with source code and a file name */
 void  lexer_init(Lexer *lx, const char *src, const char *filename);
 
-/* ดึง token ตัวถัดไป ผู้เรียกมีหน้าที่ free(token.lexeme) เองเมื่อใช้เสร็จ */
+/* Get the next token. The caller is responsible for free(token.lexeme) when done */
 Token lexer_next(Lexer *lx);
 
 #endif /* MVS_LEXER_H */

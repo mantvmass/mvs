@@ -1,11 +1,11 @@
 // ============================================================
-//  use_c — MVS เรียกฟังก์ชันจากไฟล์ C ของเราเอง (mathops.c)
+//  use_c: MVS calling functions from our own C file (mathops.c)
 //  build:  mvs.exe examples/07_c_interop/use_c.mvs -c
 //          clang use_c.obj mathops.c -o use_c.exe -llegacy_stdio_definitions
 //  run:    use_c.exe
 //
-//  หลักการ: -c ให้ MVS ผลิต use_c.obj; แล้วใช้ clang ลิงก์ .obj เข้ากับ mathops.c
-//          ประกาศ extern func ให้ตรงกับ signature ของ C (ดู mathops.c)
+//  idea: -c makes MVS produce use_c.obj; then clang links the .obj with mathops.c
+//          declare extern func matching the C signatures (see mathops.c)
 // ============================================================
 import { io } from "std";
 

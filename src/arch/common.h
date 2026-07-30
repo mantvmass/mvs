@@ -1,16 +1,16 @@
 /*
- * common.h - ส่วนกลางของ backend ที่ "ไม่ขึ้นกับสถาปัตยกรรม"
+ * common.h - backend core that is "architecture independent"
  *
- * รวมโครงสร้างสถานะ (Gen) และฟังก์ชันช่วยที่ใช้ร่วมกันได้ทุก backend:
- *   - ระบบชนิดข้อมูล (ขนาด, signed/float, struct layout, การอนุมานชนิด)
- *   - ตารางสัญลักษณ์ตัวแปร/ฟังก์ชัน + การจองพื้นที่ตัวแปร
- *   - การวิเคราะห์การเข้าถึงได้ (reachability / tree-shaking)
- *   - การแปลง format string ของ io.out
+ * Contains the state structure (Gen) and helper functions shared by every backend:
+ *   - type system (sizes, signed/float, struct layout, type inference)
+ *   - variable/function symbol table + variable slot allocation
+ *   - reachability analysis (tree-shaking)
+ *   - io.out format string conversion
  *
- * แต่ละ backend (เช่น arch/x86_64/win.c) เพียง include ไฟล์นี้แล้วเขียนเฉพาะ
- * ส่วน "ปล่อย instruction" ของสถาปัตยกรรมตน — โค้ดส่วนกลางไม่ต้องเขียนซ้ำ
+ * Each backend (e.g. arch/x86_64/win.c) just includes this file and writes only the
+ * "instruction emission" part for its architecture; the shared code is not duplicated.
  *
- * หมายเหตุ: type_size สมมติ pointer ขนาด 8 ไบต์ (เป้าหมายปัจจุบันเป็น 64-bit ทั้งหมด)
+ * Note: type_size assumes pointers are 8 bytes (all current targets are 64-bit).
  */
 #ifndef MVS_ARCH_COMMON_H
 #define MVS_ARCH_COMMON_H
@@ -22,116 +22,116 @@
 #define MAX_FUNC  256
 #define MAX_STR   256
 #define MAX_LOOP  64
-#define MAX_ARGS  4   /* รองรับอาร์กิวเมนต์ผ่านรีจิสเตอร์ 4 ตัว (ที่เกินวางบน stack) */
-#define LABEL_MAX 720 /* ขนาดบัฟเฟอร์ชื่อ label (รองรับชื่อ instance generic ที่ยาว) — globals ใช้ prefix mvs_gv_ กันชน func */
+#define MAX_ARGS  4   /* supports 4 register arguments (extras go on the stack) */
+#define LABEL_MAX 720 /* label buffer size (fits long generic instance names); globals get prefix mvs_gv_ vs funcs */
 
-/* ตารางสัญลักษณ์ (symbol) สำหรับตัวแปร */
+/* Symbol table entry for variables */
 typedef struct {
     char    *name;
     DataType type;
-    int      ptr;       /* ความลึกของ pointer (0 = ไม่ใช่ pointer) */
-    char    *sname;     /* ชื่อ struct เมื่อ type == TYPE_STRUCT */
-    int      size;      /* ขนาดเป็นไบต์ของตัวแปร */
-    int      is_global; /* 1 = ตัวแปร global, 0 = ตัวแปร local บน stack */
-    int      offset;    /* สำหรับ local: ระยะจาก rbp (เป็นบวก ใช้ [rbp - offset]) */
-    Node    *sig;       /* ลายเซ็นเมื่อ type == TYPE_FUNC (function pointer) ไม่งั้น NULL */
+    int      ptr;       /* pointer depth (0 = not a pointer) */
+    char    *sname;     /* struct name when type == TYPE_STRUCT */
+    int      size;      /* size of the variable in bytes */
+    int      is_global; /* 1 = global variable, 0 = local variable on the stack */
+    int      offset;    /* for locals: distance from rbp (positive, used as [rbp - offset]) */
+    Node    *sig;       /* signature when type == TYPE_FUNC (function pointer), else NULL */
 } Sym;
 
-/* ฟิลด์หนึ่งตัวภายใน struct (พร้อม offset และขนาด ใช้ตอนเข้าถึงสมาชิก) */
+/* One field inside a struct (with offset and size, used when accessing members) */
 typedef struct {
     char    *name;
     DataType type;
     int      ptr;
-    char    *sname;     /* ชื่อ struct เมื่อฟิลด์เป็น struct ซ้อน */
-    int      offset;    /* offset ของฟิลด์ภายใน struct (ไบต์) */
-    int      size;      /* ขนาดของฟิลด์ (ไบต์) */
-    Node    *sig;       /* ลายเซ็นเมื่อฟิลด์เป็น TYPE_FUNC (function pointer) ไม่งั้น NULL */
+    char    *sname;     /* struct name when the field is a nested struct */
+    int      offset;    /* offset of the field within the struct (bytes) */
+    int      size;      /* size of the field (bytes) */
+    Node    *sig;       /* signature when the field is TYPE_FUNC (function pointer), else NULL */
 } Field;
 
-/* ข้อมูล layout ของ struct หนึ่งชนิด */
+/* Layout information for one struct type */
 typedef struct {
     char  *name;
     Field  fields[64];
     int    nfields;
-    int    size;        /* ขนาดรวมของ struct (ไบต์) */
+    int    size;        /* total size of the struct (bytes) */
 } StructInfo;
 
-/* ชนิดของนิพจน์ (ใช้ติดตามชนิด/ขนาด/pointer ระหว่าง codegen) */
+/* Type of an expression (tracks type/size/pointer depth during codegen) */
 typedef struct {
     DataType base;
     int      ptr;
     char    *sname;
-    Node    *sig;       /* ลายเซ็นเมื่อ base == TYPE_FUNC (function pointer) ไม่งั้น NULL */
+    Node    *sig;       /* signature when base == TYPE_FUNC (function pointer), else NULL */
 } ExprType;
 
-/* สถานะของ backend ทั้งหมดรวมไว้ในโครงสร้างเดียว (คอมไพเลอร์ทำงานครั้งละไฟล์) */
+/* All backend state gathered into one structure (the compiler processes one file at a time) */
 typedef struct {
     FILE *out;
 
-    Sym  locals[MAX_SYM];   int nlocals;   /* ตัวแปรในฟังก์ชันปัจจุบัน (จองทุกตัวไว้ใน pre-pass) */
-    Sym  globals[MAX_SYM];  int nglobals;  /* ตัวแปร global ทั้งโปรแกรม */
+    Sym  locals[MAX_SYM];   int nlocals;   /* variables of the current function (all reserved in a pre-pass) */
+    Sym  globals[MAX_SYM];  int nglobals;  /* global variables of the whole program */
 
-    /* สแต็กของตัวแปรที่ "มองเห็นได้" ตามขอบเขต (scope) — ดัชนีชี้เข้า locals[]
-     * ใช้ทำ scope shadowing: ตัวแปรใน block ในมองเห็นทับตัวนอก, ออก block แล้วหายไป */
+    /* Stack of variables currently "visible" per scope; indices point into locals[].
+     * Implements scope shadowing: an inner-block variable hides the outer one and disappears on block exit. */
     int  visible[MAX_SYM];  int nvisible;
 
-    /* ตารางฟังก์ชัน เก็บตัวโหนด ND_FUNC ไว้ใช้ตอน gen การเรียก (รวม namespace/extern) */
+    /* Function table; stores the ND_FUNC nodes for use when generating calls (includes namespace/extern) */
     Node *funcs[MAX_FUNC]; int nfuncs;
 
-    /* ตาราง layout ของ struct ทุกชนิด */
+    /* Layout table for every struct type */
     StructInfo structs[MAX_FUNC]; int nstructs;
 
-    int sret_off;           /* offset ของช่องเก็บ hidden pointer สำหรับฟังก์ชันที่คืน struct (0 = ไม่มี) */
+    int sret_off;           /* offset of the hidden-pointer slot for struct-returning functions (0 = none) */
 
-    const char *cur_ns;     /* namespace ที่ใช้ resolve การเรียกแบบไม่ระบุชื่อภายในฟังก์ชันปัจจุบัน */
-    int cur_ret_float;      /* 1 ถ้าฟังก์ชันที่กำลัง gen คืนค่าทศนิยม (ต้องคืนผ่าน xmm0) */
-    int cur_ret_f32c;       /* 1 ถ้าฟังก์ชัน export คืน f32 (ต้องแปลง double -> single ให้ C) */
-    int io_imported;        /* 1 ถ้ามีการ import โมดูล io (ใช้ gate ฟังก์ชันในตัว io.out) */
+    const char *cur_ns;     /* namespace used to resolve unqualified calls inside the current function */
+    int cur_ret_float;      /* 1 if the function being generated returns a float (must return via xmm0) */
+    int cur_ret_f32c;       /* 1 if an exported function returns f32 (must convert double -> single for C) */
+    int io_imported;        /* 1 if the io module was imported (gates the built-in io.out function) */
 
-    /* คลังสตริง: เก็บไบต์ของสตริงเพื่อนำไปประกาศในส่วน .data */
+    /* String pool: stores string bytes to be declared in the .data section */
     struct { unsigned char *data; int len; } strs[MAX_STR]; int nstrs;
 
-    /* สแต็กของลูปสำหรับ break/continue (เก็บหมายเลข label) */
+    /* Loop stack for break/continue (stores label numbers) */
     struct { int brk; int cont; } loops[MAX_LOOP]; int nloops;
 
-    int label_id;           /* ตัวนับ label ให้ไม่ซ้ำ */
+    int label_id;           /* counter for unique labels */
     int had_error;
 } Gen;
 
-/* --- ตัวนับ label และการตั้งชื่อสัญลักษณ์ (กฎร่วมทุก backend) --- */
+/* --- label counter and symbol naming (rules shared by all backends) --- */
 int   new_label(Gen *g);
-void  func_label_of(Node *fn, char *buf);   /* ชื่อ label ของฟังก์ชัน (extern/export = ชื่อดิบ) */
+void  func_label_of(Node *fn, char *buf);   /* label name of a function (extern/export = raw name) */
 void  global_label(const char *name, char *buf);
 
-/* --- ตารางฟังก์ชัน / ตัวแปร / สตริง --- */
+/* --- function / variable / string tables --- */
 Node *find_func(Gen *g, const char *ns, const char *name);
 Sym  *find_var(Gen *g, const char *name);
 int   intern_string(Gen *g, const char *data, int len);
 
-/* --- ระบบชนิดข้อมูลและ struct layout --- */
+/* --- type system and struct layout --- */
 StructInfo *find_struct(Gen *g, const char *name);
 int   type_size(Gen *g, DataType base, int ptr, const char *sname);
 int   is_float_type(DataType t);
 int   is_signed_type(DataType t);
 void  register_struct(Gen *g, Node *decl);
-void  layout_structs(Gen *g);   /* คำนวณ offset/size ของทุก struct (fixpoint, รองรับ forward reference) */
+void  layout_structs(Gen *g);   /* compute offset/size of every struct (fixpoint, supports forward references) */
 Field *find_field(StructInfo *s, const char *name);
 ExprType type_of(Gen *g, Node *n);
 DataType infer_type(Gen *g, Node *n);
-/* คืนลายเซ็นถ้า callee เป็นค่า function pointer (ตัวแปร/ฟิลด์ TYPE_FUNC) ไม่งั้น NULL (= เรียกตรง) */
+/* Signature if the callee is a function pointer value (TYPE_FUNC variable/field), else NULL (= direct call) */
 Node *expr_func_sig(Gen *g, Node *callee);
 
-/* --- แปลง format string ของ io.out ({} แบบ Rust) เป็น format ของ C printf ---
- * เติม vals[] = ค่าที่ส่งให้ printf จริง (struct ถูกขยายเป็นรายฟิลด์), *out_nv = จำนวน */
+/* --- convert an io.out format string (Rust-style {}) into a C printf format ---
+ * Fills vals[] = the values actually passed to printf (structs expanded field by field), *out_nv = count */
 char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out_nph,
                      Node **vals, int *out_nv, int vals_cap);
 
-/* --- การจองพื้นที่ตัวแปรบน stack (frame layout) --- */
+/* --- reserving variable space on the stack (frame layout) --- */
 int   add_local(Gen *g, const char *name, DataType type, int ptr, char *sname, Node *sig, int *frame);
 void  collect_locals(Gen *g, Node *n, int *frame);
-void  collect_struct_temps(Gen *g, Node *n, int *frame);  /* จองช่อง temp ให้ struct ที่คืนจากฟังก์ชัน (ใช้เป็น rvalue) */
+void  collect_struct_temps(Gen *g, Node *n, int *frame);  /* reserve temps for struct-returning calls (rvalues) */
 
-/* --- การวิเคราะห์การเข้าถึงได้ (tree-shaking) --- */
+/* --- reachability analysis (tree-shaking) --- */
 int   func_index(Gen *g, Node *f);
 void  reach_func(Gen *g, int idx, char *reached);
 void  reach_node(Gen *g, Node *n, const char *ns, char *reached);

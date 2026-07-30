@@ -1,50 +1,50 @@
 // ============================================================
-//  types — ชนิดข้อมูลทั้งหมดของ MVS
+//  types: every MVS data type
 //  build:  mvs.exe examples/01_language/types.mvs
 //  run:    examples\01_language\types.exe
 // ============================================================
 import { io } from "std";
 
 func main() -> i8 {
-    // ---- จำนวนเต็มมีเครื่องหมาย (signed) ----
+    // ---- signed integers ----
     let a: i8  = 0 - 128;          // -128 .. 127
     let b: i16 = 32000;
     let c: i32 = 2000000000;
     let d: i64 = 9000000000000000000;
-    let e: isize = 64;             // กว้างเท่า pointer (8 ไบต์)
+    let e: isize = 64;             // pointer-sized (8 bytes)
     io.out("i8={} i16={} i32={} i64={} isize={}", a, b, c, d, e);
 
-    // ---- จำนวนเต็มไม่มีเครื่องหมาย (unsigned) ----
+    // ---- unsigned integers ----
     let f: u8  = 255;              // 0 .. 255 (wrap-around)
     let g: u16 = 65535;
     let h: u32 = 4000000000;
-    let i: u64 = 18446744073709551615;   // 2^64 - 1 (แสดงเกิน 2^63 ได้)
+    let i: u64 = 18446744073709551615;   // 2^64 - 1 (prints values above 2^63)
     let j: usize = 4096;
     io.out("u8={} u16={} u32={} u64={} usize={}", f, g, h, i, j);
 
-    // ---- 128-bit: เก็บ/ส่ง 16 ไบต์ (คำนวณยัง 64-bit — ใช้ค่าน้อย) ----
+    // ---- 128-bit: stored/passed as 16 bytes (math still 64-bit, keep values small) ----
     let k: i128 = 0 - 5;
     let l: u128 = 12345;
     io.out("i128={} u128={}", k, l);
 
-    // ---- ทศนิยม ----
-    let m: f32 = 1.5;              // single precision (4 ไบต์)
-    let n: f64 = 3.14159265358979; // double precision (8 ไบต์)
+    // ---- floating point ----
+    let m: f32 = 1.5;              // single precision (4 bytes)
+    let n: f64 = 3.14159265358979; // double precision (8 bytes)
     io.out("f32={} f64={}", m, n);
 
     // ---- bool / char / str ----
     let ok: bool = true;
-    let ch: char = 'A';           // อักขระเดี่ยว ใช้ '' เท่านั้น
-    let s: str = "immutable text"; // สตริงคงที่ ใช้ "" เท่านั้น (ดู String สำหรับ heap)
+    let ch: char = 'A';           // single character, '' only
+    let s: str = "immutable text"; // immutable string, "" only (see String for heap)
     io.out("bool={} char={} str={}", ok, ch, s);
 
     // ---- pointer ----
     let value: i32 = 42;
-    let p: *i32 = &value;         // ที่อยู่ของ value
-    let pp: **i32 = &p;           // pointer ไปยัง pointer
+    let p: *i32 = &value;         // address of value
+    let pp: **i32 = &p;           // pointer to a pointer
     io.out("*p={} **pp={}", *p, **pp);   // 42 42
 
-    // ---- การแปลงชนิดด้วย as ----
+    // ---- type conversion with as ----
     io.out("3.9 as i32 = {}", 3.9 as i32);   // 3
     io.out("65 as char = {}", 65 as char);   // A
     io.out("300 as u8 = {}", 300 as u8);     // 44 (wrap)

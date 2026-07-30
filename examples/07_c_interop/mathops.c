@@ -1,5 +1,5 @@
-/* mathops.c — ฟังก์ชัน C ที่ฝั่ง MVS จะเรียกใช้ (ดู use_c.mvs)
- * คอมไพล์รวมตอนลิงก์: clang use_c.obj mathops.c -o use_c.exe ... */
+/* mathops.c: C functions the MVS side will call (see use_c.mvs)
+ * compiled in at link time: clang use_c.obj mathops.c -o use_c.exe ... */
 #include <math.h>
 
 int    c_add(int a, int b)         { return a + b; }

@@ -1,13 +1,13 @@
 /*
- * parser.c - ตัววิเคราะห์ไวยากรณ์แบบ recursive descent ของภาษา MVS
+ * parser.c - Recursive descent parser for the MVS language
  *
- * ไวยากรณ์ระดับบน (subset พื้นฐาน):
+ * Top-level grammar (basic subset):
  *   program  := topdecl*
- *   topdecl  := func_def | var_decl ';'        (var_decl ระดับ global)
+ *   topdecl  := func_def | var_decl ';'        (var_decl at global level)
  *   func_def := 'func' IDENT '(' params? ')' '->' type block
  *
- * ลำดับความสำคัญของตัวดำเนินการ (จากต่ำไปสูง):
- *   assignment -> '||' -> '&&' -> ('=='|'!=') -> เปรียบเทียบ ->
+ * Operator precedence (low to high):
+ *   assignment -> '||' -> '&&' -> ('=='|'!=') -> comparison ->
  *   ('+'|'-') -> ('*'|'/'|'%') -> '^' -> unary -> postfix -> primary
  */
 #include <stdio.h>
@@ -15,51 +15,51 @@
 #include <string.h>
 #include "parser.h"
 
-/* ---------- ฟังก์ชันช่วยพื้นฐานของ parser ---------- */
+/* ---------- Basic parser helper functions ---------- */
 
-/* ขยับไป token ถัดไป โดยคืน token เดิม (ไม่ free lexeme ที่ยังอาจถูกอ้างใน AST) */
+/* Move to the next token, replacing the current one (do not free the lexeme; the AST may still reference it) */
 static void advance(Parser *p) {
     p->cur = lexer_next(p->lx);
 }
 
-/* ตรวจว่า token ปัจจุบันเป็นชนิดที่ต้องการหรือไม่ */
+/* Check whether the current token is of the given kind */
 static int check(Parser *p, TokenType t) {
     return p->cur.type == t;
 }
 
-/* ถ้า token ปัจจุบันตรงชนิด ให้กินแล้วคืน 1, ไม่ตรงคืน 0 */
+/* If the current token matches the kind, consume it and return 1; otherwise return 0 */
 static int match(Parser *p, TokenType t) {
     if (check(p, t)) { advance(p); return 1; }
     return 0;
 }
 
-/* รายงาน syntax error พร้อมตำแหน่ง */
+/* Report a syntax error with its location */
 static void error(Parser *p, const char *msg) {
-    if (p->had_error) return; /* รายงานเฉพาะ error แรกเพื่อลดสัญญาณรบกวน */
+    if (p->had_error) return; /* report only the first error to reduce noise */
     fprintf(stderr, "%s:%d:%d: syntax error: %s (near '%s')\n",
             p->lx->filename, p->cur.line, p->cur.col, msg, p->cur.lexeme);
     p->had_error = 1;
 }
 
-/* บังคับว่า token ปัจจุบันต้องเป็นชนิดที่กำหนด ไม่งั้น error */
+/* Require that the current token is of the given kind, otherwise error */
 static void expect(Parser *p, TokenType t, const char *what) {
     if (!match(p, t)) error(p, what);
 }
 
-/* ตรวจว่า token ปัจจุบันเป็นคำสงวนชนิดข้อมูลหรือไม่ */
+/* Check whether the current token is a data type keyword */
 static int is_type_token(TokenType t) {
     return datatype_from_token(t) != TYPE_UNKNOWN;
 }
 
-/* ประกาศล่วงหน้า (mutual recursion) */
+/* Forward declarations (mutual recursion) */
 static Node *parse_expr(Parser *p);
 static Node *parse_stmt(Parser *p);
 static Node *parse_block(Parser *p);
 static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out);
 
-#define MAX_PARSE_DEPTH 300  /* กัน stack overflow จากนิพจน์/บล็อก/unary ที่ซ้อนลึกผิดปกติ */
+#define MAX_PARSE_DEPTH 300  /* guard against stack overflow from abnormally deep expressions/blocks/unary chains */
 
-/* ---------- การแยกวิเคราะห์นิพจน์ ---------- */
+/* ---------- Expression parsing ---------- */
 
 /* primary := INT | FLOAT | STRING | CHAR | true | false | IDENT | '(' expr ')' */
 static Node *parse_primary(Parser *p) {
@@ -70,7 +70,7 @@ static Node *parse_primary(Parser *p) {
         advance(p); return n;
     }
     if (check(p, TK_FLOAT)) {
-        /* เก็บ bit-pattern ของ double ไว้ใน int_val เพื่อให้ codegen โหลดเข้า rax ได้ตรง ๆ */
+        /* Store the double's bit-pattern in int_val so codegen can load it into rax directly */
         Node *n = node_new(ND_FLOAT, t.line);
         double d = t.float_val;
         unsigned long long bits;
@@ -81,7 +81,8 @@ static Node *parse_primary(Parser *p) {
     }
     if (check(p, TK_STRING)) {
         Node *n = node_new(ND_STR, t.line);
-        /* สตริงอาจมี '\0' ฝังกลาง (escape \0) — คัดลอกตามความยาวจริง (int_val) ไม่ใช่ strdup ที่ตัดที่ NUL */
+        /* A string may contain an embedded '\0' (escape \0); copy by the real length (int_val),
+         * not strdup which stops at NUL */
         n->str_len = (int)t.int_val;
         n->str_val = (char *)malloc((size_t)n->str_len + 1);
         memcpy(n->str_val, t.lexeme, (size_t)n->str_len);
@@ -103,14 +104,14 @@ static Node *parse_primary(Parser *p) {
         char *idname = strdup(t.lexeme);
         int line = t.line;
         advance(p);
-        /* ถ้าตามด้วย '{' คือการสร้างค่า struct: Name { field: expr, ... } */
+        /* If followed by '{', this is a struct literal: Name { field: expr, ... } */
         if (check(p, TK_LBRACE)) {
             Node *lit = node_new(ND_STRUCT_LIT, line);
             lit->name = idname;
-            advance(p); /* กิน { */
+            advance(p); /* consume { */
             if (!check(p, TK_RBRACE)) {
                 do {
-                    /* แต่ละฟิลด์เก็บเป็น ND_ASSIGN: lhs = ชื่อฟิลด์, rhs = นิพจน์ */
+                    /* Each field is stored as ND_ASSIGN: lhs = field name, rhs = expression */
                     Node *fi = node_new(ND_ASSIGN, p->cur.line);
                     Node *fname = node_new(ND_IDENT, p->cur.line);
                     if (!check(p, TK_IDENT)) { error(p, "expected field name in struct literal"); break; }
@@ -134,29 +135,29 @@ static Node *parse_primary(Parser *p) {
         return n;
     }
     error(p, "expected expression");
-    advance(p); /* กิน token ที่ผิดเพื่อกันลูปค้าง */
+    advance(p); /* consume the bad token to avoid an infinite loop */
     return node_new(ND_INT, t.line);
 }
 
 /* postfix := primary ( '.' IDENT | '(' args ')' | '++' | '--' )*
- * รองรับการเข้าถึงสมาชิก, การเรียกฟังก์ชัน, และเพิ่ม/ลดแบบ postfix */
+ * Supports member access, function calls, and postfix increment/decrement */
 static Node *parse_postfix(Parser *p) {
     Node *node = parse_primary(p);
     for (;;) {
         if (match(p, TK_DOT) || match(p, TK_COLONCOLON)) {
-            /* การเข้าถึงสมาชิก a.b (instance) หรือ associated function Type::func
-             * โครงสร้าง AST เดียวกัน (ND_MEMBER) — gen_call แยกแยะจากชนิดของ base ตอน resolve:
-             * base เป็นตัวแปร struct -> method (ฉีด self), base เป็นชื่อชนิด/โมดูล -> ฟังก์ชันใน ns นั้น */
+            /* Member access a.b (instance) or associated function Type::func.
+             * Same AST shape (ND_MEMBER); gen_call disambiguates by the base's kind at resolve time:
+             * base is a struct variable -> method (inject self), base is a type/module name -> function in that ns */
             Node *m = node_new(ND_MEMBER, p->cur.line);
             m->operand = node;
-            /* ชื่อ member/method: รับ identifier — และอนุญาต 'from' (เป็นคีย์เวิร์ดของ import)
-             * เพื่อให้ใช้ชื่อแบบ Rust ได้ เช่น String::from */
+            /* Member/method name: accept an identifier, and also allow 'from' (an import keyword)
+             * so Rust-style names like String::from work */
             if (!check(p, TK_IDENT) && !check(p, TK_FROM)) { error(p, "expected name after '.' or '::'"); }
             m->name = strdup(p->cur.lexeme);
             advance(p);
             node = m;
         } else if (match(p, TK_LPAREN)) {
-            /* การเรียกฟังก์ชัน: callee เก็บใน operand, อาร์กิวเมนต์เก็บใน items */
+            /* Function call: callee stored in operand, arguments stored in items */
             Node *call = node_new(ND_CALL, p->cur.line);
             call->operand = node;
             if (!check(p, TK_RPAREN)) {
@@ -167,7 +168,7 @@ static Node *parse_postfix(Parser *p) {
             expect(p, TK_RPAREN, "expected ')' after arguments");
             node = call;
         } else if (check(p, TK_PLUSPLUS) || check(p, TK_MINUSMINUS)) {
-            /* เพิ่ม/ลดแบบ postfix: i++ , i-- */
+            /* Postfix increment/decrement: i++ , i-- */
             Node *u = node_new(ND_UNARY, p->cur.line);
             u->op = p->cur.type;
             u->operand = node;
@@ -180,17 +181,17 @@ static Node *parse_postfix(Parser *p) {
     return node;
 }
 
-/* unary := ('-'|'!'|'~'|'*'|'&') unary | '**' unary (= deref สองชั้น) | postfix
- * '~' = bitwise NOT; '**' ในตำแหน่งนำหน้าหมายถึง dereference สองชั้น (**ptr) */
+/* unary := ('-'|'!'|'~'|'*'|'&') unary | '**' unary (= double deref) | postfix
+ * '~' = bitwise NOT; '**' in prefix position means a double dereference (**ptr) */
 static Node *parse_unary(Parser *p) {
-    if (++p->depth > MAX_PARSE_DEPTH) {       /* กันโซ่ unary ยาวผิดปกติ (เช่น !!!...) ล้น stack */
+    if (++p->depth > MAX_PARSE_DEPTH) {       /* guard against abnormally long unary chains (e.g. !!!...) overflowing the stack */
         if (!p->had_error) error(p, "expression nested too deeply");
         p->depth--;
         return node_new(ND_INT, p->cur.line);
     }
     Node *res;
     if (check(p, TK_STARSTAR)) {
-        /* **x = *( *x )  (deref สองชั้น) — แก้ความกำกวมกับยกกำลังด้วยตำแหน่ง prefix */
+        /* **x = *( *x )  (double deref); disambiguated from exponentiation by the prefix position */
         int line = p->cur.line;
         advance(p);
         Node *operand = parse_unary(p);
@@ -211,13 +212,13 @@ static Node *parse_unary(Parser *p) {
     return res;
 }
 
-/* cast := unary ('as' type)*  แปลงชนิดอย่างชัดเจน เช่น (x as i32), (i as f64)
- * ผูกแน่นกว่าตัวดำเนินการสองตัว: a as i32 * b = (a as i32) * b */
+/* cast := unary ('as' type)*  Explicit type conversion, e.g. (x as i32), (i as f64).
+ * Binds tighter than binary operators: a as i32 * b = (a as i32) * b */
 static Node *parse_cast(Parser *p) {
     Node *node = parse_unary(p);
     while (check(p, TK_AS)) {
         Node *c = node_new(ND_CAST, p->cur.line);
-        advance(p); /* กิน 'as' */
+        advance(p); /* consume 'as' */
         c->operand = node;
         c->type = parse_type(p, &c->ptr, &c->type_name, &c->sig);
         node = c;
@@ -225,7 +226,7 @@ static Node *parse_cast(Parser *p) {
     return node;
 }
 
-/* power := cast ('**' power)?  ยกกำลังเป็น right-associative (2**3**2 = 2**(3**2)) */
+/* power := cast ('**' power)?  Exponentiation is right-associative (2**3**2 = 2**(3**2)) */
 static Node *parse_power(Parser *p) {
     Node *left = parse_cast(p);
     if (check(p, TK_STARSTAR)) {
@@ -233,7 +234,7 @@ static Node *parse_power(Parser *p) {
         b->op = TK_STARSTAR;
         advance(p);
         b->lhs = left;
-        b->rhs = parse_power(p); /* เรียกตัวเองเพื่อความเป็น right-assoc */
+        b->rhs = parse_power(p); /* recurse on itself to get right-associativity */
         return b;
     }
     return left;
@@ -267,7 +268,7 @@ static Node *parse_term(Parser *p) {
     return left;
 }
 
-/* shift := term (('<<'|'>>') term)*  (เลื่อนบิต อยู่ระหว่างบวกลบกับเปรียบเทียบ) */
+/* shift := term (('<<'|'>>') term)*  (bit shifts sit between add/subtract and comparison) */
 static Node *parse_shift(Parser *p) {
     Node *left = parse_term(p);
     while (check(p, TK_SHL) || check(p, TK_SHR)) {
@@ -311,7 +312,7 @@ static Node *parse_equality(Parser *p) {
     return left;
 }
 
-/* bitand := equality ('&' equality)*  (bitwise AND — '&' ในตำแหน่ง infix) */
+/* bitand := equality ('&' equality)*  (bitwise AND '&' in infix position) */
 static Node *parse_bitand(Parser *p) {
     Node *left = parse_equality(p);
     while (check(p, TK_AMP)) {
@@ -325,7 +326,7 @@ static Node *parse_bitand(Parser *p) {
     return left;
 }
 
-/* bitxor := bitand ('^' bitand)*  (bitwise XOR — อยู่ระหว่าง & กับ |) */
+/* bitxor := bitand ('^' bitand)*  (bitwise XOR sits between & and |) */
 static Node *parse_bitxor(Parser *p) {
     Node *left = parse_bitand(p);
     while (check(p, TK_CARET)) {
@@ -384,7 +385,7 @@ static Node *parse_logic_or(Parser *p) {
 }
 
 /* assignment := logic_or ( ('='|'+='|'-='|'*='|'/=') assignment )?
- * การกำหนดค่าเป็น right-associative และตัวซ้ายต้องเป็น lvalue (ตรวจตอน codegen) */
+ * Assignment is right-associative and the left side must be an lvalue (checked during codegen) */
 static Node *parse_assignment(Parser *p) {
     Node *left = parse_logic_or(p);
     if (check(p, TK_ASSIGN) || check(p, TK_PLUS_ASSIGN) || check(p, TK_MINUS_ASSIGN) ||
@@ -399,7 +400,7 @@ static Node *parse_assignment(Parser *p) {
     return left;
 }
 
-/* จุดเริ่มของการแยกนิพจน์ */
+/* Entry point of expression parsing */
 static Node *parse_expr(Parser *p) {
     if (++p->depth > MAX_PARSE_DEPTH) {
         if (!p->had_error) error(p, "expression nested too deeply");
@@ -411,14 +412,14 @@ static Node *parse_expr(Parser *p) {
     return r;
 }
 
-/* ---------- การแยกวิเคราะห์ชนิดข้อมูล ---------- */
+/* ---------- Type parsing ---------- */
 
 /* type := ('*')* (type_keyword | IDENT)
- * '*' นำหน้านับเป็นความลึกของ pointer, IDENT = ชื่อ struct
- * เก็บความลึก pointer ลง *ptr และชื่อ struct ลง *type_name (NULL ถ้าไม่ใช่ struct) */
+ * Leading '*' counts as pointer depth; IDENT = struct name.
+ * Stores pointer depth into *ptr and the struct name into *type_name (NULL if not a struct) */
 static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out) {
     int depth = 0;
-    /* นับความลึก pointer: '*' = 1 ชั้น, '**' (token เดียว) = 2 ชั้น */
+    /* Count pointer depth: '*' = 1 level, '**' (a single token) = 2 levels */
     for (;;) {
         if (match(p, TK_STAR)) depth++;
         else if (match(p, TK_STARSTAR)) depth += 2;
@@ -427,11 +428,11 @@ static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out
     *ptr = depth;
     *type_name = NULL;
     if (sig_out) *sig_out = NULL;
-    /* ชนิด function pointer:  func ( T, T, ... ) -> R
-     * เก็บลายเซ็นเป็นโหนด ND_FUNC (items = พารามิเตอร์, type/ptr/type_name = ชนิดคืนค่า) */
+    /* Function pointer type:  func ( T, T, ... ) -> R
+     * The signature is stored as an ND_FUNC node (items = parameters, type/ptr/type_name = return type) */
     if (check(p, TK_FUNC)) {
         int line = p->cur.line;
-        advance(p); /* กิน 'func' */
+        advance(p); /* consume 'func' */
         Node *sig = node_new(ND_FUNC, line);
         expect(p, TK_LPAREN, "expected '(' in function-pointer type");
         if (!check(p, TK_RPAREN)) {
@@ -443,7 +444,7 @@ static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out
         }
         expect(p, TK_RPAREN, "expected ')' in function-pointer type");
         expect(p, TK_ARROW, "expected '->' before return type in function-pointer type");
-        sig->type = parse_type(p, &sig->ptr, &sig->type_name, NULL); /* ไม่รองรับคืนค่าเป็น func-ptr ซ้อน */
+        sig->type = parse_type(p, &sig->ptr, &sig->type_name, NULL); /* nested func-ptr return not supported */
         if (sig_out) *sig_out = sig;
         return TYPE_FUNC;
     }
@@ -452,7 +453,7 @@ static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out
         advance(p);
         return dt;
     }
-    if (check(p, TK_IDENT)) { /* ชื่อ struct */
+    if (check(p, TK_IDENT)) { /* struct name */
         *type_name = strdup(p->cur.lexeme);
         advance(p);
         return TYPE_STRUCT;
@@ -461,12 +462,12 @@ static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out
     return TYPE_UNKNOWN;
 }
 
-/* ---------- การแยกวิเคราะห์คำสั่ง ---------- */
+/* ---------- Statement parsing ---------- */
 
-/* var_decl := ('let'|'const') IDENT ':' type ['=' expr]  (ยังไม่กิน ';') */
+/* var_decl := ('let'|'const') IDENT ':' type ['=' expr]  (does not consume the ';') */
 static Node *parse_var_decl(Parser *p) {
     int is_const = check(p, TK_CONST);
-    advance(p); /* กิน let/const */
+    advance(p); /* consume let/const */
     Node *n = node_new(ND_VAR_DECL, p->cur.line);
     n->is_const = is_const;
     if (!check(p, TK_IDENT)) error(p, "expected variable name");
@@ -475,21 +476,21 @@ static Node *parse_var_decl(Parser *p) {
     expect(p, TK_COLON, "expected ':' after variable name");
     n->type = parse_type(p, &n->ptr, &n->type_name, &n->sig);
     if (match(p, TK_ASSIGN)) {
-        n->operand = parse_expr(p); /* ค่าเริ่มต้น */
+        n->operand = parse_expr(p); /* initial value */
     }
     return n;
 }
 
-/* แยก 'if' พร้อม elseif/else โดยแปลง elseif เป็น if ซ้อนในกิ่ง else */
+/* Parse 'if' with elseif/else, converting elseif into a nested if in the else branch */
 static Node *parse_if(Parser *p) {
     Node *n = node_new(ND_IF, p->cur.line);
-    advance(p); /* กิน if/elseif */
+    advance(p); /* consume if/elseif */
     expect(p, TK_LPAREN, "expected '(' after if");
     n->cond = parse_expr(p);
     expect(p, TK_RPAREN, "expected ')' after condition");
     n->then_branch = parse_block(p);
     if (check(p, TK_ELSEIF)) {
-        n->else_branch = parse_if(p); /* elseif = if ซ้อนในกิ่ง else */
+        n->else_branch = parse_if(p); /* elseif = nested if in the else branch */
     } else if (match(p, TK_ELSE)) {
         n->else_branch = parse_block(p);
     }
@@ -499,7 +500,7 @@ static Node *parse_if(Parser *p) {
 /* while := 'while' '(' expr ')' block */
 static Node *parse_while(Parser *p) {
     Node *n = node_new(ND_WHILE, p->cur.line);
-    advance(p); /* กิน while */
+    advance(p); /* consume while */
     expect(p, TK_LPAREN, "expected '(' after while");
     n->cond = parse_expr(p);
     expect(p, TK_RPAREN, "expected ')' after condition");
@@ -510,18 +511,18 @@ static Node *parse_while(Parser *p) {
 /* for := 'for' '(' [var_decl|expr] ';' [expr] ';' [expr] ')' block */
 static Node *parse_for(Parser *p) {
     Node *n = node_new(ND_FOR, p->cur.line);
-    advance(p); /* กิน for */
+    advance(p); /* consume for */
     expect(p, TK_LPAREN, "expected '(' after for");
-    /* ส่วนเริ่มต้น */
+    /* Init part */
     if (!check(p, TK_SEMICOLON)) {
         if (check(p, TK_LET) || check(p, TK_CONST)) n->init = parse_var_decl(p);
         else n->init = parse_expr(p);
     }
     expect(p, TK_SEMICOLON, "expected ';' after for-init");
-    /* เงื่อนไข */
+    /* Condition */
     if (!check(p, TK_SEMICOLON)) n->cond = parse_expr(p);
     expect(p, TK_SEMICOLON, "expected ';' after for-condition");
-    /* ส่วนเปลี่ยนค่า */
+    /* Step part */
     if (!check(p, TK_RPAREN)) n->step = parse_expr(p);
     expect(p, TK_RPAREN, "expected ')' after for-clauses");
     n->body = parse_block(p);
@@ -531,7 +532,7 @@ static Node *parse_for(Parser *p) {
 /* do_while := 'do' block 'while' '(' expr ')' ';' */
 static Node *parse_do(Parser *p) {
     Node *n = node_new(ND_DOWHILE, p->cur.line);
-    advance(p); /* กิน do */
+    advance(p); /* consume do */
     n->body = parse_block(p);
     expect(p, TK_WHILE, "expected 'while' after do block");
     expect(p, TK_LPAREN, "expected '(' after while");
@@ -542,10 +543,10 @@ static Node *parse_do(Parser *p) {
 }
 
 /* switch := 'switch' '(' expr ')' '{' ('case' expr ':' stmt* | 'default' ':' stmt*)* '}'
- * แต่ละ case เก็บเป็น ND_CASE (operand = ค่าที่เทียบ, NULL = default; items = คำสั่งใน case) */
+ * Each case is stored as ND_CASE (operand = value to compare, NULL = default; items = case statements) */
 static Node *parse_switch(Parser *p) {
     Node *n = node_new(ND_SWITCH, p->cur.line);
-    advance(p); /* กิน switch */
+    advance(p); /* consume switch */
     expect(p, TK_LPAREN, "expected '(' after switch");
     n->cond = parse_expr(p);
     expect(p, TK_RPAREN, "expected ')' after switch value");
@@ -562,7 +563,7 @@ static Node *parse_switch(Parser *p) {
             error(p, "expected 'case' or 'default' in switch");
             break;
         }
-        /* คำสั่งของ case นี้: อ่านจนกว่าจะเจอ case/default/} ถัดไป */
+        /* Statements of this case: read until the next case/default/} */
         while (!check(p, TK_CASE) && !check(p, TK_DEFAULT) &&
                !check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->had_error) {
             node_add_item(c, parse_stmt(p));
@@ -623,34 +624,34 @@ static Node *parse_stmt(Parser *p) {
     }
     if (check(p, TK_LBRACE)) return parse_block(p);
 
-    /* นอกเหนือจากนั้นถือเป็นคำสั่งนิพจน์ (assignment / call / ++/--) */
+    /* Anything else is treated as an expression statement (assignment / call / ++/--) */
     Node *e = node_new(ND_EXPR_STMT, p->cur.line);
     e->operand = parse_expr(p);
     expect(p, TK_SEMICOLON, "expected ';' after expression");
     return e;
 }
 
-/* ---------- การแยกวิเคราะห์ระดับบนสุด ---------- */
+/* ---------- Top-level parsing ---------- */
 
 /* func_def    := 'func' IDENT '(' params? ')' '->' type block
  * extern_func := 'extern' 'func' IDENT '(' params? ')' '->' type ';'
- * is_extern = 1 หมายถึงประกาศ foreign function (ไม่มี body ปิดท้ายด้วย ';') */
+ * is_extern = 1 means a foreign function declaration (no body, terminated by ';') */
 static Node *parse_func_decl(Parser *p, int is_extern) {
     Node *fn = node_new(ND_FUNC, p->cur.line);
     fn->is_extern = is_extern;
     expect(p, TK_FUNC, "expected 'func'");
-    if (!check(p, TK_IDENT) && !check(p, TK_FROM)) error(p, "expected function name"); /* อนุญาต 'from' (Rust idiom: String::from) */
+    if (!check(p, TK_IDENT) && !check(p, TK_FROM)) error(p, "expected function name"); /* allow 'from' (Rust idiom: String::from) */
     fn->name = strdup(p->cur.lexeme);
     advance(p);
     /* generic type parameters: func name<T, U>(...) */
     if (check(p, TK_LT)) {
-        advance(p); /* กิน < */
+        advance(p); /* consume < */
         do {
             if (!check(p, TK_IDENT)) { error(p, "expected generic type parameter name"); break; }
             int gi = fn->ngen < 4 ? fn->ngen : 3;
             if (fn->ngen < 4) fn->gen[fn->ngen++] = strdup(p->cur.lexeme);
             advance(p);
-            /* ผูก trait: <T: Display> — เก็บชื่อ trait ไว้ตรวจตอน instantiate */
+            /* Trait bound: <T: Display> stores the trait name to check at instantiation time */
             if (match(p, TK_COLON)) {
                 if (!check(p, TK_IDENT)) { error(p, "expected trait name after ':'"); break; }
                 fn->gen_bound[gi] = strdup(p->cur.lexeme);
@@ -668,19 +669,19 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
             advance(p);
             expect(p, TK_COLON, "expected ':' after parameter name");
             param->type = parse_type(p, &param->ptr, &param->type_name, &param->sig);
-            /* รองรับค่าปริยายในไวยากรณ์ แต่ subset นี้ยังไม่ใช้งาน (ข้ามทิ้ง) */
+            /* Default values are accepted by the grammar but unused in this subset (discarded) */
             if (match(p, TK_ASSIGN)) parse_expr(p);
             node_add_item(fn, param);
         } while (match(p, TK_COMMA));
     }
     expect(p, TK_RPAREN, "expected ')' after parameters");
     expect(p, TK_ARROW, "expected '->' before return type");
-    fn->type = parse_type(p, &fn->ptr, &fn->type_name, NULL); /* คืนค่าเป็น func-ptr ซ้อนไม่รองรับ */
+    fn->type = parse_type(p, &fn->ptr, &fn->type_name, NULL); /* nested func-ptr return not supported */
     if (is_extern) {
         expect(p, TK_SEMICOLON, "expected ';' after extern declaration");
-        fn->body = NULL; /* foreign function ไม่มี body */
+        fn->body = NULL; /* foreign function has no body */
     } else if (match(p, TK_SEMICOLON)) {
-        fn->body = NULL; /* signature อย่างเดียว (ใช้ใน trait: method ที่ไม่มี default) */
+        fn->body = NULL; /* signature only (used in traits: a method without a default) */
     } else {
         fn->body = parse_block(p);
     }
@@ -688,12 +689,12 @@ static Node *parse_func_decl(Parser *p, int is_extern) {
 }
 
 /* impl := 'impl' IDENT '{' func_def* '}'
- * method แต่ละตัวถูกติดป้าย ns = ชื่อ struct และ is_method = 1 แล้วเพิ่มเข้า program
- * (เก็บไว้ใน items ของโหนด ND_IMPL ชั่วคราว ให้ parse_program กระจายออก) */
+ * Each method is tagged with ns = struct name and is_method = 1, then added to the program
+ * (kept temporarily in the ND_IMPL node's items for parse_program to spread out) */
 static Node *parse_impl(Parser *p) {
-    Node *n = node_new(ND_PROGRAM, p->cur.line); /* ใช้เป็นภาชนะรวม method ชั่วคราว */
-    advance(p); /* กิน impl */
-    /* รูปแบบ:  impl Type { ... }   (inherent)
+    Node *n = node_new(ND_PROGRAM, p->cur.line); /* used as a temporary container for methods */
+    advance(p); /* consume impl */
+    /* Forms:  impl Type { ... }   (inherent)
      *         impl Trait for Type { ... }   (trait impl) */
     char *first = NULL, *trait = NULL, *sname = NULL;
     if (!check(p, TK_IDENT)) error(p, "expected type/trait name after impl");
@@ -708,12 +709,12 @@ static Node *parse_impl(Parser *p) {
     expect(p, TK_LBRACE, "expected '{' after impl type");
     while (check(p, TK_FUNC) && !p->had_error) {
         Node *m = parse_func_decl(p, 0);
-        m->ns = sname ? strdup(sname) : NULL; /* method/associated อยู่ใน namespace ของ type */
+        m->ns = sname ? strdup(sname) : NULL; /* method/associated fn lives in the type's namespace */
         m->is_method = 1;
         node_add_item(n, m);
     }
     expect(p, TK_RBRACE, "expected '}' to close impl block");
-    /* ถ้าเป็น trait impl ฝากเครื่องหมายไว้ให้ตัวตรวจ (type ใด impl trait ใด) */
+    /* If this is a trait impl, leave a marker for the checker (which type impls which trait) */
     if (trait && sname) {
         Node *mark = node_new(ND_TRAIT_IMPL, p->cur.line);
         mark->name = strdup(trait); mark->type_name = strdup(sname);
@@ -724,15 +725,16 @@ static Node *parse_impl(Parser *p) {
 }
 
 /* trait := 'trait' IDENT '{' (func_sig ';')* '}'
- * เก็บแค่ signature (ไม่มี body) ไว้ใน items ของ ND_TRAIT ใช้ตรวจว่า type หนึ่งทำครบไหม */
+ * Stores only signatures (no bodies) in the ND_TRAIT node's items,
+ * used to verify a type implements everything */
 static Node *parse_trait(Parser *p) {
     Node *n = node_new(ND_TRAIT, p->cur.line);
-    advance(p); /* กิน trait */
+    advance(p); /* consume trait */
     if (!check(p, TK_IDENT)) error(p, "expected trait name");
     else { n->name = strdup(p->cur.lexeme); advance(p); }
     expect(p, TK_LBRACE, "expected '{' after trait name");
     while (check(p, TK_FUNC) && !p->had_error) {
-        /* method ใน trait: ปิดด้วย ';' = signature ล้วน, หรือมี { } = default method */
+        /* Method in a trait: ends with ';' = pure signature, or has { } = default method */
         Node *sig = parse_func_decl(p, 0);
         node_add_item(n, sig);
     }
@@ -741,16 +743,16 @@ static Node *parse_trait(Parser *p) {
 }
 
 /* import := 'import' '{' IDENT (',' IDENT)* '}' 'from' STRING ';'
- * เก็บ path ไว้ใน str_val และรายชื่อที่นำเข้าไว้ใน items (เป็นโหนด ND_IDENT) */
+ * Stores the path in str_val and the imported names in items (as ND_IDENT nodes) */
 static Node *parse_import(Parser *p) {
     Node *n = node_new(ND_IMPORT, p->cur.line);
-    advance(p); /* กิน import */
+    advance(p); /* consume import */
     if (check(p, TK_IDENT)) {
-        /* รูปแบบ alias: import lib from "path"  -> ทั้งโมดูลเป็น namespace = lib (เก็บใน n->name) */
+        /* Alias form: import lib from "path"  -> the whole module gets namespace = lib (stored in n->name) */
         n->name = strdup(p->cur.lexeme);
         advance(p);
     } else {
-        /* รูปแบบ braced: import { a, b } from "path" */
+        /* Braced form: import { a, b } from "path" */
         expect(p, TK_LBRACE, "expected '{' or an alias name after import");
         if (!check(p, TK_RBRACE)) {
             do {
@@ -771,10 +773,10 @@ static Node *parse_import(Parser *p) {
 }
 
 /* struct_decl := 'struct' IDENT '{' (IDENT ':' type (';'|',')?)* '}'
- * ฟิลด์แต่ละตัวเก็บเป็นโหนด ND_PARAM (มี name, type, ptr, type_name) */
+ * Each field is stored as an ND_PARAM node (with name, type, ptr, type_name) */
 static Node *parse_struct(Parser *p) {
     Node *n = node_new(ND_STRUCT_DECL, p->cur.line);
-    advance(p); /* กิน struct */
+    advance(p); /* consume struct */
     if (!check(p, TK_IDENT)) error(p, "expected struct name");
     n->name = strdup(p->cur.lexeme);
     advance(p);
@@ -787,7 +789,7 @@ static Node *parse_struct(Parser *p) {
         expect(p, TK_COLON, "expected ':' after field name");
         f->type = parse_type(p, &f->ptr, &f->type_name, &f->sig);
         node_add_item(n, f);
-        /* ตัวคั่นฟิลด์: ';' หรือ ',' (ยืดหยุ่น) */
+        /* Field separator: ';' or ',' (flexible) */
         if (!match(p, TK_SEMICOLON)) match(p, TK_COMMA);
     }
     expect(p, TK_RBRACE, "expected '}' to close struct");
@@ -802,7 +804,7 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
     p.lx = &lx;
     p.had_error = 0;
     p.depth = 0;
-    advance(&p); /* โหลด token แรก */
+    advance(&p); /* load the first token */
 
     Node *prog = node_new(ND_PROGRAM, 1);
     while (!check(&p, TK_EOF) && !p.had_error) {
@@ -811,22 +813,22 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
         } else if (check(&p, TK_FUNC)) {
             node_add_item(prog, parse_func_decl(&p, 0));
         } else if (check(&p, TK_EXPORT)) {
-            advance(&p); /* กิน export แล้วต่อด้วย func */
+            advance(&p); /* consume export, then expect func */
             Node *fn = parse_func_decl(&p, 0);
-            fn->is_export = 1; /* ส่งออกให้ C เรียกได้ (ชื่อสัญลักษณ์ดิบ) */
+            fn->is_export = 1; /* exported so C can call it (raw symbol name) */
             node_add_item(prog, fn);
         } else if (check(&p, TK_IMPL)) {
-            /* บล็อก impl: กระจาย method (+ เครื่องหมาย trait impl) ทุกตัวเข้า program */
+            /* impl block: spread every method (+ the trait impl marker) into the program */
             Node *blk = parse_impl(&p);
             for (int i = 0; i < blk->nitems; i++) node_add_item(prog, blk->items[i]);
         } else if (check(&p, TK_TRAIT)) {
-            node_add_item(prog, parse_trait(&p));   /* นิยาม trait (เก็บ signature ไว้ตรวจ) */
+            node_add_item(prog, parse_trait(&p));   /* trait definition (signatures kept for checking) */
         } else if (check(&p, TK_EXTERN)) {
-            advance(&p); /* กิน extern แล้วต่อด้วย func */
+            advance(&p); /* consume extern, then expect func */
             node_add_item(prog, parse_func_decl(&p, 1));
         } else if (check(&p, TK_STRUCT)) {
             node_add_item(prog, parse_struct(&p));
-            match(&p, TK_SEMICOLON); /* ';' ปิดท้ายเป็นทางเลือก */
+            match(&p, TK_SEMICOLON); /* trailing ';' is optional */
         } else if (check(&p, TK_LET) || check(&p, TK_CONST)) {
             Node *n = parse_var_decl(&p);
             expect(&p, TK_SEMICOLON, "expected ';' after global declaration");

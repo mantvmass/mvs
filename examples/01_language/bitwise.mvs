@@ -1,8 +1,8 @@
 // ============================================================
-//  bitwise — ตัวดำเนินการระดับบิต & | ^ ~ << >>  (และ bitmask/flags)
+//  bitwise: bit-level operators & | ^ ~ << >>  (plus bitmask/flags)
 //  build:  mvs.exe examples/01_language/bitwise.mvs
 //  run:    examples\01_language\bitwise.exe
-//  หมายเหตุ: ^ = XOR, ยกกำลังใช้ ** (เช่น 2 ** 8)
+//  note: ^ = XOR; exponentiation uses ** (e.g. 2 ** 8)
 // ============================================================
 import { io } from "std";
 
@@ -12,14 +12,14 @@ func main() -> i8 {
     io.out("12 ^ 10 = {}", 12 ^ 10);     // 6  (XOR)
     io.out("1 << 4  = {}", 1 << 4);      // 16
     io.out("256 >> 2 = {}", 256 >> 2);   // 64
-    io.out("~(u8)0 = {}", ~(0 as u8));   // 255 (ตัดตามความกว้างชนิด)
+    io.out("~(u8)0 = {}", ~(0 as u8));   // 255 (truncated to the type width)
 
-    // ใช้เป็น flags
+    // used as flags
     let READ: u32 = 1; let WRITE: u32 = 2; let EXEC: u32 = 4;
     let perm: u32 = READ | WRITE;        // 3
     if ((perm & WRITE) != 0) { io.out("has WRITE"); }
     if ((perm & EXEC) == 0)  { io.out("no EXEC"); }
-    perm = perm & ~WRITE;                // เคลียร์ WRITE -> 1
+    perm = perm & ~WRITE;                // clear WRITE -> 1
     io.out("after clear WRITE = {}", perm);
     return 0;
 }

@@ -1,5 +1,5 @@
 // ============================================================
-//  recursion — ฟังก์ชันเรียกตัวเอง / เรียกสลับกัน
+//  recursion: functions calling themselves / each other
 //  build:  mvs.exe examples/02_functions/recursion.mvs
 //  run:    examples\02_functions\recursion.exe
 // ============================================================
@@ -10,7 +10,7 @@ func fib(n: i32) -> i64 {
     return fib(n - 1) + fib(n - 2);
 }
 
-// recursion สลับกัน (mutual recursion)
+// mutual recursion
 func is_even(n: i32) -> bool { if (n == 0) { return true; } return is_odd(n - 1); }
 func is_odd(n: i32)  -> bool { if (n == 0) { return false; } return is_even(n - 1); }
 

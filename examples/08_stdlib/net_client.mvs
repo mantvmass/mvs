@@ -1,7 +1,7 @@
 // ============================================================
-//  net_client — TCP client แบบ Rust (struct + method chaining, ผ่าน Winsock)
+//  net_client: Rust-style TCP client (struct + method chaining, via Winsock)
 //  build:  mvs.exe examples/08_stdlib/net_client.mvs
-//  run:    examples\08_stdlib\net_client.exe   (ต้องมีเซิร์ฟเวอร์ปลายทาง)
+//  run:    examples\08_stdlib\net_client.exe   (requires a reachable server)
 // ============================================================
 import { io, net } from "std";
 

@@ -2,21 +2,21 @@
 
 Guidance for Claude Code (and any AI session) working in this project.
 
-> **Read first:** [RULES.md](RULES.md) — the rules you must not break.
-> [GUIDE.md](GUIDE.md) — the language reference, internals, project status, and roadmap.
+> **Read first:** [RULES.md](RULES.md), the rules you must not break.
+> [GUIDE.md](GUIDE.md), the language reference, internals, project status, and roadmap.
 
 ## What this project is
 
 A compiler for **MVS**, a low-level language (C-level, but easier to read). Written in **plain C**,
-emitting **x86-64 Windows (NASM)** assembly directly. **No LLVM, no flex/bison** — the lexer and
+emitting **x86-64 Windows (NASM)** assembly directly. **No LLVM, no flex/bison**: the lexer and
 parser are hand-written.
 
 ## The most important constraints (full detail in RULES.md)
 
-1. **No LLVM / flex / bison** — generate assembly yourself; hand-write the lexer/parser.
-2. **Source comments in detailed Thai**, but **program output and error messages in English.**
+1. **No LLVM / flex / bison**: generate assembly yourself; hand-write the lexer/parser.
+2. **Everything is English only**: source comments, program output, error messages, and docs.
 3. Available toolchain: **clang + nasm only** (no full GNU gcc/ld/flex/bison/make).
-4. The structure must support multiple architectures — the front end must not bind to x86.
+4. The structure must support multiple architectures: the front end must not bind to x86.
 
 ## Main commands
 
@@ -89,10 +89,10 @@ a real array type · io.out as a library (variadic + reflection) · ARM64/Linux 
 
 ## Project-specific cautions (full list in RULES.md)
 
-- **Freestanding by default** (RULES §0): the language core must not depend on the OS/CRT — everything
+- **Freestanding by default** (RULES §0): the language core must not depend on the OS/CRT. Everything
   touching the OS lives in `std/*.mvs` (opt-in).
 - C interop: `export func` = raw symbol name + `global`; `-c` produces a `.obj`; `--nostd` = freestanding obj.
-- method: `ns` = struct name (label), `mod` = module (resolves internal calls) — don't confuse them (RULES §5.6).
+- method: `ns` = struct name (label), `mod` = module (resolves internal calls). Don't confuse them (RULES §5.6).
 - linking needs `-llegacy_stdio_definitions -lws2_32`; extern/export names must not clash with NASM reserved
   words (`abs`, etc.).
 - floats are stored as a bit-pattern in rax, entering xmm only for math; `io.out` is a compiler intrinsic.
@@ -104,5 +104,5 @@ a real array type · io.out as a library (variadic + reflection) · ARM64/Linux 
 | [README.md](README.md) | overview · install · how to compile · usage |
 | [GUIDE.md](GUIDE.md) | language reference · internals · real assembly · status · roadmap |
 | [RULES.md](RULES.md) | rules · freestanding philosophy · ABI · developer cautions |
-| [CLAUDE.md](CLAUDE.md) | this file — navigation for AI/developers · commands · where to edit |
+| [CLAUDE.md](CLAUDE.md) | this file: navigation for AI/developers · commands · where to edit |
 | [examples/README.md](examples/README.md) | the full list of example programs |
