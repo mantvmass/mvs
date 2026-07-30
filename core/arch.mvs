@@ -13,6 +13,12 @@
  * touch a register the surrounding code may hold. Returning a value works
  * because MVS returns in rax (x86-64) / x0 (AArch64), which is exactly what the
  * instructions below leave there.
+ *
+ * CLOBBER RULE for anything added here: an instruction may freely write the
+ * caller-saved scratch registers (x86-64: rax, rcx, rdx, r8-r11; AArch64:
+ * x0-x17), but anything it writes that the ABI says a function must preserve
+ * (rbx, rbp, rdi, rsi, r12-r15; x19-x28) has to be saved and restored inside
+ * the wrapper, as sync_instructions does for cpuid's rbx.
  */
 
 // --- spin-wait / idle hints ---
@@ -49,9 +55,14 @@ func fence_store() -> void { asm("sfence"); }
 @compile(target_arch = "aarch64")
 func fence_store() -> void { asm("dmb ishst"); }
 
-// flush the instruction pipeline (after patching code, changing system state)
+// flush the instruction pipeline (after patching code, changing system state).
+// cpuid is the classic x86 serializing instruction, but it writes rbx, which
+// both ABIs require a function to preserve, so the wrapper saves it. Everything
+// else it touches (rax/rcx/rdx) is caller-saved scratch.
 @compile(target_arch = "x86_64")
-func sync_instructions() -> void { asm("cpuid"); }
+func sync_instructions() -> void {
+    asm("push rbx", "xor eax, eax", "cpuid", "pop rbx");
+}
 @compile(target_arch = "aarch64")
 func sync_instructions() -> void { asm("isb"); }
 

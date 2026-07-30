@@ -1,0 +1,9 @@
+a[i] = 20
+a[i + 2] = 40
+a[pick()] = 30
+a[a[0] / 10] = 20
+a[u] = 40 a[3] = 40
+after writes = 30
+global = 5
+field = 88
+pointer = 30

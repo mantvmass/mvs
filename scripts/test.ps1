@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 #  MVS compiler test suite
 #
 #  Usage:
@@ -45,6 +45,7 @@ $runPass = @(
     "examples/01_language/compile_attr",
     "examples/01_language/hexbin",
     "examples/01_language/enums",
+    "examples/01_language/bounds",
     "examples/02_functions/generics",
     "examples/02_functions/overload",
     "examples/02_functions/recursion",
@@ -238,6 +239,7 @@ $elfTests = @(
     "examples/01_language/compile_attr",
     "examples/01_language/hexbin",
     "examples/01_language/enums",
+    "examples/01_language/bounds",
     "examples/02_functions/defaults",
     "examples/03_structs/methods",
     "examples/03_structs/blob_fields",

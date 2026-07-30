@@ -1,0 +1,43 @@
+// Runtime bounds checking: every NON-constant index into a [T; N] is verified
+// before the access. In-range code behaves exactly as before; an out-of-range
+// index traps (ud2 / brk) instead of reading or writing past the array.
+// Compile with --no-check to trust the indices C-style.
+import { io } from "std";
+
+struct Grid { cells: [i64; 4]; tag: i64; }
+
+let table: [i64; 5] = [1, 2, 3, 4, 5];
+
+func pick() -> i64 { return 2; }
+
+func main() -> i8 {
+    let a: [i64; 4] = [10, 20, 30, 40];
+
+    // every index shape is checked: variable, expression, call, nested
+    let i: i64 = 1;
+    io.out("a[i] = {}", a[i]);
+    io.out("a[i + 2] = {}", a[i + 2]);
+    io.out("a[pick()] = {}", a[pick()]);
+    io.out("a[a[0] / 10] = {}", a[a[0] / 10]);
+
+    // unsigned indices and the last valid element
+    let u: usize = 3;
+    io.out("a[u] = {} a[3] = {}", a[u], a[3]);
+
+    // writes and compound assignment go through the same check
+    a[i] = 25;
+    a[i] += 5;
+    io.out("after writes = {}", a[i]);
+
+    // globals and struct fields too
+    let k: i64 = 4;
+    io.out("global = {}", table[k]);
+    let g: Grid = Grid { cells: [7, 8, 9, 10], tag: 0 };
+    g.cells[i] = 88;
+    io.out("field = {}", g.cells[i]);
+
+    // a pointer carries no length, so p[i] is deliberately NOT checked
+    let p: *i64 = a;
+    io.out("pointer = {}", p[2]);
+    return 0;
+}
