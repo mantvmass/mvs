@@ -2,7 +2,7 @@
 
 Read this before touching the code. Breaking these rules tends to produce silently
 wrong output rather than a clean failure. For language reference and current status see
-[GUIDE.md](GUIDE.md).
+[guide.md](guide.md).
 
 A reminder on language: everything in this project is **English only**. Source comments
 (detailed, explaining what/why/how), everything the program prints (stdout and error

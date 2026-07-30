@@ -2,20 +2,21 @@
 
 Guidance for Claude Code (and any AI session) working in this project.
 
-> **Read first:** [RULES.md](RULES.md), the rules you must not break.
-> [GUIDE.md](GUIDE.md), the language reference, internals, project status, and roadmap.
+> **Read first:** [docs/rules.md](docs/rules.md), the rules you must not break.
+> [docs/guide.md](docs/guide.md), the language reference, internals, project status, and roadmap.
 
 ## What this project is
 
 A compiler for **MVS**, a low-level language (C-level, but easier to read). Written in **plain C**,
-emitting **x86-64 Windows (NASM)** assembly directly. **No LLVM, no flex/bison**: the lexer and
-parser are hand-written.
+emitting NASM assembly directly for two targets: **x86-64 Windows (win64)** and **x86-64
+Linux/ELF (SysV, `--target elf64`)**. **No LLVM, no flex/bison**: the lexer and parser are
+hand-written.
 
-## The most important constraints (full detail in RULES.md)
+## The most important constraints (full detail in docs/rules.md)
 
 1. **No LLVM / flex / bison**: generate assembly yourself; hand-write the lexer/parser.
 2. **Everything is English only**: source comments, program output, error messages, and docs.
-3. Available toolchain: **clang + nasm only** (no full GNU gcc/ld/flex/bison/make).
+3. Available toolchain: **clang + nasm** on Windows (gcc + nasm on Linux/CI); never flex/bison/LLVM.
 4. The structure must support multiple architectures: the front end must not bind to x86.
 
 ## Main commands
@@ -80,7 +81,7 @@ make test
    `EXAMPLES` list, and regenerate goldens with `tests/run.ps1 -Update`. New error → add a
    `tests/compile_fail/*.mvs` with a `//~ ERROR:` header.
 
-## Feature status (details in GUIDE.md)
+## Feature status (details in docs/guide.md)
 
 **Done:** struct + method/impl + chaining · pointer · real int width · f32 (real 4 bytes)/f64 (SSE) ·
 switch/do-while · Rust-style io.out (`{}`/`{:x}` + struct printing + unlimited args) · import + extern ·
@@ -97,16 +98,19 @@ caret + help, missing-return check, unused/unreachable warnings) · real `[T; N]
 full 128-bit `i128`/`u128` arithmetic (software divmod helpers + decimal io.out) ·
 `dyn Trait` trait objects (fat pointer + vtable dispatch) · multi-bound generics
 (`<T: A + B>`, `where` clauses) · ELF/SysV backend (`--target elf64`, run-tested in WSL;
-freestanding ELF links with GNU ld for GRUB OS dev).
+freestanding ELF links with GNU ld for GRUB OS dev) · impl-on-primitive
+(`impl Display for i64`) · variadic `...dyn Trait` parameters (packed dyn slices) ·
+`fmt.outf` = io.out as a pure-MVS library · native Linux build + Linux CI job.
 
-**Remaining:** io.out as a library (variadic + reflection) · ARM64 backend.
+**Remaining:** see [ROADMAP.md](ROADMAP.md) (ARM64 backend next, then conditional
+compilation and the `core` library).
 
-## Project-specific cautions (full list in RULES.md)
+## Project-specific cautions (full list in docs/rules.md)
 
-- **Freestanding by default** (RULES §0): the language core must not depend on the OS/CRT. Everything
+- **Freestanding by default** (docs/rules.md §0): the language core must not depend on the OS/CRT. Everything
   touching the OS lives in `std/*.mvs` (opt-in).
 - C interop: `export func` = raw symbol name + `global`; `-c` produces a `.obj`; `--nostd` = freestanding obj.
-- method: `ns` = struct name (label), `mod` = module (resolves internal calls). Don't confuse them (RULES §5.6).
+- method: `ns` = struct name (label), `mod` = module (resolves internal calls). Don't confuse them (docs/rules.md §5.6).
 - linking needs `-llegacy_stdio_definitions -lws2_32`; extern/export names must not clash with NASM reserved
   words (`abs`, etc.).
 - floats are stored as a bit-pattern in rax, entering xmm only for math; `io.out` is a compiler intrinsic.
@@ -116,7 +120,8 @@ freestanding ELF links with GNU ld for GRUB OS dev).
 | File | Contents |
 |------|----------|
 | [README.md](README.md) | overview · install · how to compile · usage |
-| [GUIDE.md](GUIDE.md) | language reference · internals · real assembly · status · roadmap |
-| [RULES.md](RULES.md) | rules · freestanding philosophy · ABI · developer cautions |
+| [docs/guide.md](docs/guide.md) | language reference · internals · real assembly · status · roadmap |
+| [docs/rules.md](docs/rules.md) | rules · freestanding philosophy · ABI · developer cautions |
+| [ROADMAP.md](ROADMAP.md) | planned platforms · conditional compilation sketch · core library plan |
 | [CLAUDE.md](CLAUDE.md) | this file: navigation for AI/developers · commands · where to edit |
-| [examples/README.md](examples/README.md) | the full list of example programs |
+| [docs/examples.md](docs/examples.md) | the full list of example programs |

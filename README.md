@@ -1,90 +1,61 @@
-# MVS Compiler
+# MVS
 
-A compiler for **MVS**, a small low-level language at roughly C's level but with a friendlier,
-Rust-flavored syntax. It's written in plain C, **no LLVM, no flex, no bison**, and emits
-**x86-64 (Windows) assembly** directly, which is then assembled with `nasm` and linked with `clang`.
+A compiler for **MVS**, a small low-level language at roughly C's level with a
+friendlier, Rust-flavored syntax. Written in plain C, **no LLVM, no flex, no
+bison**: the lexer, parser, type checker, and code generator are all hand-written,
+and the output is real x86-64 assembly you can read.
 
-> **For education.** This project exists to show how a real compiler works end to end: a
-> hand-written lexer and parser, a small type system, and a code generator that produces actual
-> x86-64 assembly you can read. It is a learning subset, not a production toolchain.
+> **For education.** This project exists to show how a real compiler works end to
+> end. It is a learning subset, not a production toolchain.
 
 ```
-file.mvs ──> lexer ──> parser ──> AST ──> codegen ──> .asm ──> nasm ──> .obj ──> clang ──> .exe
+file.mvs -> lexer -> parser -> typecheck -> codegen -> .asm -> nasm -> .obj -> link -> run
 ```
 
-## What you need
+## Quick start
 
-- **clang**: builds the compiler and also acts as the linker
-- **nasm**: assembles the generated `.asm` into a `.obj`
+Needs `clang` and `nasm` on PATH (Windows), or `gcc` and `nasm` (Linux).
 
 ```powershell
-clang --version
-nasm --version
+make                          # build the compiler (mvs.exe)
+.\mvs.exe examples\demo.mvs   # compile an MVS program to .exe
+.\examples\demo.exe           # run it
+make test                     # run the full test suite
 ```
 
-## Building the compiler
+On Linux, or targeting Linux from Windows:
 
-`make` builds `mvs.exe`. If you don't have `make`, run the compile command directly. It's a single
-clang invocation over the sources:
-
-```powershell
-make
+```sh
+./mvs examples/demo.mvs --target elf64   # SysV ABI, ELF64 object
+gcc examples/demo.o -o demo -no-pie -lm && ./demo
 ```
 
-```powershell
-# equivalent to (this is what the Makefile runs):
-clang -Wall -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc `
-      src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/codegen.c `
-      src/arch/common.c src/arch/x86_64/win.c -o mvs.exe
-```
+## Highlights
 
-## Compiling and running an MVS program
+Structs + methods + traits (static AND dynamic dispatch via `dyn Trait`) · generics
+with bounds and `where` clauses · function overloading · real `[T; N]` arrays ·
+full 128-bit integers · function pointers · heap `String` · modules + a small std
+(`io`/`fs`/`net`/`string`/`fmt`) · C interop in both directions · Rust-style
+compiler diagnostics · freestanding `--nostd` mode for OS/bare-metal work · two
+backends (x86-64 win64 and x86-64 SysV/ELF) sharing one architecture-independent core.
 
-```powershell
-.\mvs.exe examples\demo.mvs     # produces examples\demo.exe (mvs.exe calls nasm + clang for you)
-.\examples\demo.exe             # run it
-```
+## Documentation
 
-`mvs.exe` checks for `clang` and `nasm` on your PATH and tells you which versions it uses.
+| Where | What |
+|-------|------|
+| [docs/guide.md](docs/guide.md) | the language reference, memory model, real emitted assembly, internals |
+| [docs/rules.md](docs/rules.md) | design rules, ABI details, and gotchas for working on the compiler |
+| [docs/examples.md](docs/examples.md) | the full list of example programs (in [examples/](examples/)) |
+| [ROADMAP.md](ROADMAP.md) | planned platforms, conditional compilation, the core library plan |
+| [CLAUDE.md](CLAUDE.md) | working notes for AI assistants and contributors |
 
-Useful flags:
+## License
 
-| Flag | Meaning |
-|------|---------|
-| `-o <file>` | set the output filename |
-| `-S` | emit only the `.asm` and stop (handy for reading the generated assembly) |
-| `-c` / `--emit-obj` | emit a `.obj` and stop (to link against C) |
-| `--nostd` | freestanding: no std/CRT/OS dependency (emits a `.obj`) |
-| `--target elf64` | Linux/ELF (SysV ABI): emits a `.o` to link on Linux (`gcc file.o`) |
-| `--keep` | keep intermediate files (`.asm`, `.obj`) |
+Dual-licensed under either of
 
-## Where to look next
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
 
-- [GUIDE.md](GUIDE.md): the language reference, the memory model, the real assembly the compiler
-  emits, and the project's status and roadmap.
-- [RULES.md](RULES.md): the design rules and gotchas for working on the compiler itself.
-- [examples/](examples/): sample programs grouped by topic (`01_language` … `08_stdlib`); each file
-  has a header with its build/run command.
+at your option.
 
-## Project layout
-
-```
-src/
-  token.h            token kinds
-  lexer.{h,c}        hand-written tokenizer
-  ast.{h,c}          AST (one Node tagged by kind) + helpers
-  parser.{h,c}       recursive-descent parser
-  module.{h,c}       module system (imports across files + std)
-  codegen.{h,c}      codegen driver (picks a backend by architecture)
-  arch/
-    common.{h,c}     arch-independent backend: types, struct layout, symtab, tree-shaking
-    x86_64/win.{h,c} x86-64 Windows backend (emits NASM/win64)
-  main.c             CLI driving the whole pipeline
-std/                 standard library written in MVS (io, string, fmt, fs, net)
-examples/            sample programs
-Makefile             build script
-```
-
-The front end (lexer/parser/AST) is architecture-independent; the back end picks a target through a
-single interface, so a future ARM64 or Linux target is a new file under `src/arch/` rather than a
-rewrite.
+Copyright (c) 2026 Phumin Maliwan

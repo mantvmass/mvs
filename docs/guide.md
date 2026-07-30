@@ -3,7 +3,7 @@
 This is the deep reference for **MVS**: syntax, the memory model, the calling convention, and
 the actual assembly the compiler emits. The back half covers project status, roadmap, and the
 gotchas worth knowing before you change anything. For the rules you must not break, see
-[RULES.md](RULES.md). To get started, see [README.md](README.md).
+[rules.md](rules.md). To get started, see [../README.md](../README.md).
 
 Contents:
 1. What MVS is
@@ -443,9 +443,12 @@ io.out("{}", p);                  // p is a struct -> Point { x: 3, y: 4 }  (lik
 print format per argument. It needs `import { io }`, and it handles structs (expanded to
 `Name { field: value, ... }`, including nested) and any number of arguments.
 
-Why an intrinsic and not a function in io.mvs? The `{}` form takes an unbounded number and mix of argument
-types, which needs either a macro (compile-time expansion) or runtime type info, and neither exists yet. The
-library alternative is the `Display` trait + `fmt.println(x)` (static dispatch) for types you `impl` yourself.
+Why keep it an intrinsic at all? Printing an arbitrary STRUCT with `{}` uses compile-time
+reflection (the compiler expands the fields), which a library cannot express. For everything
+else the library route exists: `fmt.outf(f, args...)` is io.out written in pure MVS. It takes a
+variadic `...dyn Display` slice, walks the `{}` placeholders at run time, and dispatches each
+value through its `Display` impl (every primitive ships one; user structs join by writing
+`impl Display for T`). See `examples/08_stdlib/lib_out.mvs`.
 
 ### 4.11 Module system: three forms (the path decides)
 
@@ -495,8 +498,8 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `io` | `io.out(fmt, ...)`, `io.print(s)`, `io.in(prompt) -> str` |
 | `fs` | `fs.write(path, content)`, `fs.read(path) -> str` |
 | `net` | `net.TcpClient(ip, port)`, `net.TcpServer(ip, port)` + `accept`/`send`/`recv`/`close` |
-| `string` | `String` (heap string): `String::from(s)`, `String::from_int(n)`, `.push_str(s)` (chain), `.as_str() -> str`, `.len()`, `.drop()` |
-| `fmt` | trait `Display { fmt(self) -> String }` + `fmt.println(x)` / `fmt.print(x)` (library, static dispatch) |
+| `string` | `String` (heap string): `String::from(s)`, `from_int`/`from_uint`/`from_float`/`from_char`, `.push_str(s)` (chain), `.as_str() -> str`, `.len()`, `.drop()` |
+| `fmt` | trait `Display { fmt(self) -> String }` (impl'd for every primitive) + `fmt.println(x)` / `fmt.print(x)` (static dispatch) + `fmt.outf(f, args...)`, a pure-MVS io.out with run-time `{}` handling |
 
 ```rust
 import { io, string } from "std";
@@ -1056,17 +1059,16 @@ Verified by running, not just compiling: the net server echoes real HTTP from cu
 
 ### Remaining
 
-- **`io.out` as a library** instead of an intrinsic. This needs three things, in order:
-  1. trait objects / `dyn Trait` (a fat pointer `{data, vtable}`), with a per-(type, trait) vtable and dynamic
-     dispatch through it.
-  2. variadic parameters on the receiving side: gather varargs into a slice `{ptr, len}` and pass one argument
-     (avoiding C's va_list).
-  3. combine: `func out(fmt: str, args: ...dyn Display)` in io.mvs, plus `impl Display` for the primitives (which
-     in turn needs impl-on-primitive support; today `impl` only binds to structs).
-  The existing library path is `fmt.println(x)` / `fmt.print(x)` for single values you `impl Display` on, so
-  `io.out` stays an intrinsic for now (like Rust's `println!`).
+The forward-looking plan lives in [../ROADMAP.md](../ROADMAP.md). Next up:
+
 - **ARM64 backend** (`src/arch/arm64/<os>.c` + `ARCH_ARM64`); selectable object format / entry point for flat
-  binaries / multiboot kernel images.
+  binaries / multiboot kernel images. Verified through CI (cross toolchain + qemu-user).
+- Conditional compilation (`@compile(target_os/arch = ...)`) and the `core` library (see the roadmap).
+
+Note on io.out: the library path is COMPLETE. `fmt.outf(f, args...)` is a pure-MVS formatted
+print built on impl-on-primitive Display impls, variadic `...dyn Display` slices, and run-time
+dispatch. `io.out` itself remains an intrinsic because compile-time struct reflection (printing
+any struct without an impl) cannot be expressed as a library.
 
 ### Known minor limits (low risk, not yet fixed)
 

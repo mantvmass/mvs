@@ -91,3 +91,4 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `floats.mvs` | floating point + C math (`sqrt`) |
 | `files.mvs` | `fs.write`/`fs.read` + `io.in` |
 | `net_client.mvs` / `net_server.mvs` | TCP over Winsock (`net.TcpClient`/`TcpServer`) |
+| `lib_out.mvs` | `fmt.outf`: io.out as a pure-MVS library (variadic `...dyn Display`, impl-on-primitive) |
