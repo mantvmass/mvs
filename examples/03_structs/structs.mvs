@@ -20,5 +20,15 @@ func main() -> i8 {
 
     // a struct returned from a function can be used directly as an rvalue
     io.out("makePoint(1,2).x = {}", makePoint(1, 2).x);   // 1
+
+    // a struct LITERAL is an rvalue too: as an argument, with a trailing comma,
+    // and as the base of a field access
+    io.out("literal arg = {}", dist2(Point { x: 3, y: 4, }));   // 25
+    io.out("literal field = {}", Point { x: 8, y: 9 }.y);       // 9
     return 0;
+}
+
+// takes a struct by value, so a literal at the call site must materialize
+func dist2(p: Point) -> i64 {
+    return p.x * p.x + p.y * p.y;
 }

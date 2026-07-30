@@ -187,6 +187,18 @@ static void gen_addr(Gen *g, Node *n) {
             fprintf(g->out, "    add rax, rcx\n");
             break;
         }
+        case ND_STRUCT_LIT:
+            /* a literal used where an address is needed (P { .. }.field): build it
+             * in its reserved temp, then hand back that temp's address */
+            if (n->int_val) {
+                fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val);
+                gen_store_struct(g, n);
+                fprintf(g->out, "    lea rax, [rbp - %lld]\n", n->int_val);
+            } else {
+                fprintf(stderr, "codegen error: struct literal has no destination\n");
+                g->had_error = 1;
+            }
+            break;
         case ND_UNARY:
             if (n->op == TK_STAR) { gen_expr(g, n->operand); break; } /* *p: the pointer's value is the address */
             fprintf(stderr, "codegen error: expression is not an lvalue\n");

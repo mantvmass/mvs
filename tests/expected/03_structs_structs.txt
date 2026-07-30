@@ -2,3 +2,5 @@ p = (3, 4)
 after update: (10, 9)
 q = Point { x: 7, y: 8 }
 makePoint(1,2).x = 1
+literal arg = 25
+literal field = 9
