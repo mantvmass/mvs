@@ -1,0 +1,89 @@
+// unit tests for the core package (hosted here; the same code runs --nostd,
+// proven by examples/09_no_std/use_core.mvs's zero-undefined check in CI)
+import { test } from "std";
+import { mem, cmp, ptr, cstr, bits } from "core";
+import { Slice } from "core/slice";
+
+extern func malloc(n: usize) -> *u8;
+
+@test
+func core_mem() -> void {
+    let a: *u8 = malloc(16);
+    let b: *u8 = malloc(16);
+    mem.set(a, 65, 8);
+    mem.copy(b, a, 8);
+    test.ok(mem.eq(a, b, 8));
+    mem.zero(a, 4);
+    test.eq(*a as i64, 0);
+    test.eq(*(a + 4) as i64, 65);
+    // overlapping copy shifts correctly
+    mem.set(a, 0, 16);
+    a[0] = 1; a[1] = 2; a[2] = 3;
+    mem.copy(a + 1, a, 3);
+    test.eq(*(a + 1) as i64, 1);
+    test.eq(*(a + 3) as i64, 3);
+}
+
+@test
+func core_cmp() -> void {
+    test.eq(cmp.max(3, 9), 9);
+    test.eq(cmp.min(0 - 5, 2), 0 - 5);
+    test.near(cmp.clamp(2.5, 0.0, 1.0), 1.0, 0.000001);
+    test.eq(cmp.ordering(7, 7), 0);
+}
+
+@test
+func core_ptr() -> void {
+    let p: *u8 = malloc(16);
+    ptr.write64(p, 12345678901234);
+    test.eq(ptr.read64(p) as i64, 12345678901234);
+    ptr.write16(p + 8, 65535);
+    test.eq(ptr.read16(p + 8) as i64, 65535);
+    test.eq(ptr.align_up(13, 8) as i64, 16);
+    test.eq(ptr.align_down(13, 8) as i64, 8);
+    test.ok(ptr.is_aligned(4096, 4096));
+    test.ok(ptr.is_null(0));
+}
+
+@test
+func core_cstr() -> void {
+    test.eq(cstr.len("hello") as i64, 5);
+    test.ok(cstr.eq("abc", "abc"));
+    test.ok(!cstr.eq("abc", "abd"));
+    test.eq(cstr.cmp("b", "a"), 1);
+    test.eq(cstr.find("kernel", 'e'), 1);
+    test.eq(cstr.find("kernel", 'z'), 0 - 1);
+    test.ok(cstr.starts_with("multiboot", "multi"));
+    let buf: *u8 = malloc(4);
+    test.eq(cstr.copy(buf, "hello", 4) as i64, 3);   // bounded + NUL-terminated
+    test.eq(buf as str, "hel");
+}
+
+@test
+func core_bits() -> void {
+    test.eq(bits.popcount(255), 8);
+    test.eq(bits.popcount(0), 0);
+    test.eq(bits.ctz64(64), 6);
+    test.eq(bits.clz64(1), 63);
+    test.eq(bits.clz64(0), 64);
+    test.ok(bits.rotl64(1, 63) == 0x8000000000000000);
+    test.ok(bits.rotr64(0x8000000000000000, 63) == 1);
+    test.ok(bits.bswap64(0x12345678) == 0x7856341200000000);
+    test.ok(bits.bit(5, 2));
+    test.ok(!bits.bit(5, 1));
+}
+
+@test
+func core_slice() -> void {
+    let buf: *u8 = malloc(8);
+    mem.set(buf, 3, 8);
+    let s: Slice<u8> = Slice<u8>::new(buf, 8);
+    test.eq(s.len() as i64, 8);
+    test.ok(s.in_bounds(7));
+    test.ok(!s.in_bounds(8));
+    s.set(2, 42);
+    test.eq(s.get(2) as i64, 42);
+    let t: Slice<u8> = s.sub(1, 3);
+    test.eq(t.get(1) as i64, 42);
+    test.eq(t.len() as i64, 3);
+}

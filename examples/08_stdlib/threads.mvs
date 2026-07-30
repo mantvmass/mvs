@@ -1,0 +1,42 @@
+// OS threads + Mutex: 4 workers x 10000 mutex-protected increments = exactly
+// 40000 on every run and every platform (that determinism is the whole point
+// of the lock). CreateThread/SRWLock on Windows, pthreads on Linux.
+import { io, thread, sync } from "std";
+
+let m: Mutex;               // a zeroed global Mutex is valid and unlocked
+let counter: i64 = 0;
+let partial: [i64; 4] = [0, 0, 0, 0];
+
+func worker(arg: *u8) -> *u8 {
+    let id: i64 = *(arg as *i64);
+    let i: i64 = 0;
+    let local: i64 = 0;
+    while (i < 10000) {
+        m.lock();
+        counter = counter + 1;
+        m.unlock();
+        local = local + 1;
+        i = i + 1;
+    }
+    partial[id] = local;    // each worker owns its own slot: no lock needed
+    return 0;
+}
+
+func main() -> i8 {
+    let ids: [i64; 4] = [0, 1, 2, 3];
+    let hs: [i64; 4] = [0, 0, 0, 0];
+    let t: i64 = 0;
+    while (t < 4) {
+        hs[t] = thread.spawn(worker, &ids[t] as *u8) as i64;
+        t = t + 1;
+    }
+    t = 0;
+    while (t < 4) {
+        thread.join(hs[t] as usize);
+        t = t + 1;
+    }
+    io.out("count = {}", counter);
+    io.out("partials = {}", partial);
+    io.out("sum ok = {}", partial[0] + partial[1] + partial[2] + partial[3] == counter);
+    return 0;
+}

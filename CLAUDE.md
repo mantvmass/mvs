@@ -129,8 +129,11 @@ names like `Vec<i64>` mangle to `Vec__i64`; nested arguments and `>>` handled) �
 explicit generic call arguments (`none<i64>()`) · `std/option`
 (`Option<T>`/`Some`/`None`) + `std/result` (`Result<T, E>`/`Ok`/`Err`) ·
 `std/vec` (`Vec<T>` growable, bounds-checked, element size via scaled pointer
-arithmetic) · the `core` package (`core/mem`, `core/cmp`: pure MVS, importable
-under `--nostd`, packaged next to std in releases; env override MVS_CORE).
+arithmetic) · the `core` package (pure MVS, importable under `--nostd`, packaged
+next to std in releases; env override MVS_CORE): `mem`/`cmp`/`ptr`/`cstr`/
+`slice` (`Slice<T>`)/`bits` · threads + Mutex (`std/thread` spawn/join with
+`func(*u8) -> *u8` workers, `std/sync` Mutex; CreateThread+SRWLOCK vs
+pthreads via @compile; Linux links -lpthread; NO Send/Sync checking, documented).
 
 **Remaining:** see [ROADMAP.md](ROADMAP.md) (`match`, a hash map, more `core`
 modules, macOS target).

@@ -226,6 +226,16 @@ static Node *parse_primary(Parser *p) {
                 n->ngen = ngargs;
                 return n;   /* parse_postfix attaches the call */
             }
+            if (ok && !p->panic && check(p, TK_COLONCOLON)) {
+                /* associated function on a generic struct: Vec<i64>::new(...).
+                 * The ident keeps the canonical name; monomorphize rewrites it to
+                 * the instance and parse_postfix builds the :: member call. */
+                free(idname);
+                for (int i = 0; i < ngargs; i++) free(gargs[i]);
+                Node *n = node_new(ND_IDENT, line);
+                n->name = strdup(cname); n->type = TYPE_UNKNOWN;
+                return n;
+            }
             /* plain less-than after all: rewind and fall through */
             for (int i = 0; i < ngargs; i++) free(gargs[i]);
             *p->lx = lsave; p->cur = csave;

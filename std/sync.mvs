@@ -1,0 +1,53 @@
+/*
+ * std/sync.mvs - synchronization primitives (Mutex)
+ *
+ *     import { io, thread, sync } from "std";
+ *
+ *     let m: Mutex;                 // a zeroed Mutex IS a valid unlocked Mutex
+ *     let counter: i64 = 0;
+ *
+ *     func worker(arg: *u8) -> *u8 {
+ *         m.lock();
+ *         counter = counter + 1;    // protected region
+ *         m.unlock();
+ *         return 0;
+ *     }
+ *
+ * The 64-byte buffer covers both implementations: Windows SRWLOCK (8 bytes,
+ * zero-initialized by definition) and glibc pthread_mutex_t (40-48 bytes,
+ * PTHREAD_MUTEX_INITIALIZER is all-zero). Do not copy a Mutex by value.
+ */
+
+@compile(target_os = "windows")
+extern func AcquireSRWLockExclusive(p: *u64) -> void;
+@compile(target_os = "windows")
+extern func ReleaseSRWLockExclusive(p: *u64) -> void;
+
+@compile(target_os = "linux")
+extern func pthread_mutex_lock(p: *u64) -> i32;
+@compile(target_os = "linux")
+extern func pthread_mutex_unlock(p: *u64) -> i32;
+
+// 64 zero bytes; field a is the OS lock word(s), the rest is reserved space
+struct Mutex {
+    a: u64; b: u64; c: u64; d: u64;
+    e: u64; f: u64; g: u64; h: u64;
+}
+
+@compile(target_os = "windows")
+impl Mutex {
+    func lock(self: *Mutex) -> void { AcquireSRWLockExclusive(&self.a); }
+    func unlock(self: *Mutex) -> void { ReleaseSRWLockExclusive(&self.a); }
+}
+
+@compile(target_os = "linux")
+impl Mutex {
+    func lock(self: *Mutex) -> void { pthread_mutex_lock(&self.a); }
+    func unlock(self: *Mutex) -> void { pthread_mutex_unlock(&self.a); }
+}
+
+// a fresh unlocked Mutex (a zeroed one; handy for locals)
+func mutex_new() -> Mutex {
+    let m: Mutex = Mutex { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0 };
+    return m;
+}

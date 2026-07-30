@@ -1,0 +1,43 @@
+// unit tests for std/thread + std/sync (deterministic by construction:
+// the mutex makes the final counter exact, and join orders the reads)
+import { test, thread, sync } from "std";
+
+let m: Mutex;
+let counter: i64 = 0;
+
+func bump(arg: *u8) -> *u8 {
+    let i: i64 = 0;
+    while (i < 5000) {
+        m.lock();
+        counter = counter + 1;
+        m.unlock();
+        i = i + 1;
+    }
+    return 0;
+}
+
+@test
+func mutex_counter_is_exact() -> void {
+    counter = 0;
+    let hs: [i64; 4] = [0, 0, 0, 0];
+    let t: i64 = 0;
+    while (t < 4) {
+        hs[t] = thread.spawn(bump, 0) as i64;
+        t = t + 1;
+    }
+    t = 0;
+    while (t < 4) {
+        thread.join(hs[t] as usize);
+        t = t + 1;
+    }
+    test.eq(counter, 20000);
+}
+
+@test
+func spawn_join_single() -> void {
+    counter = 0;
+    let h: usize = thread.spawn(bump, 0);
+    test.ok(h != 0);
+    thread.join(h);
+    test.eq(counter, 5000);
+}

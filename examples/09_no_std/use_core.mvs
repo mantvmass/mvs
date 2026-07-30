@@ -1,6 +1,7 @@
 // the "core" package works under --nostd: pure MVS, zero undefined symbols.
 // build: mvs.exe examples/09_no_std/use_core.mvs --nostd
-import { mem, cmp } from "core";
+import { mem, cmp, ptr, cstr, bits } from "core";
+import { Slice } from "core/slice";
 
 // a tiny static arena stands in for an allocator (no CRT here)
 let arena: [u8; 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -28,5 +29,36 @@ export func kmain() -> i64 {
     if (cmp.min(3, 9) != 3) { return 6; }
     if (cmp.clamp(15, 0, 10) != 10) { return 7; }
     if (cmp.ordering(1, 2) != 0 - 1) { return 8; }
+
+    // ptr: typed access + alignment math
+    ptr.write32(a, 305419896);            // 0x12345678
+    if (ptr.read32(a) != 305419896) { return 9; }
+    if (ptr.align_up(13, 8) != 16) { return 10; }
+    if (!ptr.is_aligned(64, 16)) { return 11; }
+    if (ptr.diff(bb, a) != 32) { return 12; }
+
+    // cstr: pure-MVS C-string ops
+    if (cstr.len("hello") != 5) { return 13; }
+    if (!cstr.eq("abc", "abc")) { return 14; }
+    if (cstr.cmp("abc", "abd") != 0 - 1) { return 15; }
+    if (cstr.find("kernel", 'n') != 3) { return 16; }
+    if (!cstr.starts_with("multiboot", "multi")) { return 17; }
+
+    // bits
+    if (bits.popcount(255) != 8) { return 18; }
+    if (bits.ctz64(64) != 6) { return 19; }
+    if (bits.clz64(1) != 63) { return 20; }
+    if (bits.rotl64(1, 63) != 0x8000000000000000) { return 21; }
+    if (bits.bswap64(0xFF) != 0xFF00000000000000) { return 22; }
+
+    // slice: a typed view over the arena
+    mem.set(a, 7, 8);
+    let s: Slice<u8> = Slice<u8>::new(a, 8);
+    if (s.len() != 8) { return 23; }
+    if (s.get(3) != 7) { return 24; }
+    s.set(3, 9);
+    if (a[3] != 9) { return 25; }
+    let t: Slice<u8> = s.sub(2, 4);
+    if (t.get(1) != 9) { return 26; }
     return 0;                    // all checks passed
 }

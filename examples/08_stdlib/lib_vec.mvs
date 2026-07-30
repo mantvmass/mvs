@@ -2,12 +2,12 @@
 // Growable heap buffer + bounds-checked access; element size comes from
 // scaled pointer arithmetic, so one template serves every element type.
 import { io } from "std";
-import { Vec, vec_new } from "std/vec";
+import { Vec } from "std/vec";
 
 struct P { x: i64; y: i64; }
 
 func main() -> i8 {
-    let v: Vec<i64> = vec_new<i64>();
+    let v: Vec<i64> = Vec<i64>::new();
     let i: i64 = 0;
     while (i < 10) {
         v.push(i * i);
@@ -22,14 +22,14 @@ func main() -> i8 {
     v.drop();
 
     // element type f64
-    let f: Vec<f64> = vec_new<f64>();
+    let f: Vec<f64> = Vec<f64>::new();
     f.push(1.5);
     f.push(2.25);
     io.out("floats = {} {}", f.get(0), f.get(1));
     f.drop();
 
     // element type struct (16-byte elements copied in and out by value)
-    let ps: Vec<P> = vec_new<P>();
+    let ps: Vec<P> = Vec<P>::new();
     let p1: P = P { x: 1, y: 2 };
     let p2: P = P { x: 3, y: 4 };
     ps.push(p1);

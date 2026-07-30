@@ -49,6 +49,7 @@ examples/08_stdlib/lib_sys
 examples/08_stdlib/out_width
 examples/08_stdlib/option_result
 examples/08_stdlib/lib_vec
+examples/08_stdlib/threads
 examples/08_stdlib/net_loop"
 
 for t in $tests; do
@@ -56,7 +57,7 @@ for t in $tests; do
     if ! "$MVS" "$t.mvs" --target arm64 >/dev/null 2>&1; then
         echo "FAIL  $name (mvs compile)"; fail=$((fail+1)); continue
     fi
-    if ! "$CROSS" "$t.o" -o /tmp/mvs_a64 -static -lm 2>/tmp/mvs_a64_err.txt; then
+    if ! "$CROSS" "$t.o" -o /tmp/mvs_a64 -static -lm -lpthread 2>/tmp/mvs_a64_err.txt; then
         echo "FAIL  $name (link)"; cat /tmp/mvs_a64_err.txt; fail=$((fail+1)); continue
     fi
     "$QEMU" /tmp/mvs_a64 > /tmp/mvs_a64_out.txt 2>&1

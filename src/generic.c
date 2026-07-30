@@ -385,8 +385,9 @@ static void substitute(Node *n, Bind *gmap, int ngmap) {
             }
         }
     }
-    /* generic struct literals inside a template body: Option<T> { ... } */
-    if (n->kind == ND_STRUCT_LIT && n->name && strchr(n->name, '<')) {
+    /* generic struct literals inside a template body: Option<T> { ... };
+     * likewise Vec<T>::new()-style associated calls (an ident named "Vec<T>") */
+    if ((n->kind == ND_STRUCT_LIT || n->kind == ND_IDENT) && n->name && strchr(n->name, '<')) {
         char buf[512];
         if (subst_in_cname(n->name, gmap, ngmap, buf, sizeof(buf))) {
             free(n->name);
@@ -579,7 +580,8 @@ static void gs_resolve_node(Node *prog, Node *n, int *made) {
         free(n->type_name);
         n->type_name = strdup(m);
     }
-    if (n->kind == ND_STRUCT_LIT && n->name && strchr(n->name, '<')) {
+    if ((n->kind == ND_STRUCT_LIT || n->kind == ND_IDENT) && n->name && strchr(n->name, '<')) {
+        /* struct literal Vec<i64>{...} or the base of Vec<i64>::new(...) */
         char m[256];
         gs_instantiate(prog, n->name, m, sizeof(m), made, n->file, n->line, n->col);
         free(n->name);

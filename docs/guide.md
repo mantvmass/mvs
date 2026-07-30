@@ -531,15 +531,26 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `test` | assertions for `*.test.mvs` files: `ok(cond)`, `eq(got, want)` (i64/f64/str overloads), `near(got, want, eps)`, `fail(msg)`; see section 4.14 |
 | `option` | `Option<T>` + `Some(v)` / `None<T>()` + `is_some`/`is_none`/`unwrap`/`unwrap_or`; see section 4.15 |
 | `result` | `Result<T, E>` + `Ok<T, E>(v)` / `Err<T, E>(e)` + `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` |
-| `vec` | `Vec<T>` growable array: `vec_new<T>()` + `push`/`get`/`set`/`pop`/`len`/`is_empty`/`clear`/`drop`; bounds-checked, any element type incl. structs |
+| `vec` | `Vec<T>` growable array: `Vec<i64>::new()` + `push`/`get`/`set`/`pop`/`len`/`is_empty`/`clear`/`drop`; bounds-checked, any element type incl. structs |
+| `thread` | OS threads: `spawn(f, arg)` / `join(h)` with `func(*u8) -> *u8` workers (CreateThread vs pthreads via `@compile`); see section 4.16 |
+| `sync` | `Mutex` (`lock`/`unlock`; a zeroed Mutex is valid and unlocked; SRWLOCK vs pthread_mutex) |
 
 There is also a second package, **`core`**: pure MVS with no CRT/OS dependency, so
-it stays importable under `--nostd` (freestanding). Today: `core/mem` (byte-loop
-`copy`/`set`/`zero`/`eq`/`swap`, overlap-safe) and `core/cmp` (generic
-`min`/`max`/`clamp`/`ordering`).
+it stays importable under `--nostd` (freestanding):
+
+| Module | Contents |
+|--------|----------|
+| `core/mem` | byte-loop `copy` (overlap-safe) / `set` / `zero` / `eq` / `swap` |
+| `core/cmp` | generic `min` / `max` / `clamp` / `ordering` |
+| `core/ptr` | `is_null`, `offset`, `diff`, typed `read8..64` / `write8..64`, `align_up`/`align_down`/`is_aligned` |
+| `core/cstr` | C-string ops: `len`, `eq`, `cmp`, `find`, `starts_with`, bounded `copy` (named cstr because `str` is a keyword) |
+| `core/slice` | `Slice<T>` {ptr, len} view: `get`/`set` (unchecked) + `in_bounds`, `sub`, `len` |
+| `core/bits` | `rotl64`/`rotr64`, `popcount`, `clz64`/`ctz64`, `bswap64`, `bit` |
 
 ```txt
-import { mem, cmp } from "core";   // works even with --nostd
+import { mem, cmp, ptr, cstr, bits } from "core";   // works even with --nostd
+import { Slice } from "core/slice";
+let s: Slice<u8> = Slice<u8>::new(p, n);
 ```
 
 Two resolution rules make modules pleasant to use:
@@ -652,8 +663,10 @@ io.out("{}", p.first());          // 42
 let n: Boxed<Pair<i64, i64>>;     // generics nest ('>>' is handled)
 ```
 
-Generic functions may also take EXPLICIT type arguments when there is nothing to
-infer from: `none<i64>()`. That powers `Option`/`Result` in std:
+Associated functions work on generic structs Rust-style
+(`let v: Vec<i64> = Vec<i64>::new();`), and generic FUNCTIONS may take explicit
+type arguments when there is nothing to infer from: `none<i64>()`. That powers
+`Option`/`Result` in std:
 
 ```txt
 import { Option, Some, None } from "std/option";
@@ -672,6 +685,34 @@ Methods: `is_some`/`is_none`/`unwrap`/`unwrap_or` on Option;
 Limits (v1): type arguments must be primitives or named structs (no pointers,
 arrays, or function types), max 4 parameters, and `impl Trait for Vec<T>` is
 not supported yet. `match` is the planned next step (see ROADMAP).
+
+### 4.16 Threads + Mutex (std/thread, std/sync)
+
+```txt
+import { io, thread, sync } from "std";
+
+let m: Mutex;                  // a zeroed global Mutex is valid and unlocked
+let counter: i64 = 0;
+
+func worker(arg: *u8) -> *u8 {
+    m.lock();
+    counter = counter + 1;     // the protected region
+    m.unlock();
+    return 0;
+}
+
+let h: usize = thread.spawn(worker, 0);   // any func(*u8) -> *u8
+thread.join(h);
+```
+
+Under the hood: CreateThread/WaitForSingleObject + SRWLOCK on Windows,
+pthread_create/join + pthread_mutex on Linux, selected with `@compile`. Linking
+on Linux takes `-lpthread` (older glibc; harmless on newer). Threads run REAL
+OS concurrency on every target, including under qemu-aarch64.
+
+The honest difference from Rust: MVS has no ownership system, so there is NO
+compile-time Send/Sync data-race checking. Shared mutable data compiles fine
+whether or not you lock; the discipline is yours, exactly like C.
 
 ---
 
@@ -1153,7 +1194,8 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
   **elf64** (`--target elf64`, SysV ABI, `nasm -f elf64`), and **arm64**
   (`--target arm64`, AAPCS64, GNU as syntax, assembled with the AArch64 cross gcc/clang).
 - For elf64/arm64 the compiler stops at the `.o`; linking happens on the Linux side
-  (`gcc file.o -o file`, add `-lm` for C math, `-no-pie` for the absolute vtable relocs;
+  (`gcc file.o -o file`, add `-lm` for C math, `-lpthread` for std/thread on older
+  glibc, `-no-pie` for the absolute vtable relocs;
   arm64 links with `aarch64-linux-gnu-gcc` and runs under `qemu-aarch64`).
 - On Windows: needs `nasm` + `clang` (linked via `-llegacy_stdio_definitions -lws2_32`).
 - macOS (Mach-O) is not supported yet; see [../ROADMAP.md](../ROADMAP.md).

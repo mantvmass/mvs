@@ -1,0 +1,37 @@
+/*
+ * core/slice.mvs - Slice<T>: a {pointer, length} view in pure MVS (--nostd safe)
+ *
+ *     import { Slice } from "core/slice";
+ *     let s: Slice<i64> = Slice<i64>::new(buf, 8);
+ *     if (s.in_bounds(3)) { let v: i64 = s.get(3); }
+ *
+ * get/set are UNCHECKED (core has no panic facility to abort with); check
+ * in_bounds yourself where indices are not obviously valid.
+ */
+
+struct Slice<T> {
+    ptr: *T;
+    len: usize;
+}
+
+impl Slice<T> {
+    // wrap a pointer + length: let s: Slice<u8> = Slice<u8>::new(p, n);
+    func new(p: *T, n: usize) -> Slice<T> {
+        let s: Slice<T> = Slice<T> { ptr: p, len: n };
+        return s;
+    }
+
+    func len(self: *Slice<T>) -> usize { return self.len; }
+    func is_empty(self: *Slice<T>) -> bool { return self.len == 0; }
+    func in_bounds(self: *Slice<T>, i: usize) -> bool { return i < self.len; }
+
+    // element access (unchecked)
+    func get(self: *Slice<T>, i: usize) -> T { return self.ptr[i]; }
+    func set(self: *Slice<T>, i: usize, v: T) -> void { self.ptr[i] = v; }
+
+    // a sub-view [start, start+n) of this slice (unchecked)
+    func sub(self: *Slice<T>, start: usize, n: usize) -> Slice<T> {
+        let s: Slice<T> = Slice<T> { ptr: self.ptr + start, len: n };
+        return s;
+    }
+}

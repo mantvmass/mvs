@@ -48,16 +48,22 @@ Today `std/` is CRT-backed: `io`, `fs`, `net` (cross-platform via `@compile`),
 | `core::panic` | panic/abort support with a `--nostd` hook |
 | `core::arch` | architecture intrinsics (inline `asm`, SIMD, `pause`/`wfe`) |
 
-The `core` package EXISTS now: `core/mem` (pure-MVS byte loops) and `core/cmp`
-(generic min/max/clamp/ordering) import under `--nostd` with zero undefined
-symbols (`import { mem, cmp } from "core"`). std carries the CRT-backed layers
-(`mem`, `math`, `option`, `result`, `vec`). Remaining core rows in the table
-above (ptr/slice/str/cell/atomic/ffi/panic/arch) are still open, `core::arch`
-being the most interesting (intrinsics need compiler support, not just MVS).
+The `core` package EXISTS now and covers most of the table: `core/mem`,
+`core/cmp`, `core/ptr`, `core/cstr` (str is a keyword), `core/slice`
+(`Slice<T>`), and `core/bits`, all pure MVS importing under `--nostd` with zero
+undefined symbols. std carries the CRT/OS-backed layers (`mem`, `math`,
+`option`, `result`, `vec`, `thread`, `sync`). Still open: `core/option` (needs
+a story for the name clash with std/option), `cell`, `sync::atomic` and
+`core::arch` (both need compiler intrinsics, not just MVS), `ffi`, `panic`
+(needs a freestanding abort hook).
 
 ## Language
 
 - Pattern matching (`match`) over `Option`/`Result` (both exist now).
+- Concurrency, phase 2: channels (Mutex + condvar), atomics (compiler
+  intrinsics), and a `scoped`-style join helper. Phase 1 (threads + Mutex,
+  std/thread + std/sync) is done; Send/Sync-style compile-time race checking
+  would need an ownership system and is not planned.
 - Generic struct extensions: pointer/array type arguments, `impl Trait for Vec<T>`.
 - A hash map on top of `Vec<T>` (which is done).
 - Arrays of arrays (`[[T; N]; M]`) and slice syntax (`&a[1..3]`).

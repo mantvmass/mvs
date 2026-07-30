@@ -1,10 +1,10 @@
 // unit tests for Vec<T>
 import { test } from "std";
-import { Vec, vec_new } from "std/vec";
+import { Vec } from "std/vec";
 
 @test
 func push_get_len() -> void {
-    let v: Vec<i64> = vec_new<i64>();
+    let v: Vec<i64> = Vec<i64>::new();
     test.ok(v.is_empty());
     let i: i64 = 0;
     while (i < 100) {          // forces several growth steps
@@ -19,7 +19,7 @@ func push_get_len() -> void {
 
 @test
 func set_pop_clear() -> void {
-    let v: Vec<i64> = vec_new<i64>();
+    let v: Vec<i64> = Vec<i64>::new();
     v.push(1);
     v.push(2);
     v.push(3);
@@ -34,7 +34,7 @@ func set_pop_clear() -> void {
 
 @test
 func float_elements() -> void {
-    let f: Vec<f64> = vec_new<f64>();
+    let f: Vec<f64> = Vec<f64>::new();
     f.push(0.5);
     f.push(0.25);
     test.near(f.get(0) + f.get(1), 0.75, 0.000001);

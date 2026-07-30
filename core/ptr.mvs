@@ -1,0 +1,44 @@
+/*
+ * core/ptr.mvs - raw pointer utilities in pure MVS (no CRT, no OS; --nostd safe)
+ *
+ *     import { ptr } from "core";
+ *     if (!ptr.is_null(p)) { let v: u64 = ptr.read64(p); }
+ */
+
+// is this a null pointer?
+func is_null(p: *u8) -> bool {
+    return p == 0;
+}
+
+// p advanced by n BYTES (can be negative)
+func offset(p: *u8, n: isize) -> *u8 {
+    return p + n;
+}
+
+// byte distance a - b
+func diff(a: *u8, b: *u8) -> isize {
+    return (a as isize) - (b as isize);
+}
+
+// typed loads (the address must be valid for the width)
+func read8(p: *u8) -> u8   { return *p; }
+func read16(p: *u8) -> u16 { return *(p as *u16); }
+func read32(p: *u8) -> u32 { return *(p as *u32); }
+func read64(p: *u8) -> u64 { return *(p as *u64); }
+
+// typed stores
+func write8(p: *u8, v: u8) -> void   { *p = v; }
+func write16(p: *u8, v: u16) -> void { *(p as *u16) = v; }
+func write32(p: *u8, v: u32) -> void { *(p as *u32) = v; }
+func write64(p: *u8, v: u64) -> void { *(p as *u64) = v; }
+
+// round an address/size up or down to a power-of-two alignment
+func align_up(x: usize, a: usize) -> usize {
+    return (x + a - 1) & ~(a - 1);
+}
+func align_down(x: usize, a: usize) -> usize {
+    return x & ~(a - 1);
+}
+func is_aligned(x: usize, a: usize) -> bool {
+    return (x & (a - 1)) == 0;
+}

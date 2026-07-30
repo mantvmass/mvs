@@ -3,9 +3,9 @@
  *
  * Usage:
  *     import { io } from "std";
- *     import { Vec, vec_new } from "std/vec";
+ *     import { Vec } from "std/vec";
  *
- *     let v: Vec<i64> = vec_new<i64>();
+ *     let v: Vec<i64> = Vec<i64>::new();
  *     v.push(10);
  *     v.push(20);
  *     io.out("{} items, first = {}", v.len(), v.get(0));
@@ -28,6 +28,12 @@ struct Vec<T> {
 }
 
 impl Vec<T> {
+    // an empty vector: let v: Vec<i64> = Vec<i64>::new();
+    func new() -> Vec<T> {
+        let v: Vec<T> = Vec<T> { data: 0, len: 0, cap: 0 };
+        return v;
+    }
+
     // number of elements
     func len(self: *Vec<T>) -> usize { return self.len; }
 
@@ -89,10 +95,4 @@ impl Vec<T> {
         self.len = 0;
         self.cap = 0;
     }
-}
-
-// an empty vector (give T explicitly: vec_new<i64>())
-func vec_new<T>() -> Vec<T> {
-    let v: Vec<T> = Vec<T> { data: 0, len: 0, cap: 0 };
-    return v;
 }

@@ -46,6 +46,7 @@ examples/08_stdlib/lib_sys
 examples/08_stdlib/out_width
 examples/08_stdlib/option_result
 examples/08_stdlib/lib_vec
+examples/08_stdlib/threads
 examples/08_stdlib/net_loop"
 
 for t in $tests; do
@@ -53,7 +54,7 @@ for t in $tests; do
     if ! "$MVS" "$t.mvs" --target elf64 >/dev/null 2>&1; then
         echo "FAIL  $name (mvs compile)"; fail=$((fail+1)); continue
     fi
-    if ! gcc "$t.o" -o /tmp/mvs_ci -no-pie -lm 2>/tmp/mvs_ci_err.txt; then
+    if ! gcc "$t.o" -o /tmp/mvs_ci -no-pie -lm -lpthread 2>/tmp/mvs_ci_err.txt; then
         echo "FAIL  $name (link)"; cat /tmp/mvs_ci_err.txt; fail=$((fail+1)); continue
     fi
     /tmp/mvs_ci > /tmp/mvs_ci_out.txt 2>&1

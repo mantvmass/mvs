@@ -517,7 +517,7 @@ static int run_test_suite(const char *argv0, const char *path_arg) {
         int crc = tr_capture(cmd, &out);
         if (crc != 0) { printf("  FAIL  (compile)\n%s", out); free(out); fail++; continue; }
         free(out);
-        snprintf(cmd, sizeof(cmd), "gcc \"%.*s.o\" -o /tmp/mvs_selftest -no-pie -lm", tfw, tbase);
+        snprintf(cmd, sizeof(cmd), "gcc \"%.*s.o\" -o /tmp/mvs_selftest -no-pie -lm -lpthread", tfw, tbase);
         int lrc = tr_capture(cmd, &out);
         if (lrc != 0) { printf("  FAIL  (link)\n%s", out); free(out); fail++; continue; }
         free(out);
@@ -567,7 +567,7 @@ static int run_test_suite(const char *argv0, const char *path_arg) {
         int crc = tr_capture(cmd, &out);
         if (crc != 0) { printf("  FAIL  %s (compile)\n%s", names[i], out); free(out); fail++; continue; }
         free(out);
-        snprintf(cmd, sizeof(cmd), "gcc %s.o -o /tmp/mvs_selftest -no-pie -lm", path);
+        snprintf(cmd, sizeof(cmd), "gcc %s.o -o /tmp/mvs_selftest -no-pie -lm -lpthread", path);
         int lrc = tr_capture(cmd, &out);
         if (lrc != 0) { printf("  FAIL  %s (link)\n%s", names[i], out); free(out); fail++; continue; }
         free(out);

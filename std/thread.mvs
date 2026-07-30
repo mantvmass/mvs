@@ -1,0 +1,59 @@
+/*
+ * std/thread.mvs - OS threads (Rust-flavored API)
+ *
+ * A thread runs a function with the signature `func(*u8) -> *u8` (one opaque
+ * argument in, one opaque result out, POSIX style). spawn returns a handle;
+ * join blocks until that thread finishes.
+ *
+ *     import { io, thread } from "std";
+ *
+ *     func worker(arg: *u8) -> *u8 {
+ *         io.out("hello from thread {}", *arg);
+ *         return 0;
+ *     }
+ *
+ *     let h: usize = thread.spawn(worker, &n);
+ *     thread.join(h);
+ *
+ * IMPORTANT: unlike Rust there is NO compile-time Send/Sync checking; this is
+ * C-level threading with a friendlier API. Guard shared data with sync.Mutex
+ * (std/sync) yourself.
+ *
+ * Windows uses CreateThread (the DWORD return truncation is harmless on x64);
+ * Linux uses pthreads, selected with @compile.
+ */
+
+@compile(target_os = "windows")
+extern func CreateThread(attr: *u8, stack: usize, f: func(*u8) -> *u8, arg: *u8, flags: u32, id: *u8) -> usize;
+@compile(target_os = "windows")
+extern func WaitForSingleObject(h: usize, ms: u32) -> u32;
+@compile(target_os = "windows")
+extern func CloseHandle(h: usize) -> i32;
+
+@compile(target_os = "linux")
+extern func pthread_create(tid: *u64, attr: *u8, f: func(*u8) -> *u8, arg: *u8) -> i32;
+@compile(target_os = "linux")
+extern func pthread_join(tid: u64, ret: *u8) -> i32;
+
+// start a new thread running f(arg); returns a handle for join (0 on failure)
+@compile(target_os = "windows")
+func spawn(f: func(*u8) -> *u8, arg: *u8) -> usize {
+    return CreateThread(0, 0, f, arg, 0, 0);
+}
+@compile(target_os = "linux")
+func spawn(f: func(*u8) -> *u8, arg: *u8) -> usize {
+    let tid: u64 = 0;
+    if (pthread_create(&tid, 0, f, arg) != 0) { return 0; }
+    return tid as usize;
+}
+
+// wait until the thread behind the handle finishes
+@compile(target_os = "windows")
+func join(h: usize) -> void {
+    WaitForSingleObject(h, 4294967295);   // INFINITE
+    CloseHandle(h);
+}
+@compile(target_os = "linux")
+func join(h: usize) -> void {
+    pthread_join(h as u64, 0);
+}

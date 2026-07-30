@@ -4,7 +4,7 @@
 # scripts/test.ps1 drives this and diffs the output against the same goldens as win64.
 cd "$(dirname "$0")/.." || exit 1
 for f in "$@"; do
-    if gcc "$f.o" -o /tmp/mvs_elf_test -no-pie -lm 2>/tmp/mvs_elf_err; then
+    if gcc "$f.o" -o /tmp/mvs_elf_test -no-pie -lm -lpthread 2>/tmp/mvs_elf_err; then
         /tmp/mvs_elf_test > /tmp/mvs_elf_out 2>&1
         echo "== $f rc=$?"
         cat /tmp/mvs_elf_out
