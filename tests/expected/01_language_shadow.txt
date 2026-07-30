@@ -1,0 +1,8 @@
+outer x = 1
+inner x = 2
+inner inner x = three
+back to inner x = 2
+back to outer x = 1
+loop x = 10
+loop x = 11
+after loop x = 1

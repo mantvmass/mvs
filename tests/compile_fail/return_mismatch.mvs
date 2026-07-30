@@ -1,0 +1,9 @@
+//~ ERROR: return type mismatch
+// returning a string from an i32 function is rejected
+func f() -> i32 {
+    return "not a number";
+}
+func main() -> i8 {
+    f();
+    return 0;
+}

@@ -1,0 +1,6 @@
+//~ ERROR: undefined function
+// calling a function that does not exist fails clearly
+func main() -> i8 {
+    missing_function(1, 2);
+    return 0;
+}

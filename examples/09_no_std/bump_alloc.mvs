@@ -1,0 +1,35 @@
+// ============================================================
+//  bump_alloc: a freestanding bump allocator (no malloc, no CRT)
+//  build:  mvs.exe examples/09_no_std/bump_alloc.mvs --nostd
+//          mvs.exe examples/09_no_std/bump_alloc.mvs --nostd --target elf64
+//
+//  In --nostd mode there is no malloc; a kernel owns raw memory instead.
+//  This is the classic first allocator: hand out addresses from a region,
+//  never free. State lives in a struct the caller keeps.
+// ============================================================
+
+struct Bump {
+    base: usize;    // start of the managed region
+    end:  usize;    // first address past the region
+    cur:  usize;    // next free address
+}
+
+// carve the allocator out of a raw memory region
+export func bump_init(b: *Bump, base: usize, size: usize) -> void {
+    b.base = base;
+    b.end = base + size;
+    b.cur = base;
+}
+
+// allocate n bytes aligned to 8; returns 0 when the region is exhausted
+export func bump_alloc(b: *Bump, n: usize) -> usize {
+    let aligned: usize = (b.cur + 7) & (0 - 8);   // round up to a multiple of 8
+    if (aligned + n > b.end) { return 0; }
+    b.cur = aligned + n;
+    return aligned;
+}
+
+// how many bytes remain
+export func bump_left(b: *Bump) -> usize {
+    return b.end - b.cur;
+}

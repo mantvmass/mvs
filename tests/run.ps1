@@ -41,6 +41,7 @@ $runPass = @(
     "examples/01_language/args",
     "examples/01_language/arrays",
     "examples/01_language/int128",
+    "examples/01_language/shadow",
     "examples/02_functions/generics",
     "examples/02_functions/overload",
     "examples/02_functions/recursion",
@@ -69,6 +70,8 @@ $compileOnly = @(
     @{ src = "examples/07_c_interop/export_lib.mvs";   flags = "-c" },
     @{ src = "examples/07_c_interop/use_c.mvs";        flags = "-c" },
     @{ src = "examples/07_c_interop/freestanding.mvs"; flags = "--nostd" },
+    @{ src = "examples/09_no_std/kernel.mvs";          flags = "--nostd" },
+    @{ src = "examples/09_no_std/bump_alloc.mvs";      flags = "--nostd" },
     @{ src = "examples/08_stdlib/files.mvs";           flags = "" },
     @{ src = "examples/08_stdlib/net_client.mvs";      flags = "" },
     @{ src = "examples/08_stdlib/net_server.mvs";      flags = "" }

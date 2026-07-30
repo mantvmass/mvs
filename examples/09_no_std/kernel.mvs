@@ -1,0 +1,40 @@
+// ============================================================
+//  kernel: a freestanding OS-style skeleton (no std, no CRT, no OS)
+//  build (COFF, lld):  mvs.exe examples/09_no_std/kernel.mvs --nostd
+//  build (ELF, GNU ld for GRUB multiboot):
+//         mvs.exe examples/09_no_std/kernel.mvs --nostd --target elf64
+//         ld kernel.o -o kernel.elf --entry=kmain
+//
+//  Everything here is pure MVS: no imports, no io.out, no malloc. The exported
+//  functions are reachability roots, so the object is self-contained (verify
+//  with llvm-nm / nm: there are no undefined symbols).
+// ============================================================
+
+// The VGA text buffer lives at physical 0xB8000 on legacy x86 boots:
+// 80x25 cells of [character byte][attribute byte].
+const VGA_BASE: usize = 753664;      // 0xB8000
+const WHITE_ON_BLACK: u8 = 15;
+
+// write one character into a VGA cell
+export func vga_put(cell: usize, ch: u8, attr: u8) -> void {
+    let vga: *u8 = VGA_BASE as *u8;
+    vga[cell * 2] = ch;
+    vga[cell * 2 + 1] = attr;
+}
+
+// write a null-terminated string starting at a cell; returns the next free cell
+export func vga_print(cell: usize, msg: str) -> usize {
+    let p: *u8 = msg;                 // str is a pointer to NUL-terminated bytes
+    let i: usize = 0;
+    while (p[i] != 0) {
+        vga_put(cell + i, p[i], WHITE_ON_BLACK);
+        i = i + 1;
+    }
+    return cell + i;
+}
+
+// the kernel entry point a bootloader jumps to
+export func kmain() -> void {
+    let next: usize = vga_print(0, "MVS kernel: hello from bare metal");
+    vga_put(next + 1, 62, WHITE_ON_BLACK);   // '>'
+}

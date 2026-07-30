@@ -16,6 +16,7 @@ examples/01_language/control
 examples/01_language/bitwise
 examples/01_language/arrays
 examples/01_language/int128
+examples/01_language/shadow
 examples/02_functions/generics
 examples/02_functions/overload
 examples/02_functions/recursion
@@ -56,6 +57,28 @@ for t in $tests; do
     rm -f "$t.o"
     pass=$((pass+1)); echo "ok    $name"
 done
+# freestanding (--nostd) ELF objects: must have ZERO undefined symbols and the
+# kernel skeleton must link with plain GNU ld (the GRUB multiboot path)
+for t in examples/07_c_interop/freestanding examples/09_no_std/kernel examples/09_no_std/bump_alloc; do
+    name=$(echo "$t" | sed 's|^examples/||; s|/|_|g')
+    if ! "$MVS" "$t.mvs" --nostd --target elf64 >/dev/null 2>&1; then
+        echo "FAIL  nostd_$name (mvs compile)"; fail=$((fail+1)); continue
+    fi
+    undef=$(nm -u "$t.o" | wc -l)
+    if [ "$undef" -ne 0 ]; then
+        echo "FAIL  nostd_$name ($undef undefined symbol(s))"; nm -u "$t.o"; fail=$((fail+1)); continue
+    fi
+    pass=$((pass+1)); echo "ok    nostd_$name (freestanding, 0 undefined)"
+    rm -f "$t.o"
+done
+if "$MVS" examples/09_no_std/kernel.mvs --nostd --target elf64 >/dev/null 2>&1 &&
+   ld examples/09_no_std/kernel.o -o /tmp/mvs_kernel.elf --entry=kmain 2>/dev/null; then
+    pass=$((pass+1)); echo "ok    nostd_kernel_ld (links with GNU ld)"
+else
+    fail=$((fail+1)); echo "FAIL  nostd_kernel_ld"
+fi
+rm -f examples/09_no_std/kernel.o
+
 echo
 if [ "$fail" -gt 0 ]; then echo "FAILED: $fail failure(s), $pass passed"; exit 1; fi
 echo "ALL PASS: $pass test(s)"

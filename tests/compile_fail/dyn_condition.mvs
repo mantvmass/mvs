@@ -1,0 +1,12 @@
+//~ ERROR: cannot be used as a condition
+// a trait object in a boolean context would test its address; rejected
+import { String } from "std/string";
+struct A { x: i32; }
+trait T { func f(self: *Self) -> i32; }
+impl T for A { func f(self: *A) -> i32 { return 1; } }
+func main() -> i8 {
+    let a: A = A { x: 1 };
+    let d: dyn T = &a;
+    if (d) { return 1; }
+    return 0;
+}

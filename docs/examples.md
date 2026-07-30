@@ -33,6 +33,7 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `args.mvs` | command-line args via `main(argc, argv)` |
 | `arrays.mvs` | `[T; N]` arrays: literals, indexing, `.len`, structs, decay to `*T` |
 | `int128.mvs` | full 128-bit arithmetic: mul/div/mod past 64 bits, u128 max, shifts |
+| `shadow.mvs` | scope shadowing: blocks, type-changing shadows, loop variables |
 
 ## 02_functions: functions / generics / overloading
 
@@ -92,3 +93,10 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 | `files.mvs` | `fs.write`/`fs.read` + `io.in` |
 | `net_client.mvs` / `net_server.mvs` | TCP over Winsock (`net.TcpClient`/`TcpServer`) |
 | `lib_out.mvs` | `fmt.outf`: io.out as a pure-MVS library (variadic `...dyn Display`, impl-on-primitive) |
+
+## 09_no_std: freestanding (OS / bare-metal, `--nostd`)
+
+| File | Contents |
+|------|----------|
+| `kernel.mvs` | OS-style skeleton: VGA text writer + exported `kmain` entry (links with GNU ld) |
+| `bump_alloc.mvs` | a freestanding bump allocator (no malloc, state in a caller-owned struct) |
