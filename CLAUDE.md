@@ -168,6 +168,14 @@ imported under both a namespace and a symbol form works under both spellings
 (the loader aliases its free functions instead of warning) · unresolved
 overload calls stop the pipeline instead of reappearing as codegen errors.
 
+**Performance:** `sh scripts/bench.sh` times the same program built by MVS and
+by C and prints the ratio (`bench/loops.mvs` + `bench/loops.c`, also step 10 of
+the audit). Locals are register allocated (busiest scalars whose address is
+never taken go to rbx/r12/r13/r14, x19 to x22 on arm64) and a binary operation
+whose operands are both simple skips the temp stack entirely. That took the
+benchmark from 8.4x gcc -O2 to about 3x. The remaining gap is the stack machine
+used for everything else.
+
 **How the audit is kept exhaustive:** `sh scripts/audit.sh` is the one command.
 Its five enumerated axes are `scripts/matrix.sh` (every TYPE through every
 context), `scripts/matrix_features.sh` (every FEATURE through every context:

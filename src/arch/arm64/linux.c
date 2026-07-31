@@ -88,9 +88,65 @@ static void gen_store_typed(Gen *g, DataType base, int size) {
     }
 }
 
+/* Callee-saved registers a local may live in. AAPCS64 preserves x19 to x28
+ * across a call, so a promoted variable needs no spilling around calls. */
+static const char *REGVARS[] = { "x19", "x20", "x21", "x22" };
+#define NREGVARS ((int)(sizeof(REGVARS) / sizeof(REGVARS[0])))
+
+/* the register holding this variable, or NULL when it lives in the frame */
+static const char *var_reg(Sym *s) {
+    return (s && !s->is_global && s->reg >= 0 && s->reg < NREGVARS) ? REGVARS[s->reg] : NULL;
+}
+
+static void gen_regsave(Gen *g) {
+    for (int i = 0; i < g->plan.n && i < NREGVARS; i++) {
+        addr_local(g, "x9", g->regsave_off - i * 8);
+        fprintf(g->out, "    str %s, [x9]\n", REGVARS[i]);
+    }
+}
+static void gen_regrestore(Gen *g) {
+    for (int i = 0; i < g->plan.n && i < NREGVARS; i++) {
+        addr_local(g, "x9", g->regsave_off - i * 8);
+        fprintf(g->out, "    ldr %s, [x9]\n", REGVARS[i]);
+    }
+}
+static void gen_epilogue(Gen *g) {
+    gen_regrestore(g);
+    fprintf(g->out, "    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n");
+}
+
+/* A SIMPLE operand is already sitting somewhere: an integer literal, a variable
+ * in a register, or a plain 8-byte slot. When BOTH sides of a binary operation
+ * are simple, no temp stack is needed. Both must qualify, because evaluating an
+ * arbitrary left operand would clobber the register the right one sits in. */
+static int simple_operand(Gen *g, Node *n) {
+    if (!n) return 0;
+    if (n->kind == ND_INT || n->kind == ND_BOOL || n->kind == ND_CHAR)
+        return n->int_val >= 0 && n->int_val <= 65535;     /* fits one movz */
+    if (n->kind != ND_IDENT) return 0;
+    Sym *s = find_var(g, n->name);
+    if (!s || s->arr > 0) return 0;
+    if (s->type == TYPE_STRUCT || is_blob16(s->type, s->ptr)) return 0;
+    if (s->ptr == 0 && is_float_type(s->type)) return 0;
+    if (s->size != 8) return 0;
+    return 1;
+}
+
+static void emit_simple(Gen *g, Node *n, const char *reg) {
+    if (n->kind != ND_IDENT) { fprintf(g->out, "    mov %s, #%lld\n", reg, n->int_val); return; }
+    Sym *s = find_var(g, n->name);
+    const char *r = var_reg(s);
+    if (r) { fprintf(g->out, "    mov %s, %s\n", reg, r); return; }
+    char lbl[LABEL_MAX];
+    if (s->is_global) { global_label(s->name, lbl); addr_label(g, reg, lbl); }
+    else              addr_local(g, reg, s->offset);
+    fprintf(g->out, "    ldr %s, [%s]\n", reg, reg);
+}
+
 /* Load a variable's value into x0 (struct/array/i128/dyn = its address) */
 static void gen_load_var(Gen *g, Sym *s) {
     char lbl[LABEL_MAX];
+    { const char *r = var_reg(s); if (r) { fprintf(g->out, "    mov x0, %s\n", r); return; } }
     if (s->is_global) { global_label(s->name, lbl); addr_label(g, "x0", lbl); }
     else              addr_local(g, "x0", s->offset);
     if (s->arr > 0) return;
@@ -102,6 +158,7 @@ static void gen_load_var(Gen *g, Sym *s) {
 /* Store x0 into a variable (width/f32 conversion applied) */
 static void gen_store_var(Gen *g, Sym *s) {
     char lbl[LABEL_MAX];
+    { const char *r = var_reg(s); if (r) { fprintf(g->out, "    mov %s, x0\n", r); return; } }
     fprintf(g->out, "    mov x1, x0\n");
     if (s->is_global) { global_label(s->name, lbl); addr_label(g, "x0", lbl); }
     else              addr_local(g, "x0", s->offset);
@@ -147,6 +204,14 @@ static void gen_addr(Gen *g, Node *n) {
             Sym *s = find_var(g, n->name);
             if (!s) { fprintf(stderr, "codegen error: undefined variable '%s'\n", n->name); g->had_error = 1; return; }
             char lbl[LABEL_MAX];
+            /* a promoted variable still owns its slot: write the register back
+             * and hand out the slot address (every such use only reads) */
+            if (var_reg(s)) {
+                addr_local(g, "x9", s->offset);
+                fprintf(g->out, "    str %s, [x9]\n", var_reg(s));
+                addr_local(g, "x0", s->offset);
+                break;
+            }
             if (s->is_global) { global_label(s->name, lbl); addr_label(g, "x0", lbl); }
             else              addr_local(g, "x0", s->offset);
             break;
@@ -608,11 +673,17 @@ static void gen_expr(Gen *g, Node *n) {
                 }
                 break;
             }
-            /* integer path; pointer +/- scales by the pointee size */
-            gen_expr(g, n->lhs); push_tmp(g);
-            gen_expr(g, n->rhs);
-            fprintf(g->out, "    mov x1, x0\n");
-            pop_tmp(g, "x0");
+            /* integer path; pointer +/- scales by the pointee size.
+             * Two simple operands need no temp stack at all. */
+            if (simple_operand(g, n->lhs) && simple_operand(g, n->rhs)) {
+                emit_simple(g, n->rhs, "x1");
+                emit_simple(g, n->lhs, "x0");
+            } else {
+                gen_expr(g, n->lhs); push_tmp(g);
+                gen_expr(g, n->rhs);
+                fprintf(g->out, "    mov x1, x0\n");
+                pop_tmp(g, "x0");
+            }
             if ((n->op == TK_PLUS || n->op == TK_MINUS) && lt.ptr > 0 && rt.ptr > 0) {
                 int sc = type_size(g, lt.base, lt.ptr - 1, lt.sname);
                 fprintf(g->out, "    sub x0, x0, x1\n");
@@ -679,6 +750,8 @@ static void gen_expr(Gen *g, Node *n) {
                 int inc = (s->ptr > 0) ? type_size(g, s->type, s->ptr - 1, s->sname) : 1;
                 fprintf(g->out, "    mov x9, #%d\n", inc);
                 fprintf(g->out, n->op == TK_PLUSPLUS ? "    add x1, x0, x9\n" : "    sub x1, x0, x9\n");
+                { const char *vr = var_reg(s);
+                  if (vr) { fprintf(g->out, "    mov %s, x1\n", vr); break; } }
                 char lbl[LABEL_MAX];
                 if (s->is_global) { global_label(s->name, lbl); addr_label(g, "x10", lbl); }
                 else              addr_local(g, "x10", s->offset);
@@ -788,6 +861,34 @@ static void gen_expr(Gen *g, Node *n) {
             }
             int sz = type_size(g, tt.base, tt.ptr, tt.sname);
             DataType st = tt.ptr > 0 ? TYPE_USIZE : tt.base;
+            /* the target lives in a register: assign straight into it. Without
+             * this the value would go to the frame slot while every read comes
+             * from the register, and the variable would never change. */
+            if (target->kind == ND_IDENT) {
+                Sym *ts = find_var(g, target->name);
+                const char *tr = var_reg(ts);
+                if (tr) {
+                    if (n->op == TK_ASSIGN) {
+                        gen_expr(g, n->rhs);
+                        { ExprType rvt = type_of(g, n->rhs); gen_coerce_num(g, rvt, tt); }
+                        fprintf(g->out, "    mov %s, x0\n", tr);
+                    } else {
+                        TokenType bop2 = n->op == TK_PLUS_ASSIGN ? TK_PLUS :
+                                         n->op == TK_MINUS_ASSIGN ? TK_MINUS :
+                                         n->op == TK_STAR_ASSIGN ? TK_STAR : TK_SLASH;
+                        gen_expr(g, n->rhs);                    /* x0 = rhs */
+                        fprintf(g->out, "    mov x1, x0\n");
+                        if (tt.ptr > 0 && (bop2 == TK_PLUS || bop2 == TK_MINUS)) {
+                            int sc = type_size(g, tt.base, tt.ptr - 1, tt.sname);
+                            if (sc != 1) fprintf(g->out, "    mov x9, #%d\n    mul x1, x1, x9\n", sc);
+                        }
+                        fprintf(g->out, "    mov x0, %s\n", tr);
+                        gen_binop_apply(g, bop2, is_unsigned_val(tt.base, tt.ptr));
+                        fprintf(g->out, "    mov %s, x0\n", tr);
+                    }
+                    break;                                       /* x0 = the assigned value */
+                }
+            }
             if (n->op == TK_ASSIGN) {
                 gen_expr(g, n->rhs);
                 { ExprType rvt = type_of(g, n->rhs); gen_coerce_num(g, rvt, tt); }
@@ -1326,7 +1427,7 @@ static void gen_stmt(Gen *g, Node *n) {
             } else {
                 fprintf(g->out, "    mov x0, xzr\n");
             }
-            fprintf(g->out, "    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n");
+            gen_epilogue(g);   /* give back the borrowed registers, then unwind and return */
             break;
         case ND_IF: {
             int lelse = new_label(g), lend = new_label(g);
@@ -1447,6 +1548,15 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
     int frame = 0;
     g->sret_off = 0;
 
+    /* choose which locals live in registers before any symbol exists, so
+     * add_local can tag them, and reserve the slots those registers park in */
+    regplan_build(g, fn, NREGVARS);
+    g->regsave_off = 0;
+    if (g->plan.n > 0) {
+        frame += g->plan.n * 8;
+        g->regsave_off = frame;
+    }
+
     int returns_struct = ((fn->type == TYPE_STRUCT || is_blob16(fn->type, fn->ptr)) && fn->ptr == 0 && !fn->is_extern);
     if (returns_struct)
         g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, NULL, NULL, &frame);
@@ -1481,6 +1591,7 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
         if (frame_size <= 4095) fprintf(g->out, "    sub sp, sp, #%d\n", frame_size);
         else fprintf(g->out, "    mov x9, #%d\n    sub sp, sp, x9\n", frame_size);
     }
+    gen_regsave(g);      /* park the callee-saved registers this function borrows */
 
     /* spill parameters: ints from x0.., floats from d0.., overflow at [x29, #16 + k*8];
      * the hidden struct-return pointer arrives in x8 */
@@ -1516,6 +1627,10 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
             /* spill through x9/x10 ONLY: x0..x7 still carry the remaining parameters */
             if (png < 8) fprintf(g->out, "    mov x9, x%d\n", png++);
             else         fprintf(g->out, "    ldr x9, [x29, #%d]\n", 16 + 8 * pnstk++);
+            if (var_reg(psym)) {   /* a promoted parameter goes to its register, not the frame */
+                fprintf(g->out, "    mov %s, x9\n", var_reg(psym));
+                continue;
+            }
             addr_local(g, "x10", psym->offset);
             switch (psym->size) {
                 case 1:  fprintf(g->out, "    strb w9, [x10]\n"); break;
@@ -1578,7 +1693,8 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
 
     gen_stmt(g, fn->body);
 
-    fprintf(g->out, "    mov x0, xzr\n    mov sp, x29\n    ldp x29, x30, [sp], #16\n    ret\n");
+    fprintf(g->out, "    mov x0, xzr\n");
+    gen_epilogue(g);      /* falling off the end restores what the function borrowed */
 }
 
 /* ---------- 128-bit helper routines (A64) ---------- */

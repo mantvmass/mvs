@@ -533,7 +533,108 @@ int add_local(Gen *g, const char *name, DataType type, int ptr, int arr, char *s
     s->is_global = 0;
     s->sig = sig;                        /* signature (function pointers only) */
     s->offset = *frame;                  /* the variable lives at [rbp - offset .. rbp - offset + size) */
+    s->reg = regplan_index(g, name);     /* ... unless it was promoted to a register */
     return s->offset;
+}
+
+/* ---------- register allocation for locals ----------
+ *
+ * A stack machine that spills every local to the frame spends most of a hot
+ * loop moving the same two values in and out of memory. Promoting the busiest
+ * scalars to callee-saved registers removes that traffic without touching the
+ * rest of the backend: everything else still goes through the frame.
+ *
+ * A variable qualifies when it is a plain 64-bit scalar (integer, pointer or
+ * str), its address is never taken, and its name is declared exactly once in
+ * the function. Anything else (structs, arrays, i128, dyn, floats, shadowed
+ * names) keeps its frame slot, so no other pass has to know about this. */
+
+typedef struct { const char *name; int uses; int ok; } RegCand;
+
+static int rc_find(RegCand *c, int n, const char *name) {
+    for (int i = 0; i < n; i++)
+        if (strcmp(c[i].name, name) == 0) return i;
+    return -1;
+}
+
+/* is this declaration a candidate at all? */
+static int rc_eligible(Node *d) {
+    if (d->arr > 0 || d->is_const) return 0;
+    if (d->ptr > 0) return 1;                       /* any pointer is one word */
+    switch (d->type) {
+        case TYPE_I64: case TYPE_U64: case TYPE_ISIZE: case TYPE_USIZE: case TYPE_STR:
+            return 1;
+        default:
+            return 0;                                /* narrower ints keep their truncating store */
+    }
+}
+
+/* Uses are weighted by loop depth, the estimate every simple allocator uses:
+ * a variable read once inside two nested loops is worth far more than one read
+ * ten times in straight-line code. */
+static void rc_scan(Node *n, RegCand *c, int *nc, int cap, int depth) {
+    if (!n) return;
+    int inner = depth;
+    if (n->kind == ND_WHILE || n->kind == ND_FOR || n->kind == ND_DOWHILE) inner = depth + 1;
+    if ((n->kind == ND_VAR_DECL || n->kind == ND_PARAM) && n->name) {
+        int i = rc_find(c, *nc, n->name);
+        if (i >= 0) c[i].ok = 0;                     /* declared twice: shadowing, leave it in memory */
+        else if (*nc < cap) {
+            c[*nc].name = n->name;
+            c[*nc].uses = 0;
+            c[*nc].ok = rc_eligible(n);
+            (*nc)++;
+        }
+    }
+    if (n->kind == ND_IDENT && n->name) {
+        int i = rc_find(c, *nc, n->name);
+        if (i >= 0) {
+            int w = 1;
+            for (int d = 0; d < depth && d < 4; d++) w *= 8;
+            c[i].uses += w;
+        }
+    }
+    /* &x needs a memory home, and so does anything reached through the name */
+    if (n->kind == ND_UNARY && n->op == TK_AMP && n->operand &&
+        n->operand->kind == ND_IDENT && n->operand->name) {
+        int i = rc_find(c, *nc, n->operand->name);
+        if (i >= 0) c[i].ok = 0;
+    }
+    /* the loop's own condition and step run once per iteration, like its body */
+    Node *kids[9] = { n->lhs, n->rhs, n->operand, n->cond, n->then_branch,
+                      n->else_branch, n->init, n->step, n->body };
+    for (int i = 0; i < 9; i++) rc_scan(kids[i], c, nc, cap, kids[i] == n->init ? depth : inner);
+    for (int i = 0; i < n->nitems; i++) rc_scan(n->items[i], c, nc, cap, inner);
+}
+
+void regplan_build(Gen *g, Node *fn, int npool) {
+    g->plan.n = 0;
+    if (npool > MAX_REGVARS) npool = MAX_REGVARS;
+    if (!fn || !fn->body || npool <= 0) return;
+
+    RegCand cand[MAX_SYM];
+    int nc = 0;
+    for (int i = 0; i < fn->nitems; i++) rc_scan(fn->items[i], cand, &nc, MAX_SYM, 0);
+    rc_scan(fn->body, cand, &nc, MAX_SYM, 0);
+
+    /* the busiest eligible variables win; ties keep declaration order */
+    while (g->plan.n < npool) {
+        int best = -1;
+        for (int i = 0; i < nc; i++) {
+            if (!cand[i].ok || cand[i].uses < 1) continue;
+            if (best < 0 || cand[i].uses > cand[best].uses) best = i;
+        }
+        if (best < 0) break;
+        g->plan.names[g->plan.n++] = (char *)cand[best].name;
+        cand[best].ok = 0;
+    }
+}
+
+int regplan_index(Gen *g, const char *name) {
+    if (!name) return -1;
+    for (int i = 0; i < g->plan.n; i++)
+        if (strcmp(g->plan.names[i], name) == 0) return i;
+    return -1;
 }
 
 /* Walk the function body to reserve space for every variable declaration (pre-pass),

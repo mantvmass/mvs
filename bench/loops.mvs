@@ -1,0 +1,66 @@
+// bench/loops.mvs - the shapes a low-level language must not be slow at
+// The C file next to it is the same program; scripts/bench.sh times both.
+import { io } from "std";
+
+// a tight accumulation loop: the loop counter and the accumulator are the
+// whole working set, so this measures how often a local touches memory
+func sum_to(n: i64) -> i64 {
+    let acc: i64 = 0;
+    let i: i64 = 0;
+    while (i < n) {
+        acc = acc + i;
+        i = i + 1;
+    }
+    return acc;
+}
+
+// nested loops with a little arithmetic in the middle
+func triangle(n: i64) -> i64 {
+    let total: i64 = 0;
+    let i: i64 = 0;
+    while (i < n) {
+        let j: i64 = 0;
+        while (j < i) {
+            total = total + (i * j) % 7;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return total;
+}
+
+// call overhead and recursion
+func fib(n: i64) -> i64 {
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+// pointer walking over a heap buffer
+extern func malloc(n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+
+func sieve(limit: i64) -> i64 {
+    let flags: *u8 = malloc((limit + 1) as usize);
+    let i: i64 = 0;
+    while (i <= limit) { flags[i as usize] = 1; i = i + 1; }
+    let count: i64 = 0;
+    let p: i64 = 2;
+    while (p <= limit) {
+        if (flags[p as usize] == 1) {
+            count = count + 1;
+            let q: i64 = p * p;
+            while (q <= limit) { flags[q as usize] = 0; q = q + p; }
+        }
+        p = p + 1;
+    }
+    free(flags);
+    return count;
+}
+
+func main() -> i8 {
+    io.out("{}", sum_to(200000000));
+    io.out("{}", triangle(20000));
+    io.out("{}", fib(32));
+    io.out("{}", sieve(20000000));
+    return 0;
+}

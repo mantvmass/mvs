@@ -175,6 +175,9 @@ Build / assemble / link:
     with three or more parameters where a later one is a struct, `dyn`, or `i128`. It unrolls the
     copy for sizes up to 128 bytes and saves/restores the counter for bigger ones.
   - Free scratch (volatile) registers: rax, rcx, rdx, r8, r9, r10, r11, xmm0-5.
+  - **rbx, r12, r13 and r14 belong to the register allocator** (x19 to x22 on arm64). A function
+    that borrows them parks them in its frame in the prologue and restores them at every return,
+    so emitting code that clobbers one without saving it corrupts a live variable.
 
 ## 5. Label naming (don't collide with the C runtime)
 

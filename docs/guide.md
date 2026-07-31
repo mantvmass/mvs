@@ -1102,6 +1102,29 @@ Takeaways: every expression evaluates into `rax` (a simple stack machine); a bin
 pushes it to a temp, evaluates the right, then combines; `i32` stores via `eax` and loads via `movsxd`
 (that's "real type width"); temp pushes use 16 bytes to keep 16-byte alignment.
 
+#### What makes it fast enough to be called low-level
+
+Two things cut most of the frame traffic a plain stack machine produces:
+
+- **Locals in registers.** Before a function is emitted, the busiest scalars
+  whose address is never taken are given callee-saved registers (`rbx`, `r12`,
+  `r13`, `r14`; `x19` to `x22` on arm64). Uses are weighted by loop depth, so a
+  loop counter wins over a variable touched ten times in straight-line code. The
+  registers are parked in the frame in the prologue and restored at every return,
+  so a C caller gets them back untouched. Everything else (structs, arrays,
+  `i128`, `dyn`, floats, shadowed names, anything whose address is taken) keeps
+  its frame slot, which is why the rest of the backend needs no changes.
+- **No temp stack for simple operands.** When both sides of a binary operation
+  are already sitting somewhere (a literal, a register variable, a plain 8-byte
+  slot), they are loaded straight into `rax` and `rcx`. The `sub rsp` / `mov` /
+  `mov` / `add rsp` sequence disappears.
+
+`sh scripts/bench.sh` times the same program built by MVS and by C and prints
+the ratio. On the loop, recursion and sieve benchmark those two changes moved
+MVS from **8.4x** `gcc -O2` to about **3x** (roughly 1.8x `gcc -O0`). The rest of
+the gap is the stack machine everything else still goes through, and the lack of
+instruction selection: no strength reduction, no unrolling, no vectorization.
+
 ### 6.2 Calling a function (win64 ABI)
 
 ```txt

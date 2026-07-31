@@ -19,6 +19,7 @@
 #   7  debug info           -g line tables reach back to .mvs
 #   8  sanitizers           the whole suite under ASan and UBSan
 #   9  fuzzing              mutations, token soup and nesting stress
+#  10  performance          the same program in MVS and in C, timed, ratio reported
 #
 # Usage: sh scripts/audit.sh [quick]   (quick skips arm64 and shortens the fuzz)
 set -u
@@ -136,6 +137,13 @@ if [ -x ./mvs_asan ]; then
     fi
 fi
 rm -f mvs_asan
+
+step "10. performance against the C reference"
+if sh scripts/bench.sh > /tmp/audit_bench.txt 2>&1; then
+    tail -3 /tmp/audit_bench.txt
+else
+    tail -6 /tmp/audit_bench.txt; note "benchmark"
+fi
 
 printf '\n===============================\n'
 if [ -z "$fails" ]; then

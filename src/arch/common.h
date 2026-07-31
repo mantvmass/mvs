@@ -42,7 +42,17 @@ typedef struct {
     int      is_global; /* 1 = global variable, 0 = local variable on the stack */
     int      offset;    /* for locals: distance from rbp (positive, used as [rbp - offset]) */
     Node    *sig;       /* signature when type == TYPE_FUNC (function pointer), else NULL */
+    int      reg;       /* register allocation: index into the backend's callee-saved pool, or -1 for memory */
 } Sym;
+
+/* Which locals of the function being generated live in a register instead of a
+ * frame slot. Built once per function before any code is emitted, so add_local
+ * can tag each symbol as it is created. */
+#define MAX_REGVARS 8
+typedef struct {
+    char *names[MAX_REGVARS];   /* the chosen variables, by name (not owned) */
+    int   n;                    /* how many of the pool's registers are in use */
+} RegPlan;
 
 /* One field inside a struct (with offset and size, used when accessing members) */
 typedef struct {
@@ -99,6 +109,8 @@ typedef struct {
     int cur_ret_float;      /* 1 if the function being generated returns a float (must return via xmm0) */
     int cur_ret_f32c;       /* 1 if an exported function returns f32 (must convert double -> single for C) */
     int cur_ret_i128;       /* 1 if the function returns i128/u128 (goes through the hidden sret pointer) */
+    RegPlan plan;           /* locals promoted to registers in the current function */
+    int regsave_off;        /* frame offset where the callee-saved registers are parked */
     const char *cur_ret_dyn;/* trait name if the function returns dyn Trait (hidden sret pointer), else NULL */
     int io_imported;        /* 1 if the io module was imported (gates the built-in io.out function) */
 
@@ -179,6 +191,8 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
 
 /* --- reserving variable space on the stack (frame layout) --- */
 int   add_local(Gen *g, const char *name, DataType type, int ptr, int arr, char *sname, Node *sig, int *frame);
+void  regplan_build(Gen *g, Node *fn, int npool);   /* choose the locals worth a register */
+int   regplan_index(Gen *g, const char *name);      /* slot for a name, or -1 */
 void  collect_locals(Gen *g, Node *n, int *frame);
 void  collect_struct_temps(Gen *g, Node *n, int *frame);  /* reserve temps for struct-returning calls (rvalues) */
 
