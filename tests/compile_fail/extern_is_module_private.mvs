@@ -1,0 +1,8 @@
+//~ ERROR: undefined
+// an extern belongs to the module that declared it: std/io declares printf, so
+// calling it unqualified from here must not silently reach that declaration
+import { io } from "std";
+func main() -> i8 {
+    printf("hello\n");
+    return 0;
+}

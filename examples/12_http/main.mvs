@@ -1,0 +1,216 @@
+/*
+ * examples/12_http/main.mvs - a web application on std/http
+ *
+ * The shape is axum's: a Router built from method routers, handlers that take
+ * the request and return a Response, and a listener the server loop runs on.
+ *
+ * Routes, path parameters, query strings, a POST body, JSON, a redirect, a
+ * custom 404 and a 405, all served over a real socket. Server and client run
+ * in one process: the request is sent first, then the server accepts it, which
+ * is the same loopback trick examples/08_stdlib/net_loop.mvs uses and is what
+ * makes the output identical on every run and every target.
+ *
+ * Memory is manual: each round trip drops the response String it read, and the
+ * server drops the Request and Response it built.
+ */
+import { io, mem } from "std";
+import { Router, Listener, Request, Response } from "std/http";
+import { get, post, put, delete, head, options, any } from "std/http";
+import { Text, Html, Json, Status, Redirect } from "std/http";
+import { serve_once, serve_n } from "std/http";
+import { send_request, read_response, response_status, response_body, response_header } from "std/http";
+import { TcpSocket } from "std/net";
+import { String } from "std/string";
+import { Option, Some, None } from "std/option";
+
+const ADDR: str = "127.0.0.1:47822";
+
+// ---- handlers ----------------------------------------------------------
+
+func home(_req: *Request) -> Response {
+    return Html("<h1>mvs http</h1>");
+}
+
+func show_user(req: *Request) -> Response {
+    match (req.param("id")) {
+        Some(id) => {
+            let body: String = String::from("user ");
+            body.push_str(id);
+            let res: Response = Text(body.as_str());
+            body.drop();
+            return res;
+        }
+        None => { return Text("missing id").status(400); }
+    }
+}
+
+// two captures in one pattern, to prove the router keeps them apart
+func show_post(req: *Request) -> Response {
+    let body: String = String::new();
+    match (req.param("user")) { Some(u) => { body.push_str(u); } None => { } }
+    body.push_str("/");
+    match (req.param("post")) { Some(p) => { body.push_str(p); } None => { } }
+    let res: Response = Text(body.as_str());
+    body.drop();
+    return res;
+}
+
+func search(req: *Request) -> Response {
+    match (req.query("q")) {
+        Some(q) => {
+            let body: String = String::from("searching for ");
+            body.push_str(q);
+            let res: Response = Text(body.as_str());
+            body.drop();
+            return res;
+        }
+        None => { return Text("q is required").status(400); }
+    }
+}
+
+func echo(req: *Request) -> Response {
+    return Text(req.body).header("X-Echo", "1");
+}
+
+func stats(_req: *Request) -> Response {
+    return Json("{\"ok\":true,\"service\":\"mvs\"}");
+}
+
+func old_path(_req: *Request) -> Response {
+    return Redirect("/");
+}
+
+func teapot(_req: *Request) -> Response {
+    return Text("I am a teapot").status(418);
+}
+
+func assets(req: *Request) -> Response {
+    return Text(req.path).content_type("text/css");
+}
+
+func create_user(req: *Request) -> Response {
+    return Text(req.body).status(201).header("Location", "/users/new");
+}
+
+func replace_user(req: *Request) -> Response {
+    match (req.param("id")) {
+        Some(id) => { return Text(id).header("X-Replaced", "1"); }
+        None => { return Text("missing id").status(400); }
+    }
+}
+
+func remove_user(_req: *Request) -> Response {
+    return Status(204);
+}
+
+func ping(_req: *Request) -> Response {
+    return Status(200);
+}
+
+func not_found(req: *Request) -> Response {
+    let body: String = String::from("no route for ");
+    body.push_str(req.path);
+    let res: Response = Text(body.as_str()).status(404);
+    body.drop();
+    return res;
+}
+
+// ---- driving the server from the same process --------------------------
+
+// One round trip: send, let the server answer it, read the reply, print it.
+func call(l: *Listener, app: *Router, method: str, path: str, body: str) -> void {
+    let sock: TcpSocket = send_request(ADDR, method, path, body);
+    serve_once(l, app);
+    let resp: String = read_response(&sock);
+    let text: str = response_body(resp.as_str());
+    io.out("{} {} -> {} {}", method, path, response_status(resp.as_str()), text);
+    mem.dealloc(text as *u8);
+    resp.drop();
+    sock.close();
+}
+
+// the same, but showing a header instead of the body
+func call_header(l: *Listener, app: *Router, method: str, path: str, name: str) -> void {
+    let sock: TcpSocket = send_request(ADDR, method, path, "");
+    serve_once(l, app);
+    let resp: String = read_response(&sock);
+    let status: i64 = response_status(resp.as_str());
+    match (response_header(resp.as_str(), name)) {
+        Some(v) => {
+            io.out("{} {} -> {} [{}: {}]", method, path, status, name, v);
+            mem.dealloc(v as *u8);
+        }
+        None => { io.out("{} {} -> {} [no {} header]", method, path, status, name); }
+    }
+    resp.drop();
+    sock.close();
+}
+
+func main() -> i8 {
+    let app: Router = Router::new()
+        .route("/", get(home))
+        .route("/users/:id", get(show_user).put(replace_user).delete(remove_user))
+        .route("/users", post(create_user))
+        .route("/users/:user/posts/:post", get(show_post))
+        .route("/search", get(search))
+        .route("/echo", post(echo))
+        .route("/api/stats", get(stats))
+        .route("/old", get(old_path))
+        .route("/assets/*", get(assets))
+        .route("/ping", head(ping).on("OPTIONS", ping))
+        .route("/teapot", any(teapot))
+        .fallback(not_found);
+
+    let l: Listener = Listener::bind(ADDR);
+    if (!l.ok) { io.out("could not bind {}", ADDR); return 1; }
+
+    io.out("--- routing");
+    call(&l, &app, "GET", "/", "");
+    call(&l, &app, "GET", "/users/42", "");
+    call(&l, &app, "GET", "/users/alice/posts/7", "");
+    call(&l, &app, "GET", "/assets/css/site.css", "");
+
+    io.out("--- query strings, percent decoded");
+    call(&l, &app, "GET", "/search?q=hello+world", "");
+    call(&l, &app, "GET", "/search?page=2&q=caf%C3%A9", "");
+    call(&l, &app, "GET", "/search", "");
+
+    io.out("--- bodies and content types");
+    call(&l, &app, "POST", "/echo", "the body came back");
+    call(&l, &app, "GET", "/api/stats", "");
+    call_header(&l, &app, "GET", "/api/stats", "Content-Type");
+
+    io.out("--- any method, redirects, errors");
+    call(&l, &app, "DELETE", "/teapot", "");
+    call_header(&l, &app, "GET", "/old", "Location");
+    call(&l, &app, "POST", "/users/42", "");      // path matches, method does not
+    call(&l, &app, "GET", "/nope", "");           // the custom fallback
+
+    io.out("--- headers set by a handler");
+    call_header(&l, &app, "POST", "/echo", "X-Echo");
+
+    io.out("--- one path, several methods");
+    call(&l, &app, "POST", "/users", "new user");
+    call(&l, &app, "PUT", "/users/9", "");
+    call(&l, &app, "DELETE", "/users/9", "");
+    call(&l, &app, "HEAD", "/ping", "");
+    call(&l, &app, "OPTIONS", "/ping", "");
+
+    io.out("--- two requests in flight, served as a batch, with the access log on");
+    app.log(true);
+    let a: TcpSocket = send_request(ADDR, "GET", "/users/1", "");
+    let b: TcpSocket = send_request(ADDR, "GET", "/users/2", "");
+    serve_n(&l, &app, 2);
+    let ra: String = read_response(&a);
+    let rb: String = read_response(&b);
+    io.out("first  -> {}", response_status(ra.as_str()));
+    io.out("second -> {}", response_status(rb.as_str()));
+    ra.drop(); rb.drop();
+    a.close(); b.close();
+    app.log(false);
+
+    io.out("--- served {} request(s)", app.requests);
+    l.close();
+    app.drop();
+    return 0;
+}

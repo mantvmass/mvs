@@ -1,0 +1,32 @@
+--- routing
+GET / -> 200 <h1>mvs http</h1>
+GET /users/42 -> 200 user 42
+GET /users/alice/posts/7 -> 200 alice/7
+GET /assets/css/site.css -> 200 /assets/css/site.css
+--- query strings, percent decoded
+GET /search?q=hello+world -> 200 searching for hello world
+GET /search?page=2&q=caf%C3%A9 -> 200 searching for café
+GET /search -> 400 q is required
+--- bodies and content types
+POST /echo -> 200 the body came back
+GET /api/stats -> 200 {"ok":true,"service":"mvs"}
+GET /api/stats -> 200 [Content-Type: application/json]
+--- any method, redirects, errors
+DELETE /teapot -> 418 I am a teapot
+GET /old -> 302 [Location: /]
+POST /users/42 -> 405 405 method not allowed
+GET /nope -> 404 no route for /nope
+--- headers set by a handler
+POST /echo -> 200 [X-Echo: 1]
+--- one path, several methods
+POST /users -> 201 new user
+PUT /users/9 -> 200 9
+DELETE /users/9 -> 204 
+HEAD /ping -> 200 
+OPTIONS /ping -> 200 
+--- two requests in flight, served as a batch, with the access log on
+GET /users/1 -> 200
+GET /users/2 -> 200
+first  -> 200
+second -> 200
+--- served 22 request(s)

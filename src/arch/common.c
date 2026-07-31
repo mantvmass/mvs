@@ -31,16 +31,23 @@ Node *find_func(Gen *g, const char *ns, const char *name) {
     for (int i = 0; i < g->nfuncs; i++) {
         Node *f = g->funcs[i];
         const char *fns = f->ns ? f->ns : "";
-        if (strcmp(f->name, name) == 0 && strcmp(fns, ns) == 0) return f;
+        if (strcmp(f->name, name) != 0 || strcmp(fns, ns) != 0) continue;
+        /* An extern belongs to the module that declared it: a C declaration is
+         * that module's business, reachable there by name and elsewhere only as
+         * ns.func(...). Without this, one module's `extern func listen` would
+         * answer another module's unqualified call to its own listen. */
+        if (f->is_extern && f->mod && f->mod[0] && strcmp(f->mod, ns) != 0) continue;
+        return f;
     }
-    /* Namespace fallback: ns.func(...) also reaches an extern DECLARED by module ns
-     * (externs keep their raw C label, so they carry mod instead of ns; this makes
-     * calls like math.fmod(...) hit the libm fmod that std/math declared) */
+    /* Module fallback: a call inside module M resolves to M's own function or
+     * extern before any same-named one elsewhere. Externs keep their raw C label
+     * and carry mod instead of ns, which is what makes math.fmod(...) reach the
+     * libm fmod std/math declared, and what stops another module's 'listen' from
+     * capturing std/net's call to the socket listen it declared itself. */
     if (ns && ns[0]) {
         for (int i = 0; i < g->nfuncs; i++) {
             Node *f = g->funcs[i];
-            if (f->is_extern && strcmp(f->name, name) == 0 &&
-                f->mod && strcmp(f->mod, ns) == 0) return f;
+            if (strcmp(f->name, name) == 0 && f->mod && strcmp(f->mod, ns) == 0) return f;
         }
     }
     return NULL;
@@ -690,6 +697,15 @@ void reach_func(Gen *g, int idx, char *reached) {
     reach_node(g, f->body, f->mod ? f->mod : "", reached);
 }
 
+/* Find an extern by name whoever declared it. Externs are private to their
+ * module for name resolution, but io.out is a compiler intrinsic that emits a
+ * call to printf no matter which module declared it. */
+Node *find_extern_any(Gen *g, const char *name) {
+    for (int i = 0; i < g->nfuncs; i++)
+        if (g->funcs[i]->is_extern && strcmp(g->funcs[i]->name, name) == 0) return g->funcs[i];
+    return NULL;
+}
+
 /* Scan a node for function calls and mark the targets reachable (recursively visits every child) */
 void reach_node(Gen *g, Node *n, const char *ns, char *reached) {
     if (!n) return;
@@ -697,7 +713,7 @@ void reach_node(Gen *g, Node *n, const char *ns, char *reached) {
         Node *callee = n->operand;
         if (callee->kind == ND_MEMBER && callee->operand->kind == ND_IDENT &&
             strcmp(callee->operand->name, "io") == 0 && strcmp(callee->name, "out") == 0) {
-            reach_func(g, func_index(g, find_func(g, "", "printf")), reached); /* io.out uses printf */
+            reach_func(g, func_index(g, find_extern_any(g, "printf")), reached); /* io.out uses printf */
         } else if (callee->kind == ND_IDENT) {
             Node *t = find_func(g, ns, callee->name);
             if (!t) t = find_func(g, "", callee->name);

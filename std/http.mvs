@@ -1,0 +1,837 @@
+/*
+ * std/http.mvs - an HTTP/1.1 server framework, written in MVS
+ *
+ * The shape is axum's: a Router built from method routers, handlers that take
+ * the request and return a Response, and a listener the server loop runs on.
+ *
+ *     import { Router, Request, Response } from "std/http";
+ *     import { get, post, Text, Html, Json, Status, Listener, serve } from "std/http";
+ *
+ *     func home(_req: *Request) -> Response {
+ *         return Html("<h1>Home</h1>");
+ *     }
+ *     func show(req: *Request) -> Response {
+ *         match (req.param("id")) {
+ *             Some(id) => { return Text(id); }
+ *             None => { return Status(400); }
+ *         }
+ *     }
+ *     func create(req: *Request) -> Response {
+ *         return Json(req.body).status(201).header("Location", "/users/new");
+ *     }
+ *
+ *     func main() -> i8 {
+ *         let app: Router = Router::new()
+ *             .route("/", get(home))
+ *             .route("/users/:id", get(show).post(create))
+ *             .route("/assets/*", get(assets))
+ *             .fallback(my404);
+ *
+ *         let l: Listener = Listener::bind("0.0.0.0:8080");
+ *         serve(&l, &app);
+ *         l.close();
+ *         app.drop();
+ *         return 0;
+ *     }
+ *
+ * Routing is first match wins, in the order the routes were added. A pattern
+ * segment starting with ':' captures that segment into `req.param(name)`; a
+ * segment that is just '*' matches the rest of the path.
+ *
+ * Memory is manual, as everywhere in MVS (docs/rules.md 0.2). The server owns
+ * the Request for the duration of one call and drops it after the handler
+ * returns, so a handler must not keep pointers into it; the Response a handler
+ * returns is owned by whoever received it, which is the server loop in serve()
+ * and the caller in handle().
+ *
+ * Not implemented on purpose: TLS, chunked transfer encoding, keep-alive
+ * (every response closes the connection), and multipart bodies. A request
+ * larger than MAX_REQUEST bytes is refused rather than growing forever.
+ */
+import { mem } from "std";
+import { cstr } from "core";
+import { Vec } from "std/vec";
+import { HashMap } from "std/map";
+import { String } from "std/string";
+import { Option, Some, None } from "std/option";
+import { TcpServer, TcpSocket } from "std/net";
+
+const MAX_REQUEST: i64 = 65536;      // a request bigger than this is refused
+const SP: u8 = 32;
+const CR: u8 = 13;
+const LF: u8 = 10;
+const COLON: u8 = 58;
+const STAR: u8 = 42;
+const SLASH: u8 = 47;
+
+// ---------------------------------------------------------------- strings
+// Small helpers the framework needs. They allocate, and every allocation ends
+// up owned by a Request or a Response, which frees it in drop.
+
+// a fresh NUL-terminated copy of s[start, end)
+func slice(s: str, start: i64, end: i64) -> str {
+    if (end < start) { end = start; }
+    let n: i64 = end - start;
+    let p: *u8 = s as *u8;
+    let buf: *u8 = mem.alloc((n + 1) as usize);
+    let i: i64 = 0;
+    while (i < n) {
+        buf[i as usize] = p[(start + i) as usize];
+        i = i + 1;
+    }
+    buf[n as usize] = 0;
+    return buf as str;
+}
+
+// index of the first byte b at or after `from`, or -1
+func index_of(s: str, b: u8, from: i64) -> i64 {
+    let p: *u8 = s as *u8;
+    let n: i64 = cstr.len(s) as i64;
+    let i: i64 = from;
+    while (i < n) {
+        if (p[i as usize] == b) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// index of the first "\r\n\r\n", or -1
+func header_end(s: str) -> i64 {
+    let p: *u8 = s as *u8;
+    let n: i64 = cstr.len(s) as i64;
+    let i: i64 = 0;
+    while (i + 3 < n) {
+        if (p[i as usize] == CR && p[(i + 1) as usize] == LF &&
+            p[(i + 2) as usize] == CR && p[(i + 3) as usize] == LF) { return i; }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// ASCII lowercase copy, used so header lookups are case insensitive
+func lower(s: str) -> str {
+    let n: i64 = cstr.len(s) as i64;
+    let p: *u8 = s as *u8;
+    let buf: *u8 = mem.alloc((n + 1) as usize);
+    let i: i64 = 0;
+    while (i < n) {
+        let c: u8 = p[i as usize];
+        if (c >= 65 && c <= 90) { c = c + 32; }
+        buf[i as usize] = c;
+        i = i + 1;
+    }
+    buf[n as usize] = 0;
+    return buf as str;
+}
+
+func is_space(c: u8) -> bool { return c == SP || c == 9; }
+
+// a copy of s without leading and trailing spaces or tabs
+func trim(s: str) -> str {
+    let n: i64 = cstr.len(s) as i64;
+    let p: *u8 = s as *u8;
+    let a: i64 = 0;
+    while (a < n && is_space(p[a as usize])) { a = a + 1; }
+    let b: i64 = n;
+    while (b > a && is_space(p[(b - 1) as usize])) { b = b - 1; }
+    return slice(s, a, b);
+}
+
+// non-negative integer at the start of s, or -1 when there is no digit
+func to_int(s: str) -> i64 {
+    let n: i64 = cstr.len(s) as i64;
+    let p: *u8 = s as *u8;
+    let i: i64 = 0;
+    let v: i64 = 0;
+    let any: bool = false;
+    while (i < n && p[i as usize] >= 48 && p[i as usize] <= 57) {
+        v = v * 10 + ((p[i as usize] - 48) as i64);
+        any = true;
+        i = i + 1;
+    }
+    if (!any) { return 0 - 1; }
+    return v;
+}
+
+func hex_val(c: u8) -> i64 {
+    if (c >= 48 && c <= 57) { return (c - 48) as i64; }
+    if (c >= 97 && c <= 102) { return (c - 97 + 10) as i64; }
+    if (c >= 65 && c <= 70) { return (c - 65 + 10) as i64; }
+    return 0 - 1;
+}
+
+// percent decoding, with '+' meaning a space (query strings use that)
+func url_decode(s: str) -> str {
+    let n: i64 = cstr.len(s) as i64;
+    let p: *u8 = s as *u8;
+    let buf: *u8 = mem.alloc((n + 1) as usize);
+    let i: i64 = 0;
+    let o: i64 = 0;
+    while (i < n) {
+        let c: u8 = p[i as usize];
+        if (c == 37 && i + 2 < n) {                       // '%'
+            let hi: i64 = hex_val(p[(i + 1) as usize]);
+            let lo: i64 = hex_val(p[(i + 2) as usize]);
+            if (hi >= 0 && lo >= 0) {
+                buf[o as usize] = (hi * 16 + lo) as u8;
+                o = o + 1;
+                i = i + 3;
+            } else {
+                buf[o as usize] = c; o = o + 1; i = i + 1;
+            }
+        } else if (c == 43) {                             // '+'
+            buf[o as usize] = SP; o = o + 1; i = i + 1;
+        } else {
+            buf[o as usize] = c; o = o + 1; i = i + 1;
+        }
+    }
+    buf[o as usize] = 0;
+    return buf as str;
+}
+
+// ---------------------------------------------------------------- request
+
+struct Request {
+    method: str;                  // "GET", as it arrived
+    path: str;                    // "/users/42", percent decoded
+    query_string: str;            // "a=1&b=2", raw
+    version: str;                 // "HTTP/1.1"
+    headers: HashMap<str, str>;   // names lowercased
+    params: HashMap<str, str>;    // captured path segments
+    body: str;
+    owned: Vec<i64>;              // every allocation this request holds
+    ok: bool;                     // false when parsing failed
+}
+
+impl Request {
+    func empty() -> Request {
+        let r: Request = Request {
+            method: "", path: "", query_string: "", version: "",
+            headers: HashMap<str, str>::new(),
+            params: HashMap<str, str>::new(),
+            body: "",
+            owned: Vec<i64>::new(),
+            ok: false,
+        };
+        return r;
+    }
+
+    func track(self: *Request, s: str) -> str {
+        self.owned.push(s as i64);
+        return s;
+    }
+
+    // a header by name, case insensitive
+    func header(self: *Request, name: str) -> Option<str> {
+        let key: str = lower(name);
+        let got: Option<str> = self.headers.get(key);
+        mem.dealloc(key as *u8);
+        return got;
+    }
+
+    // a captured path segment: "/users/:id" against "/users/42" gives "42"
+    func param(self: *Request, name: str) -> Option<str> {
+        return self.params.get(name);
+    }
+
+    // a value from the query string, percent decoded
+    func query(self: *Request, name: str) -> Option<str> {
+        let q: str = self.query_string;
+        let n: i64 = cstr.len(q) as i64;
+        let start: i64 = 0;
+        while (start < n) {
+            let amp: i64 = index_of(q, 38, start);        // '&'
+            let end: i64 = amp;
+            if (end < 0) { end = n; }
+            let eq: i64 = index_of(q, 61, start);         // '='
+            if (eq >= 0 && eq < end) {
+                let key: str = slice(q, start, eq);
+                let hit: bool = cstr.eq(key, name);
+                mem.dealloc(key as *u8);
+                if (hit) {
+                    let raw: str = slice(q, eq + 1, end);
+                    let val: str = url_decode(raw);
+                    mem.dealloc(raw as *u8);
+                    self.track(val);
+                    return Some(val);
+                }
+            }
+            if (amp < 0) { return None(); }
+            start = amp + 1;
+        }
+        return None();
+    }
+
+    func content_length(self: *Request) -> i64 {
+        match (self.header("content-length")) {
+            Some(v) => { return to_int(v); }
+            None => { return 0; }
+        }
+    }
+
+    func is_method(self: *Request, m: str) -> bool { return cstr.eq(self.method, m); }
+
+    func drop(self: *Request) -> void {
+        let i: usize = 0;
+        while (i < self.owned.len()) {
+            mem.dealloc(self.owned.get(i) as *u8);
+            i = i + 1;
+        }
+        self.owned.drop();
+        self.headers.drop();
+        self.params.drop();
+    }
+}
+
+// Parse a whole request. Everything the Request points at is copied out of
+// `raw`, so the caller may free the buffer as soon as this returns.
+func parse_request(raw: str) -> Request {
+    let req: Request = Request::empty();
+    let n: i64 = cstr.len(raw) as i64;
+    if (n <= 0 || n > MAX_REQUEST) { return req; }
+
+    // request line: METHOD SP TARGET SP VERSION CRLF
+    let sp1: i64 = index_of(raw, SP, 0);
+    if (sp1 < 0) { return req; }
+    let sp2: i64 = index_of(raw, SP, sp1 + 1);
+    if (sp2 < 0) { return req; }
+    let eol: i64 = index_of(raw, LF, sp2 + 1);
+    if (eol < 0) { return req; }
+    let vend: i64 = eol;
+    let p: *u8 = raw as *u8;
+    if (vend > 0 && p[(vend - 1) as usize] == CR) { vend = vend - 1; }
+
+    req.method = req.track(slice(raw, 0, sp1));
+    req.version = req.track(slice(raw, sp2 + 1, vend));
+
+    // split the target into path and query, then decode the path
+    let target: str = slice(raw, sp1 + 1, sp2);
+    let qmark: i64 = index_of(target, 63, 0);            // '?'
+    if (qmark >= 0) {
+        let rawpath: str = slice(target, 0, qmark);
+        req.path = req.track(url_decode(rawpath));
+        mem.dealloc(rawpath as *u8);
+        req.query_string = req.track(slice(target, qmark + 1, cstr.len(target) as i64));
+    } else {
+        req.path = req.track(url_decode(target));
+        req.query_string = req.track(slice(target, 0, 0));
+    }
+    mem.dealloc(target as *u8);
+
+    // headers, one per line, until an empty line
+    let pos: i64 = eol + 1;
+    let scanning: bool = true;
+    while (scanning) {
+        if (pos >= n) { scanning = false; }
+        else {
+            let e: i64 = index_of(raw, LF, pos);
+            if (e < 0) { e = n; }
+            let lineend: i64 = e;
+            if (lineend > pos && p[(lineend - 1) as usize] == CR) { lineend = lineend - 1; }
+            if (lineend == pos) {                        // the empty line ends the headers
+                pos = e + 1;
+                scanning = false;
+            } else {
+                let c: i64 = index_of(raw, COLON, pos);
+                if (c >= 0 && c < lineend) {
+                    let namepart: str = slice(raw, pos, c);
+                    let key: str = lower(namepart);
+                    mem.dealloc(namepart as *u8);
+                    let valpart: str = slice(raw, c + 1, lineend);
+                    let val: str = trim(valpart);
+                    mem.dealloc(valpart as *u8);
+                    req.track(key);
+                    req.track(val);
+                    req.headers.insert(key, val);
+                }
+                pos = e + 1;
+            }
+        }
+    }
+    if (pos > n) { pos = n; }
+    req.body = req.track(slice(raw, pos, n));
+    req.ok = true;
+    return req;
+}
+// --------------------------------------------------------------- response
+// A handler returns a Response. The constructors are free functions named
+// after what they produce, the way axum spells Html(...) and Json(...), and
+// every modifier returns the response so they chain:
+//
+//     return Text("hello");
+//     return Html("<h1>Home</h1>");
+//     return Json(doc).status(201).header("Location", "/x");
+//     return Status(404);
+
+struct Response {
+    status: i64;
+    ctype: str;             // Content-Type value
+    extra: String;          // extra header lines, already formatted
+    body: String;
+}
+
+// an empty response carrying just a status
+func Status(code: i64) -> Response {
+    let r: Response = Response {
+        status: code,
+        ctype: "text/plain; charset=utf-8",
+        extra: String::new(),
+        body: String::new(),
+    };
+    return r;
+}
+
+func Text(body: str) -> Response {
+    let r: Response = Status(200);
+    r.body.push_str(body);
+    return r;
+}
+
+func Html(body: str) -> Response {
+    let r: Response = Status(200);
+    r.ctype = "text/html; charset=utf-8";
+    r.body.push_str(body);
+    return r;
+}
+
+// the body is sent as JSON; building the document is the caller's job
+func Json(body: str) -> Response {
+    let r: Response = Status(200);
+    r.ctype = "application/json";
+    r.body.push_str(body);
+    return r;
+}
+
+func Redirect(location: str) -> Response {
+    let r: Response = Status(302);
+    return r.header("Location", location);
+}
+
+impl Response {
+    // override the status: Json(doc).status(201)
+    func status(self: *Response, code: i64) -> Response {
+        self.status = code;
+        return *self;
+    }
+
+    func header(self: *Response, name: str, value: str) -> Response {
+        self.extra.push_str(name);
+        self.extra.push_str(": ");
+        self.extra.push_str(value);
+        self.extra.push_str("\r\n");
+        return *self;
+    }
+
+    func content_type(self: *Response, value: str) -> Response {
+        self.ctype = value;
+        return *self;
+    }
+
+    // append to the body
+    func write(self: *Response, s: str) -> Response {
+        self.body.push_str(s);
+        return *self;
+    }
+
+    func code(self: *Response) -> i64 { return self.status; }
+
+    // the full response text, ready to write to a socket. The caller owns it.
+    func render(self: *Response) -> String {
+        let out: String = String::new();
+        out.push_str("HTTP/1.1 ");
+        let code: String = String::from_int(self.status);
+        out.push_str(code.as_str());
+        code.drop();
+        out.push_str(" ");
+        out.push_str(status_text(self.status));
+        out.push_str("\r\nContent-Type: ");
+        out.push_str(self.ctype);
+        out.push_str("\r\nContent-Length: ");
+        let len: String = String::from_uint(self.body.len() as u64);
+        out.push_str(len.as_str());
+        len.drop();
+        out.push_str("\r\nConnection: close\r\n");
+        out.push_str(self.extra.as_str());
+        out.push_str("\r\n");
+        out.push_str(self.body.as_str());
+        return out;
+    }
+
+    func drop(self: *Response) -> void {
+        self.extra.drop();
+        self.body.drop();
+    }
+}
+
+// the reason phrase for a status code
+func status_text(code: i64) -> str {
+    if (code == 200) { return "OK"; }
+    else if (code == 201) { return "Created"; }
+    else if (code == 204) { return "No Content"; }
+    else if (code == 301) { return "Moved Permanently"; }
+    else if (code == 302) { return "Found"; }
+    else if (code == 304) { return "Not Modified"; }
+    else if (code == 400) { return "Bad Request"; }
+    else if (code == 401) { return "Unauthorized"; }
+    else if (code == 403) { return "Forbidden"; }
+    else if (code == 404) { return "Not Found"; }
+    else if (code == 405) { return "Method Not Allowed"; }
+    else if (code == 409) { return "Conflict"; }
+    else if (code == 413) { return "Payload Too Large"; }
+    else if (code == 418) { return "I am a teapot"; }
+    else if (code == 429) { return "Too Many Requests"; }
+    else if (code == 500) { return "Internal Server Error"; }
+    else if (code == 501) { return "Not Implemented"; }
+    else if (code == 503) { return "Service Unavailable"; }
+    return "Unknown";
+}
+
+// ----------------------------------------------------------- method router
+// One path, one or more methods: get(show).post(create).delete(remove). The
+// entries live in a fixed array so a MethodRouter owns no heap memory and can
+// be passed around by value while it is being built.
+
+const MAX_METHODS: i64 = 8;
+
+struct MethodEntry {
+    method: str;
+    handler: func(*Request) -> Response;
+}
+
+struct MethodRouter {
+    entries: [MethodEntry; 8];
+    count: i64;
+}
+
+func no_handler(_req: *Request) -> Response { return Status(500); }
+
+func method_router(method: str, h: func(*Request) -> Response) -> MethodRouter {
+    let blank: MethodEntry = MethodEntry { method: "", handler: no_handler };
+    let m: MethodRouter = MethodRouter {
+        entries: [blank, blank, blank, blank, blank, blank, blank, blank],
+        count: 0,
+    };
+    return m.on(method, h);
+}
+
+impl MethodRouter {
+    // add one more method to this path
+    func on(self: *MethodRouter, method: str, h: func(*Request) -> Response) -> MethodRouter {
+        if (self.count < MAX_METHODS) {
+            self.entries[self.count as usize] = MethodEntry { method: method, handler: h };
+            self.count = self.count + 1;
+        }
+        return *self;
+    }
+
+    func get(self: *MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("GET", h); }
+    func post(self: *MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("POST", h); }
+    func put(self: *MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("PUT", h); }
+    func delete(self: *MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("DELETE", h); }
+    func patch(self: *MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("PATCH", h); }
+    func head(self: *MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("HEAD", h); }
+    func any(self: *MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("*", h); }
+}
+
+// the entry points: get(handler), post(handler), ... one per method
+func get(h: func(*Request) -> Response) -> MethodRouter { return method_router("GET", h); }
+func post(h: func(*Request) -> Response) -> MethodRouter { return method_router("POST", h); }
+func put(h: func(*Request) -> Response) -> MethodRouter { return method_router("PUT", h); }
+func delete(h: func(*Request) -> Response) -> MethodRouter { return method_router("DELETE", h); }
+func patch(h: func(*Request) -> Response) -> MethodRouter { return method_router("PATCH", h); }
+func head(h: func(*Request) -> Response) -> MethodRouter { return method_router("HEAD", h); }
+func options(h: func(*Request) -> Response) -> MethodRouter { return method_router("OPTIONS", h); }
+func any(h: func(*Request) -> Response) -> MethodRouter { return method_router("*", h); }
+
+// ----------------------------------------------------------------- router
+
+struct Route {
+    method: str;         // "GET", or "*" for any method
+    pattern: str;        // "/users/:id", a segment may be '*'
+    handler: func(*Request) -> Response;
+}
+
+// Does `pattern` match `path`? Captured segments are inserted into `out`, and
+// the copies made for them are recorded in `owned` so the request frees them.
+func match_path(pattern: str, path: str, out: *HashMap<str, str>, owned: *Vec<i64>) -> bool {
+    let pn: i64 = cstr.len(pattern) as i64;
+    let sn: i64 = cstr.len(path) as i64;
+    let pp: *u8 = pattern as *u8;
+    let sp: *u8 = path as *u8;
+    let i: i64 = 0;
+    let j: i64 = 0;
+    while (i < pn) {
+        if (pp[i as usize] != SLASH || j >= sn || sp[j as usize] != SLASH) { return false; }
+        i = i + 1;
+        j = j + 1;
+        let pstart: i64 = i;
+        while (i < pn && pp[i as usize] != SLASH) { i = i + 1; }
+        let sstart: i64 = j;
+        while (j < sn && sp[j as usize] != SLASH) { j = j + 1; }
+        if (i - pstart == 1 && pp[pstart as usize] == STAR) { return true; }   // rest of the path
+        if (pstart < pn && pp[pstart as usize] == COLON) {         // ':name'
+            let name: str = slice(pattern, pstart + 1, i);
+            let value: str = slice(path, sstart, j);
+            owned.push(name as i64);
+            owned.push(value as i64);
+            out.insert(name, value);
+        } else {
+            let a: str = slice(pattern, pstart, i);
+            let b: str = slice(path, sstart, j);
+            let same: bool = cstr.eq(a, b);
+            mem.dealloc(a as *u8);
+            mem.dealloc(b as *u8);
+            if (!same) { return false; }
+        }
+    }
+    return j >= sn;
+}
+
+func default_fallback(_req: *Request) -> Response { return Text("404 not found").status(404); }
+
+struct Router {
+    routes: Vec<Route>;
+    missing: func(*Request) -> Response;
+    requests: i64;        // how many requests have been handled
+    verbose: bool;        // print one line per request
+}
+
+impl Router {
+    func new() -> Router {
+        let r: Router = Router {
+            routes: Vec<Route>::new(),
+            missing: default_fallback,
+            requests: 0,
+            verbose: false,
+        };
+        return r;
+    }
+
+    func drop(self: *Router) -> void { self.routes.drop(); }
+
+    // one path with everything it answers: .route("/x", get(show).post(save))
+    func route(self: *Router, pattern: str, m: MethodRouter) -> Router {
+        let i: i64 = 0;
+        while (i < m.count) {
+            let e: MethodEntry = m.entries[i];
+            self.routes.push(Route { method: e.method, pattern: pattern, handler: e.handler });
+            i = i + 1;
+        }
+        return *self;
+    }
+
+    // what answers when no route matched
+    func fallback(self: *Router, h: func(*Request) -> Response) -> Router {
+        self.missing = h;
+        return *self;
+    }
+
+    // one access log line per request
+    func log(self: *Router, on: bool) -> Router {
+        self.verbose = on;
+        return *self;
+    }
+
+    // Answer one request. No sockets involved, which is what makes an HTTP
+    // application testable: build a Request, call handle, read the Response.
+    func handle(self: *Router, req: *Request) -> Response {
+        self.requests = self.requests + 1;
+        if (!req.ok) { return Text("400 bad request").status(400); }
+        let i: usize = 0;
+        let allowed: bool = false;          // the path matched but the method did not
+        while (i < self.routes.len()) {
+            let r: Route = self.routes.get(i);
+            if (match_path(r.pattern, req.path, &req.params, &req.owned)) {
+                if (cstr.eq(r.method, "*") || cstr.eq(r.method, req.method)) {
+                    return r.handler(req);
+                }
+                allowed = true;
+            }
+            i = i + 1;
+        }
+        if (allowed) { return Text("405 method not allowed").status(405); }
+        let nf: func(*Request) -> Response = self.missing;
+        return nf(req);
+    }
+}
+
+// ----------------------------------------------------------------- serving
+// Listener::bind opens the socket and serve() runs the loop, the same split
+// axum makes between TcpListener::bind and axum::serve. Splitting them is also what
+// lets one thread drive both sides on loopback: send the request first, then
+// serve it.
+
+struct Listener {
+    sock: TcpServer;
+    ok: bool;
+    addr: str;
+}
+
+impl Listener {
+    // axum spells this TcpListener::bind(addr); the address is "ip:port"
+    func bind(addr: str) -> Listener {
+    let c: i64 = index_of(addr, COLON, 0);
+    let ip: str = "0.0.0.0";
+    let port: i64 = 80;
+    if (c >= 0) {
+        ip = slice(addr, 0, c);
+        let ptext: str = slice(addr, c + 1, cstr.len(addr) as i64);
+        port = to_int(ptext);
+        mem.dealloc(ptext as *u8);
+    } else {
+        ip = slice(addr, 0, cstr.len(addr) as i64);
+    }
+    let l: Listener = Listener { sock: TcpServer::bind(ip, port as u16), ok: port > 0, addr: addr };
+    mem.dealloc(ip as *u8);
+    if (l.sock.fd == 0) { l.ok = false; }
+    return l;
+    }
+
+    func close(self: *Listener) -> i32 {
+        if (!self.ok) { return 0; }
+        self.ok = false;
+        return self.sock.close();
+    }
+}
+
+// accept one connection, answer it, close it
+func serve_once(l: *Listener, app: *Router) -> i32 {
+    if (!l.ok) { return 0 - 1; }
+    let conn: TcpSocket = l.sock.accept();
+    let raw: str = conn.recv();
+    let req: Request = parse_request(raw);
+    let res: Response = app.handle(&req);
+    let text: String = res.render();
+    conn.send(text.as_str());
+    if (app.verbose) { log_line(&req, &res); }
+    text.drop();
+    res.drop();
+    req.drop();
+    mem.dealloc(raw as *u8);
+    return conn.close();
+}
+
+// serve exactly n requests, then return
+func serve_n(l: *Listener, app: *Router, n: i64) -> i32 {
+    if (!l.ok) { return 0 - 1; }
+    let served: i64 = 0;
+    while (served < n) {
+        serve_once(l, app);
+        served = served + 1;
+    }
+    return 0;
+}
+
+// serve until the process is stopped
+func serve(l: *Listener, app: *Router) -> i32 {
+    if (!l.ok) { return 0 - 1; }
+    while (true) { serve_once(l, app); }
+    return 0;
+}
+
+// one line per request, in the shape every access log uses
+func log_line(req: *Request, res: *Response) -> void {
+    printf("%s %s -> %d\n", req.method, req.path, res.status as i32);
+}
+
+extern func printf(fmt: str, a: str, b: str, c: i32) -> i32;
+
+// ----------------------------------------------------------------- client
+// Enough of a client to talk to a server, including this one.
+
+// Connect and send a request; the socket is returned so the caller can read
+// the answer when it is ready (on loopback that may be after it serves).
+func send_request(addr: str, method: str, path: str, body: str) -> TcpSocket {
+    let c: i64 = index_of(addr, COLON, 0);
+    let ip: str = slice(addr, 0, c);
+    let ptext: str = slice(addr, c + 1, cstr.len(addr) as i64);
+    let sock: TcpSocket = TcpSocket::connect(ip, to_int(ptext) as u16);
+    let req: String = String::new();
+    req.push_str(method);
+    req.push_str(" ");
+    req.push_str(path);
+    req.push_str(" HTTP/1.1\r\nHost: ");
+    req.push_str(ip);
+    req.push_str("\r\nContent-Length: ");
+    let n: String = String::from_uint(cstr.len(body) as u64);
+    req.push_str(n.as_str());
+    n.drop();
+    req.push_str("\r\nConnection: close\r\n\r\n");
+    req.push_str(body);
+    sock.send(req.as_str());
+    req.drop();
+    mem.dealloc(ip as *u8);
+    mem.dealloc(ptext as *u8);
+    return sock;
+}
+
+// Read one response off the socket. The caller owns the returned String.
+func read_response(sock: *TcpSocket) -> String {
+    let raw: str = sock.recv();
+    let out: String = String::from(raw);
+    mem.dealloc(raw as *u8);
+    return out;
+}
+
+// Connect, send, read, close: the whole round trip against a server that is
+// already running somewhere else.
+func fetch(addr: str, method: str, path: str, body: str) -> String {
+    let sock: TcpSocket = send_request(addr, method, path, body);
+    let out: String = read_response(&sock);
+    sock.close();
+    return out;
+}
+
+// The status code out of a raw response, or -1 when it does not look like one.
+func response_status(raw: str) -> i64 {
+    if (!cstr.starts_with(raw, "HTTP/")) { return 0 - 1; }
+    let sp: i64 = index_of(raw, SP, 0);
+    if (sp < 0) { return 0 - 1; }
+    let end: i64 = index_of(raw, SP, sp + 1);
+    if (end < 0) { return 0 - 1; }
+    let code: str = slice(raw, sp + 1, end);
+    let v: i64 = to_int(code);
+    mem.dealloc(code as *u8);
+    return v;
+}
+
+// The body of a raw response (everything after the blank line). Caller owns it.
+func response_body(raw: str) -> str {
+    let h: i64 = header_end(raw);
+    if (h < 0) { return slice(raw, 0, 0); }
+    return slice(raw, h + 4, cstr.len(raw) as i64);
+}
+
+// One header value out of a raw response, case insensitive. Caller owns it.
+func response_header(raw: str, name: str) -> Option<str> {
+    let n: i64 = cstr.len(raw) as i64;
+    let p: *u8 = raw as *u8;
+    let key: str = lower(name);
+    let klen: i64 = cstr.len(key) as i64;
+    let kp: *u8 = key as *u8;
+    let i: i64 = 0;
+    while (i < n) {
+        if (p[i as usize] == LF && i + klen + 1 < n) {
+            let s: i64 = i + 1;
+            let k: i64 = 0;
+            let hit: bool = true;
+            while (k < klen && hit) {
+                let a: u8 = p[(s + k) as usize];
+                if (a >= 65 && a <= 90) { a = a + 32; }
+                if (a != kp[k as usize]) { hit = false; }
+                k = k + 1;
+            }
+            if (hit && p[(s + klen) as usize] == COLON) {
+                let v: i64 = s + klen + 1;
+                while (v < n && is_space(p[v as usize])) { v = v + 1; }
+                let e: i64 = v;
+                while (e < n && p[e as usize] != CR && p[e as usize] != LF) { e = e + 1; }
+                mem.dealloc(key as *u8);
+                return Some(slice(raw, v, e));
+            }
+        }
+        i = i + 1;
+    }
+    mem.dealloc(key as *u8);
+    return None();
+}

@@ -173,7 +173,8 @@ static Node *find_template(Node *prog, const char *name) {
         if (d->kind != ND_FUNC || d->ngen == 0 || strcmp(d->name, name) != 0) continue;
         if (d->is_method) continue;   /* generic-struct methods instantiate with their struct */
         const char *ns = d->ns ? d->ns : "";
-        if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) return d;
+        const char *dm = d->mod ? d->mod : "";
+        if (g_cur_mod[0] && (strcmp(ns, g_cur_mod) == 0 || strcmp(dm, g_cur_mod) == 0)) return d;
         if (!ns[0] && !global) global = d;
         if (!any) any = d;
     }
@@ -195,7 +196,10 @@ static int func_ret_type(Node *prog, const char *name, CType *out) {
         Node *d = prog->items[i];
         if (d->kind != ND_FUNC || strcmp(d->name, name) != 0) continue;
         const char *ns = d->ns ? d->ns : "";
-        if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) { best = d; break; }
+        const char *dm = d->mod ? d->mod : "";
+        /* an extern is private to the module that declared it (see find_func) */
+        if (d->is_extern && dm[0] && strcmp(dm, g_cur_mod) != 0) continue;
+        if (g_cur_mod[0] && (strcmp(ns, g_cur_mod) == 0 || strcmp(dm, g_cur_mod) == 0)) { best = d; break; }
         if (!ns[0] && !best) best = d;
     }
     if (!best) return 0;
@@ -2073,7 +2077,8 @@ static Node *df_find_unique(Node *prog, const char *name) {
         if (f->kind != ND_FUNC || f->is_extern || f->is_method || !f->name) continue;
         if (strcmp(f->name, name) != 0) continue;
         const char *ns = f->ns ? f->ns : "";
-        if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) { modf = f; nmod++; }
+        const char *fm = f->mod ? f->mod : "";
+        if (g_cur_mod[0] && (strcmp(ns, g_cur_mod) == 0 || strcmp(fm, g_cur_mod) == 0)) { modf = f; nmod++; }
         else if (!ns[0]) { globf = f; nglob++; }
     }
     if (nmod == 1) return modf;                      /* module-local match wins */
@@ -2692,14 +2697,26 @@ static void tc_check(TcCtx *c, Node *n) {
         if (callee->kind == ND_IDENT) {
             /* unqualified call: enclosing module's function wins, then a global one
              * (a foreign module's ns function is NOT what this call site will run) */
+            int own_extern = 0;      /* this module declared a C function by that name */
             for (int i = 0; i < c->prog->nitems; i++) {
                 Node *d = c->prog->items[i];
-                if (d->kind != ND_FUNC || d->is_extern || d->ngen != 0 || d->is_method ||
-                    !d->name || strcmp(d->name, callee->name) != 0) continue;
+                if (d->kind != ND_FUNC || !d->name || strcmp(d->name, callee->name) != 0) continue;
+                if (d->is_extern) {
+                    /* an extern the ENCLOSING module declared is what this call runs,
+                     * and extern signatures are not checked (they may be variadic or
+                     * shortened), so the call is left alone rather than measured
+                     * against a same-named function from somewhere else */
+                    const char *em = d->mod ? d->mod : "";
+                    if (g_cur_mod[0] && strcmp(em, g_cur_mod) == 0) { own_extern = 1; break; }
+                    continue;
+                }
+                if (d->ngen != 0 || d->is_method) continue;
                 const char *ns = d->ns ? d->ns : "";
-                if (g_cur_mod[0] && strcmp(ns, g_cur_mod) == 0) { fn = d; break; }
+                const char *dm = d->mod ? d->mod : "";
+                if (g_cur_mod[0] && (strcmp(ns, g_cur_mod) == 0 || strcmp(dm, g_cur_mod) == 0)) { fn = d; break; }
                 if (!ns[0] && !fn) fn = d;
             }
+            if (own_extern) fn = NULL;
         } else if (callee->kind == ND_MEMBER) {
             CType bt = infer(c->prog, callee->operand, c->map, *c->nmap);
             /* primitive receiver (impl Display for i64): resolve by the type-name namespace,

@@ -1,0 +1,408 @@
+// unit tests for std/http: parsing, routing and rendering, with no sockets
+// involved. An HTTP application is testable exactly because handle() takes a
+// Request and returns a Response rather than touching a connection.
+import { test, mem } from "std";
+import { Router, Request, Response, parse_request } from "std/http";
+import { get, post, put, delete, head, patch, options, any, method_router, no_handler } from "std/http";
+import { Text, Html, Json, Status, Redirect } from "std/http";
+import { status_text, url_decode, trim, to_int, match_path } from "std/http";
+import { index_of, header_end, lower, is_space, hex_val, default_fallback } from "std/http";
+import { response_status, response_body, response_header } from "std/http";
+import { String } from "std/string";
+import { HashMap } from "std/map";
+import { Vec } from "std/vec";
+import { Option, Some, None } from "std/option";
+import { cstr } from "core";
+
+func hello(_req: *Request) -> Response { return Text("hello"); }
+func mirror(req: *Request) -> Response { return Text(req.body); }
+func with_id(req: *Request) -> Response {
+    match (req.param("id")) {
+        Some(v) => { return Text(v); }
+        None => { return Text("no id").status(500); }
+    }
+}
+func teapot(_req: *Request) -> Response { return Text("teapot").status(418); }
+func my404(_req: *Request) -> Response { return Text("custom").status(404); }
+func empty_ok(_req: *Request) -> Response { return Status(204); }
+
+@test
+func http_parse_request_line() -> void {
+    let req: Request = parse_request("GET /a/b?x=1 HTTP/1.1\r\nHost: h\r\n\r\n");
+    test.ok(req.ok);
+    test.eq(req.method, "GET");
+    test.eq(req.path, "/a/b");
+    test.eq(req.query_string, "x=1");
+    test.eq(req.version, "HTTP/1.1");
+    test.eq(req.body, "");
+    test.ok(req.is_method("GET"));
+    test.ok(!req.is_method("POST"));
+    req.drop();
+}
+
+@test
+func http_parse_headers_and_body() -> void {
+    let req: Request = parse_request(
+        "POST /submit HTTP/1.1\r\nHost: example.com\r\nContent-Type:  text/plain  \r\nContent-Length: 5\r\n\r\nhello");
+    test.ok(req.ok);
+    test.eq(req.body, "hello");
+    test.eq(req.content_length(), 5);
+    match (req.header("host")) { Some(v) => { test.eq(v, "example.com"); } None => { test.fail("no host"); } }
+    // header names are case insensitive and values are trimmed
+    match (req.header("CONTENT-TYPE")) { Some(v) => { test.eq(v, "text/plain"); } None => { test.fail("no ctype"); } }
+    match (req.header("missing")) { Some(v) => { test.fail("found a header that is not there"); } None => { } }
+    req.drop();
+}
+
+@test
+func http_parse_rejects_garbage() -> void {
+    let a: Request = parse_request("");
+    test.ok(!a.ok);
+    a.drop();
+    let b: Request = parse_request("nonsense");
+    test.ok(!b.ok);
+    b.drop();
+    let c: Request = parse_request("GET /only-two-fields\r\n\r\n");
+    test.ok(!c.ok);
+    c.drop();
+}
+
+@test
+func http_query_parameters() -> void {
+    let req: Request = parse_request("GET /s?a=1&q=hello+world&b=caf%C3%A9 HTTP/1.1\r\n\r\n");
+    match (req.query("a")) { Some(v) => { test.eq(v, "1"); } None => { test.fail("no a"); } }
+    match (req.query("q")) { Some(v) => { test.eq(v, "hello world"); } None => { test.fail("no q"); } }
+    match (req.query("b")) { Some(v) => { test.eq(v, "café"); } None => { test.fail("no b"); } }
+    match (req.query("zz")) { Some(v) => { test.fail("found a parameter that is not there"); } None => { } }
+    req.drop();
+}
+
+@test
+func http_url_decode() -> void {
+    let a: str = url_decode("a%20b+c");
+    test.eq(a, "a b c");
+    mem.dealloc(a as *u8);
+    let b: str = url_decode("%2F%3Fx%3D1");
+    test.eq(b, "/?x=1");
+    mem.dealloc(b as *u8);
+    let c: str = url_decode("bad%zz");        // an invalid escape stays as it is
+    test.eq(c, "bad%zz");
+    mem.dealloc(c as *u8);
+}
+
+@test
+func http_small_helpers() -> void {
+    let t: str = trim("   padded  ");
+    test.eq(t, "padded");
+    mem.dealloc(t as *u8);
+    test.eq(to_int("42abc"), 42);
+    test.eq(to_int("abc"), 0 - 1);
+    test.eq(status_text(200), "OK");
+    test.eq(status_text(404), "Not Found");
+    test.eq(status_text(999), "Unknown");
+}
+
+@test
+func http_path_matching() -> void {
+    let params: HashMap<str, str> = HashMap<str, str>::new();
+    let owned: Vec<i64> = Vec<i64>::new();
+    test.ok(match_path("/", "/", &params, &owned));
+    test.ok(match_path("/a/b", "/a/b", &params, &owned));
+    test.ok(!match_path("/a/b", "/a/c", &params, &owned));
+    test.ok(!match_path("/a", "/a/b", &params, &owned));
+    test.ok(!match_path("/a/b", "/a", &params, &owned));
+    test.ok(match_path("/static/*", "/static/css/site.css", &params, &owned));
+    test.ok(match_path("/static/*", "/static/", &params, &owned));
+    test.ok(!match_path("/static/*", "/other/x", &params, &owned));
+
+    test.ok(match_path("/users/:id", "/users/42", &params, &owned));
+    match (params.get("id")) { Some(v) => { test.eq(v, "42"); } None => { test.fail("id not captured"); } }
+    test.ok(match_path("/u/:user/p/:post", "/u/alice/p/7", &params, &owned));
+    match (params.get("user")) { Some(v) => { test.eq(v, "alice"); } None => { test.fail("user not captured"); } }
+    match (params.get("post")) { Some(v) => { test.eq(v, "7"); } None => { test.fail("post not captured"); } }
+
+    let i: usize = 0;
+    while (i < owned.len()) { mem.dealloc(owned.get(i) as *u8); i = i + 1; }
+    owned.drop();
+    params.drop();
+}
+
+// send one request through the router and give back the rendered response
+func roundtrip(app: *Router, raw: str) -> String {
+    let req: Request = parse_request(raw);
+    let res: Response = app.handle(&req);
+    let out: String = res.render();
+    res.drop();
+    req.drop();
+    return out;
+}
+
+@test
+func http_routing() -> void {
+    let app: Router = Router::new()
+        .route("/", get(hello))
+        .route("/users/:id", get(with_id))
+        .route("/echo", post(mirror))
+        .route("/teapot", any(teapot))
+        .fallback(my404);
+
+    let a: String = roundtrip(&app, "GET / HTTP/1.1\r\n\r\n");
+    test.eq(response_status(a.as_str()), 200);
+    let ab: str = response_body(a.as_str());
+    test.eq(ab, "hello");
+    mem.dealloc(ab as *u8);
+    a.drop();
+
+    let b: String = roundtrip(&app, "GET /users/99 HTTP/1.1\r\n\r\n");
+    let bb: str = response_body(b.as_str());
+    test.eq(bb, "99");
+    mem.dealloc(bb as *u8);
+    b.drop();
+
+    let c: String = roundtrip(&app, "POST /echo HTTP/1.1\r\nContent-Length: 4\r\n\r\nbody");
+    let cb: str = response_body(c.as_str());
+    test.eq(cb, "body");
+    mem.dealloc(cb as *u8);
+    c.drop();
+
+    // any() answers whatever method arrives
+    let d: String = roundtrip(&app, "DELETE /teapot HTTP/1.1\r\n\r\n");
+    test.eq(response_status(d.as_str()), 418);
+    d.drop();
+
+    // the path exists but the method does not
+    let e: String = roundtrip(&app, "POST /users/1 HTTP/1.1\r\n\r\n");
+    test.eq(response_status(e.as_str()), 405);
+    e.drop();
+
+    // no route at all reaches the fallback
+    let f: String = roundtrip(&app, "GET /nope HTTP/1.1\r\n\r\n");
+    test.eq(response_status(f.as_str()), 404);
+    let fb: str = response_body(f.as_str());
+    test.eq(fb, "custom");
+    mem.dealloc(fb as *u8);
+    f.drop();
+
+    // a malformed request never reaches a handler
+    let g: String = roundtrip(&app, "junk");
+    test.eq(response_status(g.as_str()), 400);
+    g.drop();
+
+    test.eq(app.requests, 7);
+    app.drop();
+}
+
+@test
+func http_router_ordering() -> void {
+    // first match wins, so a literal route registered before a capture keeps it
+    let app: Router = Router::new()
+        .route("/users/me", get(hello))
+        .route("/users/:id", get(with_id));
+    let a: String = roundtrip(&app, "GET /users/me HTTP/1.1\r\n\r\n");
+    let ab: str = response_body(a.as_str());
+    test.eq(ab, "hello");
+    mem.dealloc(ab as *u8);
+    a.drop();
+    let b: String = roundtrip(&app, "GET /users/7 HTTP/1.1\r\n\r\n");
+    let bb: str = response_body(b.as_str());
+    test.eq(bb, "7");
+    mem.dealloc(bb as *u8);
+    b.drop();
+    app.drop();
+}
+
+@test
+func http_status_only_response() -> void {
+    let app: Router = Router::new().route("/quiet", get(empty_ok));
+    let r: String = roundtrip(&app, "GET /quiet HTTP/1.1\r\n\r\n");
+    test.eq(response_status(r.as_str()), 204);
+    let body: str = response_body(r.as_str());
+    test.eq(body, "");
+    mem.dealloc(body as *u8);
+    r.drop();
+    app.drop();
+}
+
+@test
+func http_response_rendering() -> void {
+    let res: Response = Json("{\"a\":1}").status(201)
+        .header("X-One", "1")
+        .header("X-Two", "2");
+    let out: String = res.render();
+    let s: str = out.as_str();
+    test.ok(cstr.starts_with(s, "HTTP/1.1 201 Created\r\n"));
+    test.eq(response_status(s), 201);
+    test.eq(res.code(), 201);
+    let body: str = response_body(s);
+    test.eq(body, "{\"a\":1}");
+    mem.dealloc(body as *u8);
+    // the length header counts the body bytes
+    match (response_header(s, "content-length")) { Some(v) => { test.eq(v, "7"); mem.dealloc(v as *u8); } None => { test.fail("no length"); } }
+    match (response_header(s, "Content-Type")) { Some(v) => { test.eq(v, "application/json"); mem.dealloc(v as *u8); } None => { test.fail("no type"); } }
+    match (response_header(s, "X-One")) { Some(v) => { test.eq(v, "1"); mem.dealloc(v as *u8); } None => { test.fail("no X-One"); } }
+    match (response_header(s, "X-Two")) { Some(v) => { test.eq(v, "2"); mem.dealloc(v as *u8); } None => { test.fail("no X-Two"); } }
+    match (response_header(s, "Connection")) { Some(v) => { test.eq(v, "close"); mem.dealloc(v as *u8); } None => { test.fail("no connection"); } }
+    match (response_header(s, "X-Absent")) { Some(v) => { test.fail("found a header that is not there"); } None => { } }
+    out.drop();
+    res.drop();
+}
+
+@test
+func http_response_helpers() -> void {
+    let a: Response = Redirect("/elsewhere");
+    let ar: String = a.render();
+    test.eq(response_status(ar.as_str()), 302);
+    match (response_header(ar.as_str(), "Location")) { Some(v) => { test.eq(v, "/elsewhere"); mem.dealloc(v as *u8); } None => { test.fail("no location"); } }
+    ar.drop();
+    a.drop();
+
+    let b: Response = Text("one").write(" two").write(" three");
+    let br: String = b.render();
+    let bb: str = response_body(br.as_str());
+    test.eq(bb, "one two three");
+    mem.dealloc(bb as *u8);
+    br.drop();
+    b.drop();
+
+    let c: Response = Html("<p>hi</p>");
+    let cr: String = c.render();
+    match (response_header(cr.as_str(), "content-type")) { Some(v) => { test.eq(v, "text/html; charset=utf-8"); mem.dealloc(v as *u8); } None => { test.fail("no type"); } }
+    cr.drop();
+    c.drop();
+
+    let d: Response = Text("x").content_type("text/csv");
+    let dr: String = d.render();
+    match (response_header(dr.as_str(), "content-type")) { Some(v) => { test.eq(v, "text/csv"); mem.dealloc(v as *u8); } None => { test.fail("no type"); } }
+    dr.drop();
+    d.drop();
+
+    let e: Response = Status(404);
+    test.eq(e.code(), 404);
+    e.drop();
+
+    // every status constructor carries the code its name promises
+    let f: Response = Text("x").status(201);    test.eq(f.code(), 201); f.drop();
+    let g: Response = Status(204);              test.eq(g.code(), 204); g.drop();
+    let h: Response = Json("{}").status(400);   test.eq(h.code(), 400); h.drop();
+    let l: Response = Text("x");                test.eq(l.code(), 200); l.drop();
+}
+
+@test
+func http_byte_helpers() -> void {
+    // the scanning primitives the parser is built out of
+    test.eq(index_of("abc def", 32, 0), 3);          // ' '
+    test.eq(index_of("abc def", 32, 4), 0 - 1);
+    test.eq(index_of("", 32, 0), 0 - 1);
+    test.eq(header_end("GET / HTTP/1.1
+A: 1
+
+body"), 20);
+    test.eq(header_end("no blank line here"), 0 - 1);
+    let l: str = lower("Content-TYPE");
+    test.eq(l, "content-type");
+    mem.dealloc(l as *u8);
+    test.ok(is_space(32));
+    test.ok(is_space(9));
+    test.ok(!is_space(65));
+    test.eq(hex_val(48), 0);        // '0'
+    test.eq(hex_val(57), 9);        // '9'
+    test.eq(hex_val(97), 10);       // 'a'
+    test.eq(hex_val(70), 15);       // 'F'
+    test.eq(hex_val(122), 0 - 1);   // 'z'
+}
+
+@test
+func http_default_fallback() -> void {
+    // the handler a router uses when nothing else matched
+    let req: Request = parse_request("GET /x HTTP/1.1
+
+");
+    let direct: Response = default_fallback(&req);
+    test.eq(direct.code(), 404);
+    direct.drop();
+    req.drop();
+
+    // a router with no fallback answers 404 by itself
+    let app: Router = Router::new().route("/", get(hello));
+    let r: String = roundtrip(&app, "GET /missing HTTP/1.1
+
+");
+    test.eq(response_status(r.as_str()), 404);
+    let body: str = response_body(r.as_str());
+    test.eq(body, "404 not found");
+    mem.dealloc(body as *u8);
+    r.drop();
+    app.drop();
+}
+
+@test
+func http_empty_request() -> void {
+    // the blank Request a failed parse hands back must be safe to touch
+    let r: Request = Request::empty();
+    test.ok(!r.ok);
+    test.eq(r.method, "");
+    test.eq(r.content_length(), 0);
+    match (r.param("id")) { Some(v) => { test.fail("a param out of nowhere"); } None => { } }
+    match (r.query("q")) { Some(v) => { test.fail("a query out of nowhere"); } None => { } }
+    r.drop();
+}
+
+@test
+func http_method_router() -> void {
+    // one path answering several methods, built the way axum builds it
+    let app: Router = Router::new()
+        .route("/thing", get(hello).post(mirror).put(mirror).delete(empty_ok)
+                         .patch(mirror).head(hello))
+        .route("/opt", options(hello))
+        .route("/wild", method_router("PROPFIND", hello));
+
+    let a: String = roundtrip(&app, "GET /thing HTTP/1.1
+
+");
+    test.eq(response_status(a.as_str()), 200);
+    a.drop();
+    let b: String = roundtrip(&app, "DELETE /thing HTTP/1.1
+
+");
+    test.eq(response_status(b.as_str()), 204);
+    b.drop();
+    let c: String = roundtrip(&app, "PATCH /thing HTTP/1.1
+Content-Length: 2
+
+hi");
+    let cb: str = response_body(c.as_str());
+    test.eq(cb, "hi");
+    mem.dealloc(cb as *u8);
+    c.drop();
+    let d: String = roundtrip(&app, "OPTIONS /opt HTTP/1.1
+
+");
+    test.eq(response_status(d.as_str()), 200);
+    d.drop();
+    // a method the path does not answer is a 405, not a 404
+    let e: String = roundtrip(&app, "TRACE /thing HTTP/1.1
+
+");
+    test.eq(response_status(e.as_str()), 405);
+    e.drop();
+    // any method name works, not just the ones with a helper
+    let f: String = roundtrip(&app, "PROPFIND /wild HTTP/1.1
+
+");
+    test.eq(response_status(f.as_str()), 200);
+    f.drop();
+    app.drop();
+}
+
+@test
+func http_unfilled_method_slot() -> void {
+    // the placeholder a fresh MethodRouter starts with never answers a request,
+    // but calling it directly must still be safe
+    let req: Request = parse_request("GET / HTTP/1.1
+
+");
+    let r: Response = no_handler(&req);
+    test.eq(r.code(), 500);
+    r.drop();
+    req.drop();
+}

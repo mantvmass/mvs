@@ -151,3 +151,16 @@ leak detection ON.
 | `compiler.mvs` | two passes: collect functions, then emit bytecode with patched jumps |
 | `vm.mvs` | the stack machine and the disassembler, every runtime failure reported |
 | `main.mvs` | the `minivm` CLI plus the demo suite the golden test runs |
+
+## 12_http: a web application on the built-in framework
+
+`std/http` is the HTTP framework in the standard library, written in MVS on top
+of `std/net`, in axum's shape: `Router::new().route("/users/:id", get(show).post(create))`.
+This example is a full application on it: routes with path parameters and a
+wildcard, query strings, a POST body, JSON, a redirect, custom headers, a 405,
+a custom 404, one path answering several methods, and the access log.
+See [examples/12_http/README.md](../examples/12_http/README.md).
+
+Client and server run in one process, so the output is identical on every run
+and on all three targets, and the program is clean under AddressSanitizer with
+leak detection ON.

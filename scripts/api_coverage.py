@@ -25,6 +25,11 @@ EXEMPT = {
     "arch.interrupts_on": "privileged",
     "arch.park": "never returns",
     "process.run": "spawns a shell",
+    # a server loop that never returns, and a client round trip that needs a
+    # peer already serving; examples/12_http covers the rest of std/http
+    "http.serve": "serves until the process is stopped",
+    "http.fetch": "needs a peer that is already serving",
+    "http.log_line": "writes the access log; examples/12_http turns it on",
     "thread.exit": "kills the caller",
     "test.fail": "fails the run by design",
     # the runner's generated main calls these; no test file names them

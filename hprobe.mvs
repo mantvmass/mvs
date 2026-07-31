@@ -1,0 +1,35 @@
+import { io } from "std";
+import { Server, Request, Response, parse_request, status_text, url_decode } from "std/http";
+import { Option, Some, None } from "std/option";
+import { String } from "std/string";
+
+func hello(req: *Request, res: *Response) -> void { res.text(200, "hello"); }
+func show(req: *Request, res: *Response) -> void {
+    match (req.param("id")) {
+        Some(id) => { res.text(200, id); }
+        None => { res.text(400, "no id"); }
+    }
+}
+
+func main() -> i8 {
+    let raw: str = "GET /users/42?name=bob+jones HTTP/1.1\r\nHost: localhost\r\nX-Test: 7\r\n\r\nbody here";
+    let req: Request = parse_request(raw);
+    io.out("ok={} method={} path={} query={} body={}", req.ok, req.method, req.path, req.query, req.body);
+    match (req.header("host")) { Some(h) => { io.out("host={}", h); } None => { io.out("no host"); } }
+    match (req.query_param("name")) { Some(v) => { io.out("name={}", v); } None => { io.out("no name"); } }
+
+    let app: Server = Server::new();
+    app.get("/", hello);
+    app.get("/users/:id", show);
+    let res: Response = Response::new();
+    app.handle(&req, &res);
+    let text: String = res.render();
+    io.out("--- response ---");
+    io.out("{}", text.as_str());
+    text.drop();
+    res.drop();
+    req.drop();
+    app.drop();
+    io.out("status 404 = {}", status_text(404));
+    return 0;
+}

@@ -138,6 +138,7 @@ void  global_label(const char *name, char *buf);
 
 /* --- function / variable / string tables --- */
 Node *find_func(Gen *g, const char *ns, const char *name);
+Node *find_extern_any(Gen *g, const char *name);   /* module-blind, for the io.out intrinsic */
 Sym  *find_var(Gen *g, const char *name);
 int   intern_string(Gen *g, const char *data, int len);
 

@@ -180,6 +180,12 @@ OPERATOR on every numeric type, with C as the oracle: 1924 checks). When a bug
 turns up, add the axis that would have caught it rather than a single
 regression test.
 
+**std/http:** the HTTP framework lives in the standard library, in axum's
+shape: `Router::new().route("/users/:id", get(show).post(create))`,
+`Listener::bind("0.0.0.0:8080")` + `serve(&l, &app)`, handlers returning
+`Text`/`Html`/`Json`/`Status`/`Redirect`, path patterns with `:name` and `*`.
+Covered by `tests/unit/http.test.mvs` plus `examples/12_http`.
+
 **Dogfood:** two real programs, 2477 lines of MVS between them. Run them before
 claiming a language change is ergonomic. `examples/10_json` (1084 lines, JSON
 library + CLI) surfaced trailing commas, contextual `from`, struct-literal

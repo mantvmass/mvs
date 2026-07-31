@@ -360,6 +360,14 @@ static void load_module(Loader *L, const char *path, const char *ns) {
         if (it->kind == ND_IMPORT) {
             handle_import(L, it, dir);            /* nested import: keep loading recursively */
         } else {
+            if (it->kind == ND_FUNC && !(ns && ns[0])) {
+                /* A module imported for its symbols has no namespace, but it still
+                 * needs an identity: without one, its own call to an extern it
+                 * declared could resolve to a same-named function in a DIFFERENT
+                 * module. The canonical path can never be typed as a namespace,
+                 * so it identifies the module without becoming reachable as one. */
+                it->mod = strdup(canon);
+            }
             if (ns && ns[0] && it->kind == ND_FUNC) {
                 /* Every function in this module belongs to module ns. For functions with a
                  * body this resolves internal calls; for externs it lets ns.func(...) reach

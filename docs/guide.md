@@ -611,6 +611,7 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `map` | `HashMap<K, V>` (open addressing, linear probing): `HashMap<str, i64>::new()` + `insert`/`get` (returns `Option<V>`)/`contains`/`len`/`is_empty`/`drop`; keys `i64` and `str` |
 | `thread` | OS threads: `spawn(f, arg)` / `join(h)` with `func(*u8) -> *u8` workers (CreateThread vs pthreads via `@compile`); see section 4.16 |
 | `sync` | `Mutex` (`Mutex::new()` or a zeroed one, `lock`/`unlock`; SRWLOCK vs pthread_mutex) |
+| `http` | the HTTP/1.1 server framework, in axum's shape: `Router::new().route("/users/:id", get(show).post(create))`, `Listener::bind("0.0.0.0:8080")` + `serve(&l, &app)`, handlers that return `Text`/`Html`/`Json`/`Status`/`Redirect`, `Request` (`param`/`query`/`header`/`body`), plus a small client (`fetch`, `send_request`, `read_response`); see section 4.18 |
 
 There is also a second package, **`core`**: pure MVS with no CRT/OS dependency, so
 it stays importable under `--nostd` (freestanding):
@@ -904,6 +905,75 @@ match (a) { Just(v) => { ... } Nothing => { ... } }
   and each variant's payload fields exist side by side in the struct (a sum of
   sizes, not a union). Printing an enum with io.out shows its raw desugared
   struct (a `__tag` field plus every payload slot).
+
+### 4.18 The HTTP framework (std/http)
+
+An HTTP/1.1 server framework in the standard library, written in MVS on top of
+`std/net`. The shape is axum's: a `Router` built from method routers, handlers
+that take the request and return a `Response`, and a listener the server loop
+runs on.
+
+```txt
+import { Router, Listener, Request, Response } from "std/http";
+import { get, post, Text, Html, Json, Status, Redirect, serve } from "std/http";
+
+func home(_req: *Request) -> Response {
+    return Html("<h1>Home</h1>");
+}
+
+func show(req: *Request) -> Response {
+    match (req.param("id")) {                 // "/users/:id" captured the segment
+        Some(id) => { return Text(id); }
+        None => { return Status(400); }
+    }
+}
+
+func create(req: *Request) -> Response {
+    return Json(req.body).status(201).header("Location", "/users/new");
+}
+
+func main() -> i8 {
+    let app: Router = Router::new()
+        .route("/", get(home))
+        .route("/users/:id", get(show).post(create).delete(remove))
+        .route("/assets/*", get(assets))       // '*' takes the rest of the path
+        .fallback(my404);
+
+    let l: Listener = Listener::bind("0.0.0.0:8080");
+    serve(&l, &app);                           // serves until the process stops
+    l.close();
+    app.drop();
+    return 0;
+}
+```
+
+- **Responses** are free functions named after what they produce: `Text(body)`,
+  `Html(body)`, `Json(body)`, `Status(code)`, `Redirect(url)`. Every modifier
+  returns the response, so they chain: `.status(code)`, `.header(n, v)`,
+  `.content_type(v)`, `.write(s)`, and `.render()` for the raw text.
+- **Method routers** are the entry points `get/post/put/delete/patch/head/options/any(handler)`,
+  chained with the same names for one path (`get(show).post(create)`), or
+  `method_router("PROPFIND", h)` / `.on("TRACE", h)` for anything else.
+- **Routing** is first match wins, in registration order. A `:name` segment is
+  captured into `req.param("name")`; a `*` segment matches the rest. A path that
+  matches with a different method answers 405 by itself, and `.fallback(h)`
+  replaces the built-in 404.
+- **Request**: `method`, `path`, `query_string`, `version`, `body`, plus
+  `.param(n)`, `.query(n)` (percent decoded), `.header(n)` (case insensitive),
+  `.content_length()`, `.is_method(m)`. The three lookups return `Option<str>`.
+- **Serving**: `Listener::bind("ip:port")`, then `serve(&l, &app)` (forever),
+  `serve_n(&l, &app, n)`, or `serve_once(&l, &app)`. `app.handle(req)` dispatches
+  with no socket at all, which is how the tests and examples drive it.
+- **Client**: `send_request(addr, method, path, body)`, `read_response(sock)`,
+  `fetch(addr, method, path, body)`, and `response_status` / `response_body` /
+  `response_header` for reading a raw reply.
+- Memory is manual: the server drops the Request and Response for each
+  connection; a handler must not keep pointers into the request it was given.
+
+Not implemented on purpose: TLS, chunked encoding, keep-alive, multipart
+bodies, and concurrency (one connection at a time; `std/thread` is available if
+you want workers). `examples/12_http` is a full application, and
+`tests/unit/http.test.mvs` exercises the parser and the router without sockets.
 
 ---
 
