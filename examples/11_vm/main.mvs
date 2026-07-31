@@ -1,0 +1,196 @@
+/*
+ * examples/11_vm/main.mvs - the minivm command line program
+ *
+ * A second real program written in MVS, built from the modules next to it:
+ *   lexer.mvs      tokenizer for the mini language
+ *   ast.mvs        arena syntax tree
+ *   parser.mvs     recursive descent
+ *   compiler.mvs   tree to bytecode, names resolved to slots
+ *   vm.mvs         stack machine
+ *
+ * Usage (with no arguments it runs the built-in demo suite):
+ *   minivm run '<source>'    compile and run
+ *   minivm dis '<source>'    print the bytecode
+ *   minivm stats '<source>'  nodes, instructions, functions, steps
+ *
+ * Memory: every Lexer, Prog, Chunk, Compiler and Vm created here is dropped
+ * explicitly, which is the whole point of MVS being manual (docs/rules.md 0.2).
+ */
+import { io } from "std";
+import { Vec } from "std/vec";
+import { cstr } from "core";
+import { Lexer, Token, tokenize } from "./lexer.mvs";
+import { Prog, Ast } from "./ast.mvs";
+import { Parser } from "./parser.mvs";
+import { Chunk, Compiler } from "./compiler.mvs";
+import { Vm, disassemble } from "./vm.mvs";
+
+const STEP_LIMIT: i64 = 2000000;
+
+// Everything the front end produces for one source string. The pieces are
+// dropped in reverse order by unload, which is the manual equivalent of a
+// destructor running at the end of a scope.
+struct Unit {
+    lx: Lexer;
+    toks: Vec<Token>;
+    prog: Prog;
+    chunk: Chunk;
+    root: i64;
+    err: str;          // "" when the unit compiled
+    err_line: i64;
+}
+
+func compile_unit(src: str) -> Unit {
+    let u: Unit = Unit {
+        lx: Lexer::new(src),
+        toks: Vec<Token>::new(),
+        prog: Prog::new(),
+        chunk: Chunk::new(),
+        root: 0 - 1,
+        err: "",
+        err_line: 0,
+    };
+    u.toks = tokenize(&u.lx);
+    let ps: Parser = Parser::new(u.toks, &u.prog);
+    u.root = ps.parse_program();
+    if (u.root < 0) {
+        u.err = ps.err;
+        u.err_line = ps.err_line;
+        return u;
+    }
+    let cp: Compiler = Compiler::new(&u.prog, &u.chunk);
+    cp.compile(u.root);
+    if (cp.failed()) { u.err = cp.err; }
+    cp.drop();
+    return u;
+}
+
+func unload(u: *Unit) -> void {
+    u.chunk.drop();
+    u.prog.drop();
+    u.toks.drop();
+    u.lx.drop();
+}
+
+func failed(u: *Unit) -> bool { return cstr.len(u.err) != 0; }
+
+// --- the commands -------------------------------------------------------
+
+func cmd_run(src: str) -> i32 {
+    let u: Unit = compile_unit(src);
+    if (failed(&u)) {
+        if (u.err_line > 0) { io.out("error on line {}: {}", u.err_line, u.err); }
+        else { io.out("error: {}", u.err); }
+        unload(&u);
+        return 1;
+    }
+    let vm: Vm = Vm::new(&u.chunk);
+    let ok: bool = vm.run(STEP_LIMIT);
+    if (!ok) { io.out("runtime error: {}", vm.err); }
+    vm.drop();
+    unload(&u);
+    if (ok) { return 0; }
+    return 1;
+}
+
+func cmd_dis(src: str) -> i32 {
+    let u: Unit = compile_unit(src);
+    if (failed(&u)) {
+        io.out("error: {}", u.err);
+        unload(&u);
+        return 1;
+    }
+    io.out("main entry {} locals {}", u.chunk.main_entry, u.chunk.main_locals);
+    let i: usize = 0;
+    while (i < u.chunk.fns.len()) {
+        let f: FnInfo = u.chunk.fns.get(i);
+        io.out("func {} entry {} arity {} locals {}", f.name, f.entry, f.arity, f.nlocals);
+        i = i + 1;
+    }
+    disassemble(&u.chunk);
+    unload(&u);
+    return 0;
+}
+
+func cmd_stats(src: str) -> i32 {
+    let u: Unit = compile_unit(src);
+    if (failed(&u)) {
+        io.out("error: {}", u.err);
+        unload(&u);
+        return 1;
+    }
+    let vm: Vm = Vm::new(&u.chunk);
+    let ok: bool = vm.run(STEP_LIMIT);
+    io.out("nodes {} instructions {} functions {} steps {} printed {}",
+           u.prog.count(), u.chunk.len(), u.chunk.fns.len(), vm.steps, vm.out.len());
+    if (!ok) { io.out("runtime error: {}", vm.err); }
+    vm.drop();
+    unload(&u);
+    return 0;
+}
+
+// --- the demo suite, which is what the golden test runs ------------------
+
+func demo(title: str, src: str) -> void {
+    io.out("--- {}", title);
+    cmd_run(src);
+}
+
+func run_demo() -> i32 {
+    demo("arithmetic and precedence",
+         "print 2 + 3 * 4; print (2 + 3) * 4; print 17 % 5; print -6 / 2;");
+
+    demo("variables",
+         "let x = 10; let y = x * x; x = x + y; print x; print y;");
+
+    demo("comparisons yield 1 or 0",
+         "print 3 < 4; print 4 <= 4; print 5 > 6; print 7 == 7; print 7 != 7;");
+
+    demo("if, else if, else",
+         "let n = 7; if (n < 5) { print 1; } else if (n < 10) { print 2; } else { print 3; }");
+
+    demo("while loop: sum of 1..10",
+         "let i = 1; let s = 0; while (i <= 10) { s = s + i; i = i + 1; } print s;");
+
+    demo("nested loops: 3 by 3 multiplication",
+         "let a = 1; while (a <= 3) { let b = 1; while (b <= 3) { print a * b; b = b + 1; } a = a + 1; }");
+
+    demo("functions and arguments",
+         "func add(a, b) { return a + b; } func mul(a, b) { return a * b; } print add(2, 3); print mul(add(1, 2), 4);");
+
+    demo("recursion: factorial and fibonacci",
+         "func fact(n) { if (n <= 1) { return 1; } return n * fact(n - 1); } \
+          func fib(n) { if (n < 2) { return n; } return fib(n - 1) + fib(n - 2); } \
+          print fact(10); print fib(20);");
+
+    demo("a function declared after its call site",
+         "print later(6); func later(n) { return n * 7; }");
+
+    demo("comments and blank lines are ignored",
+         "// a comment\nlet v = 41;  // another\nprint v + 1;");
+
+    io.out("--- errors are reported, not crashed on");
+    cmd_run("let a = ;");
+    cmd_run("print undefined_name;");
+    cmd_run("print nosuchfunc(1);");
+    cmd_run("func f(a) { return a; } print f(1, 2);");
+    cmd_run("print 1 / 0;");
+    cmd_run("let i = 0; while (i >= 0) { i = i + 1; }");   // stopped by the step limit
+
+    io.out("--- bytecode for a small program");
+    cmd_dis("let x = 1; if (x == 1) { print x; } else { print 0; }");
+
+    io.out("--- statistics");
+    cmd_stats("func fib(n) { if (n < 2) { return n; } return fib(n - 1) + fib(n - 2); } print fib(10);");
+    return 0;
+}
+
+func main(argc: i32, argv: **u8) -> i8 {
+    if (argc < 2) { return run_demo() as i8; }
+    let cmd: str = argv[1] as str;
+    if (cstr.eq(cmd, "run") && argc >= 3) { return cmd_run(argv[2] as str) as i8; }
+    if (cstr.eq(cmd, "dis") && argc >= 3) { return cmd_dis(argv[2] as str) as i8; }
+    if (cstr.eq(cmd, "stats") && argc >= 3) { return cmd_stats(argv[2] as str) as i8; }
+    io.out("usage: minivm [run|dis|stats] '<source>'");
+    return 2;
+}

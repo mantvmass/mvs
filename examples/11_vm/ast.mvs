@@ -1,0 +1,117 @@
+/*
+ * examples/11_vm/ast.mvs - the syntax tree, kept in an arena
+ *
+ * Nodes live in one Vec and refer to each other by index, which is how you
+ * build a tree in a language with manual memory and no cycles collector: the
+ * whole program is freed by dropping two vectors. Variable-length child lists
+ * (block statements, call arguments) live in a second flat vector as a
+ * (start, count) range, the same trick a C compiler uses.
+ */
+import { Vec } from "std/vec";
+
+// binary and unary operator codes, shared with the compiler
+const OP_ADD: i64 = 0;
+const OP_SUB: i64 = 1;
+const OP_MUL: i64 = 2;
+const OP_DIV: i64 = 3;
+const OP_MOD: i64 = 4;
+const OP_LT: i64 = 5;
+const OP_LE: i64 = 6;
+const OP_GT: i64 = 7;
+const OP_GE: i64 = 8;
+const OP_EQ: i64 = 9;
+const OP_NE: i64 = 10;
+const OP_NEG: i64 = 11;
+
+struct Bin { op: i64; l: i64; r: i64; }
+struct Un { op: i64; e: i64; }
+struct Asg { name: str; e: i64; }
+struct If3 { c: i64; t: i64; e: i64; }        // e = -1 when there is no else
+struct Wh { c: i64; body: i64; }
+struct Lst { start: i64; count: i64; }        // a range inside Prog.lists
+struct Call { name: str; args: Lst; }
+struct Fn { name: str; params: Lst; body: i64; }
+
+enum Ast {
+    Num(i64),
+    Var(str),
+    Bin(Bin),
+    Un(Un),
+    Assign(Asg),
+    Let(Asg),
+    Print(i64),
+    If(If3),
+    While(Wh),
+    Block(Lst),
+    Call(Call),
+    Return(i64),
+    Func(Fn),
+    Bad(str),
+}
+
+struct Prog {
+    nodes: Vec<Ast>;
+    lists: Vec<i64>;      // child indices, addressed by Lst ranges
+    names: Vec<i64>;      // function name node indices, in declaration order
+}
+
+impl Prog {
+    func new() -> Prog {
+        let p: Prog = Prog {
+            nodes: Vec<Ast>::new(),
+            lists: Vec<i64>::new(),
+            names: Vec<i64>::new(),
+        };
+        return p;
+    }
+
+    // append a node and hand back its index
+    func add(self: *Prog, n: Ast) -> i64 {
+        self.nodes.push(n);
+        return (self.nodes.len() as i64) - 1;
+    }
+
+    func at(self: *Prog, i: i64) -> Ast { return self.nodes.get(i as usize); }
+
+    func count(self: *Prog) -> i64 { return self.nodes.len() as i64; }
+
+    // Commit a child list. The caller collects indices in its own vector first,
+    // because a nested block would otherwise interleave its children with ours:
+    // the arena holds each list contiguously, so it is copied in one go.
+    func add_list(self: *Prog, items: Vec<i64>) -> Lst {
+        let start: i64 = self.lists.len() as i64;
+        let i: usize = 0;
+        while (i < items.len()) {
+            self.lists.push(items.get(i));
+            i = i + 1;
+        }
+        return Lst { start: start, count: items.len() as i64 };
+    }
+
+    func child(self: *Prog, l: Lst, i: i64) -> i64 {
+        return self.lists.get((l.start + i) as usize);
+    }
+
+    func drop(self: *Prog) -> void {
+        self.nodes.drop();
+        self.lists.drop();
+        self.names.drop();
+    }
+}
+
+// the name of an operator code, for error messages and the disassembler
+func op_name(op: i64) -> str {
+    if (op == OP_ADD) { return "+"; }
+    else if (op == OP_SUB) { return "-"; }
+    else if (op == OP_MUL) { return "*"; }
+    else if (op == OP_DIV) { return "/"; }
+    else if (op == OP_MOD) { return "%"; }
+    else if (op == OP_LT) { return "<"; }
+    else if (op == OP_LE) { return "<="; }
+    else if (op == OP_GT) { return ">"; }
+    else if (op == OP_GE) { return ">="; }
+    else if (op == OP_EQ) { return "=="; }
+    else if (op == OP_NE) { return "!="; }
+    else if (op == OP_NEG) { return "neg"; }
+    return "?";
+}

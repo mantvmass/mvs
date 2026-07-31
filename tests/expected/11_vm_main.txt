@@ -1,0 +1,62 @@
+--- arithmetic and precedence
+14
+20
+2
+-3
+--- variables
+110
+100
+--- comparisons yield 1 or 0
+1
+1
+0
+1
+0
+--- if, else if, else
+2
+--- while loop: sum of 1..10
+55
+--- nested loops: 3 by 3 multiplication
+1
+2
+3
+2
+4
+6
+3
+6
+9
+--- functions and arguments
+5
+12
+--- recursion: factorial and fibonacci
+3628800
+6765
+--- a function declared after its call site
+42
+--- comments and blank lines are ignored
+42
+--- errors are reported, not crashed on
+error on line 1: expected an expression
+error: use of an undeclared variable
+error: call to an unknown function
+error: wrong number of arguments
+runtime error: division by zero
+runtime error: instruction limit reached
+--- bytecode for a small program
+main entry 0 locals 1
+   0 push  1
+   1 store 0
+   2 load  0
+   3 push  1
+   4 arith 9
+   5 jmpf  9
+   6 load  0
+   7 print
+   8 jmp   11
+   9 push  0
+  10 print
+  11 halt
+--- statistics
+55
+nodes 24 instructions 22 functions 1 steps 1770 printed 1

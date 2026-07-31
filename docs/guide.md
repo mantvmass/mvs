@@ -280,7 +280,8 @@ ptr as usize       // address as integer (pointer <-> integer)
 ### 4.5 Control flow
 
 ```txt
-if (cond) { ... } elseif (cond) { ... } else { ... }
+if (cond) { ... } else if (cond) { ... } else { ... }
+if (cond) { ... } elseif (cond) { ... } else { ... }   // the same thing, one word
 while (cond) { ... }
 for (let i: i32 = 0; i < 10; i++) { ... }
 do { ... } while (cond);            // runs at least once
@@ -1435,7 +1436,7 @@ plan lives in [../ROADMAP.md](../ROADMAP.md).
 - Hand-written lexer (keywords, numbers, strings + escapes, chars, 1-2 char operators, `//` and block comments).
 - Recursive-descent parser with full operator precedence.
 - `let`/`const` (local + global), arithmetic `+ - * / % **`, comparison, logic `&& || !`, bitwise `& | ^ ~ << >>`.
-- `if/elseif/else`, `while`, `for`, `do-while`, `switch/case/default`, `break`, `continue`.
+- `if/else if/else` (`elseif` is accepted too), `while`, `for`, `do-while`, `switch/case/default`, `break`, `continue`.
 - Functions + parameters (5+ via stack) + return + recursion.
 - Real integer width (i8..i64, u8..u64, real unsigned div/mod/compare, real wrap), `i128`/`u128` stored as 16 bytes.
 - `f32` (real 4 bytes) / `f64` via SSE; int↔float conversion; floats across the C boundary both ways.

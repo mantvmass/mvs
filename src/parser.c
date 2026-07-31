@@ -52,6 +52,10 @@ static void error(Parser *p, const char *msg) {
     }
     diag_print(p->lx->filename, p->cur.line, p->cur.col, "syntax error",
                "%s (near '%s')", msg, p->cur.lexeme);
+    /* At end of file there is nothing left to synchronize on, so continuing
+     * would report the same "expected '}'" once per unclosed block. One is
+     * enough: the first one names the real problem */
+    if (p->cur.type == TK_EOF) p->fatal = 1;
 }
 
 /* Skip ahead to a point where parsing can safely continue: just past a ';',
@@ -736,7 +740,8 @@ static Node *parse_var_decl(Parser *p) {
     return n;
 }
 
-/* Parse 'if' with elseif/else, converting elseif into a nested if in the else branch */
+/* Parse 'if' with else/else if/elseif. Both spellings of the chain become a
+ * nested if in the else branch, exactly as Rust and C read them. */
 static Node *parse_if(Parser *p) {
     Node *n = node_new(ND_IF, p->cur.line);
     advance(p); /* consume if/elseif */
@@ -747,7 +752,8 @@ static Node *parse_if(Parser *p) {
     if (check(p, TK_ELSEIF)) {
         n->else_branch = parse_if(p); /* elseif = nested if in the else branch */
     } else if (match(p, TK_ELSE)) {
-        n->else_branch = parse_block(p);
+        /* 'else if' is the same thing written the way everyone writes it */
+        n->else_branch = check(p, TK_IF) ? parse_if(p) : parse_block(p);
     }
     return n;
 }

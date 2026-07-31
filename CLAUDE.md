@@ -180,10 +180,12 @@ OPERATOR on every numeric type, with C as the oracle: 1924 checks). When a bug
 turns up, add the axis that would have caught it rather than a single
 regression test.
 
-**Dogfood:** `examples/10_json` is a real 1084-line program in MVS (JSON
-library + CLI). Run it before claiming a language change is ergonomic; it is
-what surfaced trailing commas, contextual `from`, struct-literal arguments,
-and the `str ==` warning.
+**Dogfood:** two real programs, 2477 lines of MVS between them. Run them before
+claiming a language change is ergonomic. `examples/10_json` (1084 lines, JSON
+library + CLI) surfaced trailing commas, contextual `from`, struct-literal
+arguments and the `str ==` warning. `examples/11_vm` (1393 lines: lexer, parser,
+arena AST, bytecode compiler, stack machine) surfaced `else if` not parsing and
+the repeated end-of-file syntax error.
 
 **Remaining:** see [ROADMAP.md](ROADMAP.md) (nested/guard patterns, more
 collections, more `core` modules, macOS target).

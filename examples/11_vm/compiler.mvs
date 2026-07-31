@@ -1,0 +1,308 @@
+/*
+ * examples/11_vm/compiler.mvs - the syntax tree becomes bytecode
+ *
+ * One pass per function: names are resolved to numbered slots as they are
+ * declared, so the virtual machine never sees a string. Jumps are emitted with
+ * a placeholder target and patched once the destination is known, which is how
+ * every real single-pass compiler handles forward branches.
+ */
+import { Vec } from "std/vec";
+import { HashMap } from "std/map";
+import { Option, Some, None } from "std/option";
+import { cstr } from "core";
+import { Prog, Ast, Bin, Un, Asg, If3, Wh, Lst, Call, Fn } from "./ast.mvs";
+import { OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD } from "./ast.mvs";
+import { OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE, OP_NEG } from "./ast.mvs";
+
+struct CallOp { target: i64; argc: i64; }
+
+enum Op {
+    Push(i64),
+    Load(i64),
+    Store(i64),
+    Arith(i64),        // one of the OP_* codes, applied to the top two values
+    Jump(i64),
+    JumpF(i64),        // pop, jump when false
+    Print,
+    Call(CallOp),
+    Ret,
+    Pop,
+    Halt,
+}
+
+struct FnInfo {
+    name: str;
+    entry: i64;        // index of the first instruction
+    arity: i64;
+    nlocals: i64;
+}
+
+struct Chunk {
+    code: Vec<Op>;
+    fns: Vec<FnInfo>;
+    main_entry: i64;
+    main_locals: i64;
+}
+
+impl Chunk {
+    func new() -> Chunk {
+        let c: Chunk = Chunk {
+            code: Vec<Op>::new(),
+            fns: Vec<FnInfo>::new(),
+            main_entry: 0,
+            main_locals: 0,
+        };
+        return c;
+    }
+    func drop(self: *Chunk) -> void {
+        self.code.drop();
+        self.fns.drop();
+    }
+    func len(self: *Chunk) -> i64 { return self.code.len() as i64; }
+}
+
+struct Compiler {
+    prog: *Prog;
+    chunk: *Chunk;
+    slots: HashMap<str, i64>;    // name -> local slot, for the function being compiled
+    nslots: i64;
+    fn_ids: HashMap<str, i64>;   // function name -> index into chunk.fns
+    err: str;
+    in_func: bool;
+}
+
+impl Compiler {
+    func new(prog: *Prog, chunk: *Chunk) -> Compiler {
+        let c: Compiler = Compiler {
+            prog: prog,
+            chunk: chunk,
+            slots: HashMap<str, i64>::new(),
+            nslots: 0,
+            fn_ids: HashMap<str, i64>::new(),
+            err: "",
+            in_func: false,
+        };
+        return c;
+    }
+
+    func drop(self: *Compiler) -> void {
+        self.slots.drop();
+        self.fn_ids.drop();
+    }
+
+    func failed(self: *Compiler) -> bool { return cstr.len(self.err) != 0; }
+
+    func fail(self: *Compiler, msg: str) -> void {
+        if (!self.failed()) { self.err = msg; }
+    }
+
+    func emit(self: *Compiler, op: Op) -> i64 {
+        self.chunk.code.push(op);
+        return self.chunk.len() - 1;
+    }
+
+    // reserve a slot for a name in the function being compiled
+    func declare(self: *Compiler, name: str) -> i64 {
+        match (self.slots.get(name)) {
+            Some(s) => { return s; }          // redeclaration reuses the slot
+            None => { }
+        }
+        let slot: i64 = self.nslots;
+        self.slots.insert(name, slot);
+        self.nslots = self.nslots + 1;
+        return slot;
+    }
+
+    func lookup(self: *Compiler, name: str) -> i64 {
+        match (self.slots.get(name)) {
+            Some(s) => { return s; }
+            None => { return 0 - 1; }
+        }
+    }
+
+    // start a fresh scope for one function body
+    func reset_scope(self: *Compiler) -> void {
+        self.slots.drop();
+        self.slots = HashMap<str, i64>::new();
+        self.nslots = 0;
+    }
+
+    // --- the two passes --------------------------------------------------
+
+    // pass 1: every function gets an index before any body is compiled, so a
+    // call can refer to a function declared later in the file
+    func collect_functions(self: *Compiler) -> void {
+        let i: usize = 0;
+        while (i < self.prog.names.len()) {
+            let id: i64 = self.prog.names.get(i);
+            match (self.prog.at(id)) {
+                Ast::Func(f) => {
+                    if (self.fn_ids.contains(f.name)) {
+                        self.fail("a function with that name is already defined");
+                        return;
+                    }
+                    let idx: i64 = self.chunk.fns.len() as i64;
+                    self.fn_ids.insert(f.name, idx);
+                    self.chunk.fns.push(FnInfo {
+                        name: f.name,
+                        entry: 0,
+                        arity: f.params.count,
+                        nlocals: 0,
+                    });
+                }
+                _ => { }
+            }
+            i = i + 1;
+        }
+    }
+
+    // pass 2: bodies first, then the top level, so main starts where the
+    // program's statements begin
+    func compile(self: *Compiler, root: i64) -> void {
+        self.collect_functions();
+        if (self.failed()) { return; }
+
+        let i: usize = 0;
+        while (i < self.prog.names.len() && !self.failed()) {
+            self.function(self.prog.names.get(i));
+            i = i + 1;
+        }
+        if (self.failed()) { return; }
+
+        self.reset_scope();
+        self.in_func = false;
+        self.chunk.main_entry = self.chunk.len();
+        self.node(root);
+        self.emit(Op::Halt);
+        self.chunk.main_locals = self.nslots;
+    }
+
+    func function(self: *Compiler, id: i64) -> void {
+        match (self.prog.at(id)) {
+            Ast::Func(f) => {
+                self.reset_scope();
+                self.in_func = true;
+                let idx: i64 = self.lookup_fn(f.name);
+                let entry: i64 = self.chunk.len();
+                // parameters occupy the first slots, in order
+                let k: i64 = 0;
+                while (k < f.params.count) {
+                    let pid: i64 = self.prog.child(f.params, k);
+                    match (self.prog.at(pid)) {
+                        Ast::Var(nm) => { self.declare(nm); }
+                        _ => { self.fail("a parameter must be a name"); }
+                    }
+                    k = k + 1;
+                }
+                self.node(f.body);
+                self.emit(Op::Push(0));      // a function without return gives 0
+                self.emit(Op::Ret);
+                let info: FnInfo = self.chunk.fns.get(idx as usize);
+                info.entry = entry;
+                info.nlocals = self.nslots;
+                self.chunk.fns.set(idx as usize, info);
+            }
+            _ => { self.fail("expected a function declaration"); }
+        }
+    }
+
+    func lookup_fn(self: *Compiler, name: str) -> i64 {
+        match (self.fn_ids.get(name)) {
+            Some(v) => { return v; }
+            None => { return 0 - 1; }
+        }
+    }
+
+    // --- statements and expressions --------------------------------------
+
+    func node(self: *Compiler, id: i64) -> void {
+        if (self.failed() || id < 0) { return; }
+        match (self.prog.at(id)) {
+            Ast::Block(l) => {
+                let i: i64 = 0;
+                while (i < l.count) {
+                    self.node(self.prog.child(l, i));
+                    i = i + 1;
+                }
+            }
+            Ast::Let(a) => {
+                self.node(a.e);
+                self.emit(Op::Store(self.declare(a.name)));
+            }
+            Ast::Assign(a) => {
+                let slot: i64 = self.lookup(a.name);
+                if (slot < 0) { self.fail("assignment to an undeclared variable"); return; }
+                self.node(a.e);
+                self.emit(Op::Store(slot));
+            }
+            Ast::Print(e) => {
+                self.node(e);
+                self.emit(Op::Print);
+            }
+            Ast::Return(e) => {
+                if (!self.in_func) { self.fail("return outside a function"); return; }
+                self.node(e);
+                self.emit(Op::Ret);
+            }
+            Ast::If(f) => {
+                self.node(f.c);
+                let jf: i64 = self.emit(Op::JumpF(0));
+                self.node(f.t);
+                if (f.e < 0) {
+                    self.patch(jf, self.chunk.len());
+                } else {
+                    let jend: i64 = self.emit(Op::Jump(0));
+                    self.patch(jf, self.chunk.len());
+                    self.node(f.e);
+                    self.patch(jend, self.chunk.len());
+                }
+            }
+            Ast::While(w) => {
+                let top: i64 = self.chunk.len();
+                self.node(w.c);
+                let jf: i64 = self.emit(Op::JumpF(0));
+                self.node(w.body);
+                self.emit(Op::Jump(top));
+                self.patch(jf, self.chunk.len());
+            }
+            Ast::Num(v) => { self.emit(Op::Push(v)); }
+            Ast::Var(nm) => {
+                let slot: i64 = self.lookup(nm);
+                if (slot < 0) { self.fail("use of an undeclared variable"); return; }
+                self.emit(Op::Load(slot));
+            }
+            Ast::Bin(b) => {
+                self.node(b.l);
+                self.node(b.r);
+                self.emit(Op::Arith(b.op));
+            }
+            Ast::Un(u) => {
+                self.node(u.e);
+                self.emit(Op::Arith(u.op));
+            }
+            Ast::Call(c) => {
+                let target: i64 = self.lookup_fn(c.name);
+                if (target < 0) { self.fail("call to an unknown function"); return; }
+                let want: i64 = self.chunk.fns.get(target as usize).arity;
+                if (want != c.args.count) { self.fail("wrong number of arguments"); return; }
+                let i: i64 = 0;
+                while (i < c.args.count) {
+                    self.node(self.prog.child(c.args, i));
+                    i = i + 1;
+                }
+                self.emit(Op::Call(CallOp { target: target, argc: c.args.count }));
+            }
+            Ast::Func(f) => { }        // compiled in its own pass
+            Ast::Bad(m) => { self.fail(m); }
+        }
+    }
+
+    // rewrite a jump's target now that the destination is known
+    func patch(self: *Compiler, at: i64, target: i64) -> void {
+        match (self.chunk.code.get(at as usize)) {
+            Op::Jump(t) => { self.chunk.code.set(at as usize, Op::Jump(target)); }
+            Op::JumpF(t) => { self.chunk.code.set(at as usize, Op::JumpF(target)); }
+            _ => { self.fail("tried to patch something that is not a jump"); }
+        }
+    }
+}

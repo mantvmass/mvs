@@ -54,7 +54,7 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/lib_rand examples/08_stdlib/lib_sys examples/08_stdlib/out_width \
            examples/08_stdlib/option_result examples/08_stdlib/lib_vec examples/08_stdlib/lib_map \
            examples/08_stdlib/threads \
-           examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop
+           examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop \n           examples/10_json/main examples/11_vm/main
 
 # default target: build the compiler
 $(TARGET): $(SRC) $(HDR)

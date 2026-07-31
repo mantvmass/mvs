@@ -133,3 +133,21 @@ for the breakdown and for the four compiler gaps writing it uncovered.
 | `parser.mvs` | recursive descent, errors as values, depth cap |
 | `writer.mvs` | serialization, compact and pretty, round-trip stable |
 | `main.mvs` | the `jsontool` CLI plus a demo suite |
+
+## 11_vm: the second real program (1393 lines of MVS)
+
+A whole language pipeline for a toy language called *mini*: tokenizer,
+recursive descent parser, arena syntax tree, a compiler that resolves names to
+numbered slots and emits bytecode, and a stack machine that runs it, plus a
+disassembler and a CLI. See [examples/11_vm/README.md](../examples/11_vm/README.md).
+Byte-identical output on all three targets, clean under AddressSanitizer with
+leak detection ON.
+
+| File | What it is |
+|------|------------|
+| `lexer.mvs` | text to `Vec<Token>`: keywords, numbers, two-character operators, comments |
+| `ast.mvs` | the arena: nodes in one vector, child lists in another, addressed by index |
+| `parser.mvs` | recursive descent with precedence climbing, the first error stops the parse |
+| `compiler.mvs` | two passes: collect functions, then emit bytecode with patched jumps |
+| `vm.mvs` | the stack machine and the disassembler, every runtime failure reported |
+| `main.mvs` | the `minivm` CLI plus the demo suite the golden test runs |

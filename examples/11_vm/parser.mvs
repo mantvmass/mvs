@@ -1,0 +1,363 @@
+/*
+ * examples/11_vm/parser.mvs - recursive descent over the token vector
+ *
+ * Builds the arena tree from ast.mvs. Precedence climbing for expressions,
+ * one function per statement form. The first error stops the parse and is
+ * reported with the line it happened on: a toy language does not need error
+ * recovery, and pretending otherwise would hide bugs.
+ */
+import { Vec } from "std/vec";
+import { cstr } from "core";
+import { Token, Tok } from "./lexer.mvs";
+import { Prog, Ast, Bin, Un, Asg, If3, Wh, Lst, Call, Fn } from "./ast.mvs";
+import { OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD } from "./ast.mvs";
+import { OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE, OP_NEG } from "./ast.mvs";
+
+struct Parser {
+    toks: Vec<Token>;
+    pos: i64;
+    prog: *Prog;
+    err: str;            // "" while everything is fine
+    err_line: i64;
+}
+
+impl Parser {
+    func new(toks: Vec<Token>, prog: *Prog) -> Parser {
+        let p: Parser = Parser { toks: toks, pos: 0, prog: prog, err: "", err_line: 0 };
+        return p;
+    }
+
+    func failed(self: *Parser) -> bool { return cstr.len(self.err) != 0; }
+
+    func fail(self: *Parser, msg: str) -> i64 {
+        if (!self.failed()) {
+            self.err = msg;
+            self.err_line = self.line();
+        }
+        return 0 - 1;
+    }
+
+    func peek(self: *Parser) -> Tok {
+        if (self.pos >= self.toks.len() as i64) { return Tok::End; }
+        return self.toks.get(self.pos as usize).kind;
+    }
+
+    func line(self: *Parser) -> i64 {
+        if (self.pos >= self.toks.len() as i64) { return 0; }
+        return self.toks.get(self.pos as usize).line;
+    }
+
+    func advance(self: *Parser) -> Tok {
+        let t: Tok = self.peek();
+        if (self.pos < self.toks.len() as i64) { self.pos = self.pos + 1; }
+        return t;
+    }
+
+    // --- token tests, one per shape the parser asks about ---------------
+    func is_end(self: *Parser) -> bool {
+        match (self.peek()) { Tok::End => { return true; } _ => { return false; } }
+    }
+    func eat_semi(self: *Parser) -> bool {
+        match (self.peek()) { Tok::Semi => { self.advance(); return true; } _ => { return false; } }
+    }
+    func eat_lparen(self: *Parser) -> bool {
+        match (self.peek()) { Tok::LParen => { self.advance(); return true; } _ => { return false; } }
+    }
+    func eat_rparen(self: *Parser) -> bool {
+        match (self.peek()) { Tok::RParen => { self.advance(); return true; } _ => { return false; } }
+    }
+    func eat_lbrace(self: *Parser) -> bool {
+        match (self.peek()) { Tok::LBrace => { self.advance(); return true; } _ => { return false; } }
+    }
+    func eat_rbrace(self: *Parser) -> bool {
+        match (self.peek()) { Tok::RBrace => { self.advance(); return true; } _ => { return false; } }
+    }
+    func eat_comma(self: *Parser) -> bool {
+        match (self.peek()) { Tok::Comma => { self.advance(); return true; } _ => { return false; } }
+    }
+    func eat_assign(self: *Parser) -> bool {
+        match (self.peek()) { Tok::Assign => { self.advance(); return true; } _ => { return false; } }
+    }
+
+    // --- statements -----------------------------------------------------
+
+    // program := statement* ; returns the index of the top-level block
+    func parse_program(self: *Parser) -> i64 {
+        let kids: Vec<i64> = Vec<i64>::new();
+        while (!self.is_end() && !self.failed()) {
+            let s: i64 = self.statement();
+            if (s < 0) { kids.drop(); return 0 - 1; }
+            kids.push(s);
+        }
+        if (self.failed()) { kids.drop(); return 0 - 1; }
+        let l: Lst = self.prog.add_list(kids);
+        kids.drop();
+        return self.prog.add(Ast::Block(l));
+    }
+
+    func block(self: *Parser) -> i64 {
+        if (!self.eat_lbrace()) { return self.fail("expected '{'"); }
+        let kids: Vec<i64> = Vec<i64>::new();
+        while (!self.failed()) {
+            if (self.is_end()) { kids.drop(); return self.fail("unterminated block"); }
+            match (self.peek()) { Tok::RBrace => { break; } _ => { } }
+            let s: i64 = self.statement();
+            if (s < 0) { kids.drop(); return 0 - 1; }
+            kids.push(s);
+        }
+        if (!self.eat_rbrace()) { kids.drop(); return self.fail("expected '}'"); }
+        let l: Lst = self.prog.add_list(kids);
+        kids.drop();
+        return self.prog.add(Ast::Block(l));
+    }
+
+    func statement(self: *Parser) -> i64 {
+        match (self.peek()) {
+            Tok::KwLet => { return self.let_stmt(); }
+            Tok::KwPrint => { return self.print_stmt(); }
+            Tok::KwIf => { return self.if_stmt(); }
+            Tok::KwWhile => { return self.while_stmt(); }
+            Tok::KwFunc => { return self.func_decl(); }
+            Tok::KwReturn => { return self.return_stmt(); }
+            Tok::LBrace => { return self.block(); }
+            Tok::Bad(m) => { return self.fail(m); }
+            _ => { return self.expr_stmt(); }
+        }
+    }
+
+    func let_stmt(self: *Parser) -> i64 {
+        self.advance();                     // let
+        let name: str = "";
+        match (self.advance()) {
+            Tok::Ident(s) => { name = s; }
+            _ => { return self.fail("expected a name after 'let'"); }
+        }
+        if (!self.eat_assign()) { return self.fail("expected '=' in a let"); }
+        let e: i64 = self.expression();
+        if (e < 0) { return 0 - 1; }
+        if (!self.eat_semi()) { return self.fail("expected ';'"); }
+        return self.prog.add(Ast::Let(Asg { name: name, e: e }));
+    }
+
+    func print_stmt(self: *Parser) -> i64 {
+        self.advance();                     // print
+        let e: i64 = self.expression();
+        if (e < 0) { return 0 - 1; }
+        if (!self.eat_semi()) { return self.fail("expected ';'"); }
+        return self.prog.add(Ast::Print(e));
+    }
+
+    func return_stmt(self: *Parser) -> i64 {
+        self.advance();                     // return
+        let e: i64 = self.expression();
+        if (e < 0) { return 0 - 1; }
+        if (!self.eat_semi()) { return self.fail("expected ';'"); }
+        return self.prog.add(Ast::Return(e));
+    }
+
+    func if_stmt(self: *Parser) -> i64 {
+        self.advance();                     // if
+        if (!self.eat_lparen()) { return self.fail("expected '(' after 'if'"); }
+        let c: i64 = self.expression();
+        if (c < 0) { return 0 - 1; }
+        if (!self.eat_rparen()) { return self.fail("expected ')'"); }
+        let t: i64 = self.block();
+        if (t < 0) { return 0 - 1; }
+        let e: i64 = 0 - 1;
+        match (self.peek()) {
+            Tok::KwElse => {
+                self.advance();
+                match (self.peek()) {
+                    Tok::KwIf => { e = self.if_stmt(); }     // else if
+                    _ => { e = self.block(); }
+                }
+                if (e < 0) { return 0 - 1; }
+            }
+            _ => { }
+        }
+        return self.prog.add(Ast::If(If3 { c: c, t: t, e: e }));
+    }
+
+    func while_stmt(self: *Parser) -> i64 {
+        self.advance();                     // while
+        if (!self.eat_lparen()) { return self.fail("expected '(' after 'while'"); }
+        let c: i64 = self.expression();
+        if (c < 0) { return 0 - 1; }
+        if (!self.eat_rparen()) { return self.fail("expected ')'"); }
+        let b: i64 = self.block();
+        if (b < 0) { return 0 - 1; }
+        return self.prog.add(Ast::While(Wh { c: c, body: b }));
+    }
+
+    func func_decl(self: *Parser) -> i64 {
+        self.advance();                     // func
+        let name: str = "";
+        match (self.advance()) {
+            Tok::Ident(s) => { name = s; }
+            _ => { return self.fail("expected a function name"); }
+        }
+        if (!self.eat_lparen()) { return self.fail("expected '(' after the function name"); }
+        let ps: Vec<i64> = Vec<i64>::new();
+        let first: bool = true;
+        while (!self.failed()) {
+            match (self.peek()) { Tok::RParen => { break; } _ => { } }
+            if (!first && !self.eat_comma()) { ps.drop(); return self.fail("expected ',' between parameters"); }
+            first = false;
+            match (self.advance()) {
+                Tok::Ident(s) => { ps.push(self.prog.add(Ast::Var(s))); }
+                _ => { ps.drop(); return self.fail("expected a parameter name"); }
+            }
+        }
+        if (!self.eat_rparen()) { ps.drop(); return self.fail("expected ')'"); }
+        let params: Lst = self.prog.add_list(ps);
+        ps.drop();
+        let body: i64 = self.block();
+        if (body < 0) { return 0 - 1; }
+        let id: i64 = self.prog.add(Ast::Func(Fn { name: name, params: params, body: body }));
+        self.prog.names.push(id);
+        return id;
+    }
+
+    // expression statement: an assignment or a bare call
+    func expr_stmt(self: *Parser) -> i64 {
+        let save: i64 = self.pos;
+        match (self.peek()) {
+            Tok::Ident(name) => {
+                self.advance();
+                if (self.eat_assign()) {
+                    let e: i64 = self.expression();
+                    if (e < 0) { return 0 - 1; }
+                    if (!self.eat_semi()) { return self.fail("expected ';'"); }
+                    return self.prog.add(Ast::Assign(Asg { name: name, e: e }));
+                }
+                self.pos = save;             // not an assignment: an expression
+            }
+            _ => { }
+        }
+        let e: i64 = self.expression();
+        if (e < 0) { return 0 - 1; }
+        if (!self.eat_semi()) { return self.fail("expected ';'"); }
+        return e;
+    }
+
+    // --- expressions, lowest precedence first ---------------------------
+
+    func expression(self: *Parser) -> i64 { return self.comparison(); }
+
+    func comparison(self: *Parser) -> i64 {
+        let l: i64 = self.term();
+        if (l < 0) { return 0 - 1; }
+        let go: bool = true;
+        while (go && !self.failed()) {
+            let op: i64 = 0 - 1;
+            match (self.peek()) {
+                Tok::Lt => { op = OP_LT; }
+                Tok::Le => { op = OP_LE; }
+                Tok::Gt => { op = OP_GT; }
+                Tok::Ge => { op = OP_GE; }
+                Tok::EqEq => { op = OP_EQ; }
+                Tok::BangEq => { op = OP_NE; }
+                _ => { go = false; }
+            }
+            if (go) {
+                self.advance();
+                let r: i64 = self.term();
+                if (r < 0) { return 0 - 1; }
+                l = self.prog.add(Ast::Bin(Bin { op: op, l: l, r: r }));
+            }
+        }
+        return l;
+    }
+
+    func term(self: *Parser) -> i64 {
+        let l: i64 = self.factor();
+        if (l < 0) { return 0 - 1; }
+        let go: bool = true;
+        while (go && !self.failed()) {
+            let op: i64 = 0 - 1;
+            match (self.peek()) {
+                Tok::Plus => { op = OP_ADD; }
+                Tok::Minus => { op = OP_SUB; }
+                _ => { go = false; }
+            }
+            if (go) {
+                self.advance();
+                let r: i64 = self.factor();
+                if (r < 0) { return 0 - 1; }
+                l = self.prog.add(Ast::Bin(Bin { op: op, l: l, r: r }));
+            }
+        }
+        return l;
+    }
+
+    func factor(self: *Parser) -> i64 {
+        let l: i64 = self.unary();
+        if (l < 0) { return 0 - 1; }
+        let go: bool = true;
+        while (go && !self.failed()) {
+            let op: i64 = 0 - 1;
+            match (self.peek()) {
+                Tok::Star => { op = OP_MUL; }
+                Tok::Slash => { op = OP_DIV; }
+                Tok::Percent => { op = OP_MOD; }
+                _ => { go = false; }
+            }
+            if (go) {
+                self.advance();
+                let r: i64 = self.unary();
+                if (r < 0) { return 0 - 1; }
+                l = self.prog.add(Ast::Bin(Bin { op: op, l: l, r: r }));
+            }
+        }
+        return l;
+    }
+
+    func unary(self: *Parser) -> i64 {
+        match (self.peek()) {
+            Tok::Minus => {
+                self.advance();
+                let e: i64 = self.unary();
+                if (e < 0) { return 0 - 1; }
+                return self.prog.add(Ast::Un(Un { op: OP_NEG, e: e }));
+            }
+            _ => { }
+        }
+        return self.primary();
+    }
+
+    func primary(self: *Parser) -> i64 {
+        match (self.advance()) {
+            Tok::Int(v) => { return self.prog.add(Ast::Num(v)); }
+            Tok::Ident(name) => {
+                match (self.peek()) {
+                    Tok::LParen => {
+                        self.advance();
+                        let as_: Vec<i64> = Vec<i64>::new();
+                        let first: bool = true;
+                        while (!self.failed()) {
+                            match (self.peek()) { Tok::RParen => { break; } _ => { } }
+                            if (!first && !self.eat_comma()) { as_.drop(); return self.fail("expected ',' between arguments"); }
+                            first = false;
+                            let a: i64 = self.expression();
+                            if (a < 0) { as_.drop(); return 0 - 1; }
+                            as_.push(a);
+                        }
+                        if (!self.eat_rparen()) { as_.drop(); return self.fail("expected ')'"); }
+                        let args: Lst = self.prog.add_list(as_);
+                        as_.drop();
+                        return self.prog.add(Ast::Call(Call { name: name, args: args }));
+                    }
+                    _ => { return self.prog.add(Ast::Var(name)); }
+                }
+            }
+            Tok::LParen => {
+                let e: i64 = self.expression();
+                if (e < 0) { return 0 - 1; }
+                if (!self.eat_rparen()) { return self.fail("expected ')'"); }
+                return e;
+            }
+            Tok::Bad(m) => { return self.fail(m); }
+            _ => { return self.fail("expected an expression"); }
+        }
+    }
+}

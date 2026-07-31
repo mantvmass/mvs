@@ -1,0 +1,204 @@
+/*
+ * examples/11_vm/lexer.mvs - the tokenizer for the mini language
+ *
+ * Turns source text into a token vector. Identifiers and keywords are told
+ * apart here, numbers are converted here, and every token carries its line so
+ * the parser can report where a problem is.
+ *
+ * Memory: the Lexer owns the identifier strings it allocates and frees them in
+ * drop (MVS is manual, see docs/rules.md 0.2).
+ */
+import { mem } from "std";
+import { cstr } from "core";
+import { Vec } from "std/vec";
+
+// --- token kinds -------------------------------------------------------
+enum Tok {
+    Int(i64),        // 123
+    Ident(str),      // a name (heap, owned by the lexer)
+    KwLet,
+    KwIf,
+    KwElse,
+    KwWhile,
+    KwFunc,
+    KwReturn,
+    KwPrint,
+    Plus, Minus, Star, Slash, Percent,
+    Lt, Le, Gt, Ge, EqEq, BangEq,
+    Assign,
+    LParen, RParen, LBrace, RBrace,
+    Comma, Semi,
+    End,
+    Bad(str),        // an error message, owned by the lexer
+}
+
+struct Token {
+    kind: Tok;
+    line: i64;
+}
+
+struct Lexer {
+    src: *u8;
+    len: i64;
+    pos: i64;
+    line: i64;
+    owned: Vec<i64>;     // heap blocks handed to tokens, freed by drop
+}
+
+impl Lexer {
+    func new(text: str) -> Lexer {
+        let lx: Lexer = Lexer {
+            src: text as *u8,
+            len: cstr.len(text) as i64,
+            pos: 0,
+            line: 1,
+            owned: Vec<i64>::new(),
+        };
+        return lx;
+    }
+
+    func track(self: *Lexer, p: *u8) -> void {
+        self.owned.push(p as i64);
+    }
+
+    func drop(self: *Lexer) -> void {
+        let i: usize = 0;
+        while (i < self.owned.len()) {
+            mem.dealloc(self.owned.get(i) as *u8);
+            i = i + 1;
+        }
+        self.owned.drop();
+    }
+
+    func at_end(self: *Lexer) -> bool { return self.pos >= self.len; }
+
+    func peek(self: *Lexer) -> u8 {
+        if (self.pos >= self.len) { return 0; }
+        return self.src[self.pos as usize];
+    }
+
+    func peek2(self: *Lexer) -> u8 {
+        if (self.pos + 1 >= self.len) { return 0; }
+        return self.src[(self.pos + 1) as usize];
+    }
+
+    func advance(self: *Lexer) -> u8 {
+        let c: u8 = self.peek();
+        self.pos = self.pos + 1;
+        if (c == 10) { self.line = self.line + 1; }
+        return c;
+    }
+
+    // whitespace and // comments carry no meaning
+    func skip_blank(self: *Lexer) -> void {
+        while (!self.at_end()) {
+            let c: u8 = self.peek();
+            if (c == 32 || c == 9 || c == 13 || c == 10) {
+                self.advance();
+            } else if (c == 47 && self.peek2() == 47) {          // "//"
+                while (!self.at_end() && self.peek() != 10) { self.advance(); }
+            } else {
+                return;
+            }
+        }
+    }
+
+    // copy [start, end) into a fresh NUL-terminated heap string
+    func slice(self: *Lexer, start: i64, end: i64) -> str {
+        let n: i64 = end - start;
+        let buf: *u8 = mem.alloc((n + 1) as usize);
+        let i: i64 = 0;
+        while (i < n) {
+            buf[i as usize] = self.src[(start + i) as usize];
+            i = i + 1;
+        }
+        buf[n as usize] = 0;
+        self.track(buf);
+        return buf as str;
+    }
+
+    func next(self: *Lexer) -> Token {
+        self.skip_blank();
+        let line: i64 = self.line;
+        if (self.at_end()) { return Token { kind: Tok::End, line: line }; }
+
+        let c: u8 = self.peek();
+        if (is_digit(c)) { return self.number(line); }
+        if (is_alpha(c)) { return self.word(line); }
+        self.advance();
+
+        if (c == 43) { return Token { kind: Tok::Plus, line: line }; }
+        if (c == 45) { return Token { kind: Tok::Minus, line: line }; }
+        if (c == 42) { return Token { kind: Tok::Star, line: line }; }
+        if (c == 47) { return Token { kind: Tok::Slash, line: line }; }
+        if (c == 37) { return Token { kind: Tok::Percent, line: line }; }
+        if (c == 40) { return Token { kind: Tok::LParen, line: line }; }
+        if (c == 41) { return Token { kind: Tok::RParen, line: line }; }
+        if (c == 123) { return Token { kind: Tok::LBrace, line: line }; }
+        if (c == 125) { return Token { kind: Tok::RBrace, line: line }; }
+        if (c == 44) { return Token { kind: Tok::Comma, line: line }; }
+        if (c == 59) { return Token { kind: Tok::Semi, line: line }; }
+        if (c == 60) {
+            if (self.peek() == 61) { self.advance(); return Token { kind: Tok::Le, line: line }; }
+            return Token { kind: Tok::Lt, line: line };
+        }
+        if (c == 62) {
+            if (self.peek() == 61) { self.advance(); return Token { kind: Tok::Ge, line: line }; }
+            return Token { kind: Tok::Gt, line: line };
+        }
+        if (c == 61) {
+            if (self.peek() == 61) { self.advance(); return Token { kind: Tok::EqEq, line: line }; }
+            return Token { kind: Tok::Assign, line: line };
+        }
+        if (c == 33) {
+            if (self.peek() == 61) { self.advance(); return Token { kind: Tok::BangEq, line: line }; }
+            return Token { kind: Tok::Bad("'!' must be followed by '='"), line: line };
+        }
+        return Token { kind: Tok::Bad("unexpected character"), line: line };
+    }
+
+    func number(self: *Lexer, line: i64) -> Token {
+        let v: i64 = 0;
+        while (!self.at_end() && is_digit(self.peek())) {
+            v = v * 10 + ((self.advance() - 48) as i64);
+        }
+        return Token { kind: Tok::Int(v), line: line };
+    }
+
+    func word(self: *Lexer, line: i64) -> Token {
+        let start: i64 = self.pos;
+        while (!self.at_end() && (is_alpha(self.peek()) || is_digit(self.peek()))) {
+            self.advance();
+        }
+        let text: str = self.slice(start, self.pos);
+        if (cstr.eq(text, "let")) { return Token { kind: Tok::KwLet, line: line }; }
+        if (cstr.eq(text, "if")) { return Token { kind: Tok::KwIf, line: line }; }
+        if (cstr.eq(text, "else")) { return Token { kind: Tok::KwElse, line: line }; }
+        if (cstr.eq(text, "while")) { return Token { kind: Tok::KwWhile, line: line }; }
+        if (cstr.eq(text, "func")) { return Token { kind: Tok::KwFunc, line: line }; }
+        if (cstr.eq(text, "return")) { return Token { kind: Tok::KwReturn, line: line }; }
+        if (cstr.eq(text, "print")) { return Token { kind: Tok::KwPrint, line: line }; }
+        return Token { kind: Tok::Ident(text), line: line };
+    }
+}
+
+func is_digit(c: u8) -> bool { return c >= 48 && c <= 57; }
+func is_alpha(c: u8) -> bool {
+    return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c == 95;
+}
+
+// the whole token stream in one call; the Lexer keeps owning the strings
+func tokenize(lx: *Lexer) -> Vec<Token> {
+    let out: Vec<Token> = Vec<Token>::new();
+    let done: bool = false;
+    while (!done) {
+        let t: Token = lx.next();
+        match (t.kind) {
+            Tok::End => { done = true; }
+            Tok::Bad(m) => { done = true; }
+            _ => { }
+        }
+        out.push(t);
+    }
+    return out;
+}

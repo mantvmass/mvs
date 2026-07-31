@@ -1,0 +1,205 @@
+/*
+ * examples/11_vm/vm.mvs - the stack machine that runs the bytecode
+ *
+ * One value stack holds both operands and call frames: a frame reserves its
+ * locals at the base, arguments are copied into the first slots, and a return
+ * pops back to the caller's base. Every runtime failure (stack overflow,
+ * division by zero, a bad jump) stops the machine with a message instead of
+ * corrupting memory, because a VM that trusts its input is not a VM.
+ */
+import { Vec } from "std/vec";
+import { io } from "std";
+import { cstr } from "core";
+import { Chunk, Op, CallOp, FnInfo } from "./compiler.mvs";
+import { OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD } from "./ast.mvs";
+import { OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE, OP_NEG } from "./ast.mvs";
+
+const STACK_MAX: i64 = 4096;
+const FRAME_MAX: i64 = 256;
+
+struct Frame {
+    ret_pc: i64;
+    base: i64;
+    nlocals: i64;
+}
+
+struct Vm {
+    chunk: *Chunk;
+    stack: Vec<i64>;
+    frames: Vec<Frame>;
+    base: i64;             // where the current frame's locals start
+    pc: i64;
+    steps: i64;            // instructions executed, so a runaway loop is visible
+    err: str;
+    out: Vec<i64>;         // everything print produced, for the tests
+}
+
+impl Vm {
+    func new(chunk: *Chunk) -> Vm {
+        let v: Vm = Vm {
+            chunk: chunk,
+            stack: Vec<i64>::new(),
+            frames: Vec<Frame>::new(),
+            base: 0,
+            pc: 0,
+            steps: 0,
+            err: "",
+            out: Vec<i64>::new(),
+        };
+        return v;
+    }
+
+    func drop(self: *Vm) -> void {
+        self.stack.drop();
+        self.frames.drop();
+        self.out.drop();
+    }
+
+    func failed(self: *Vm) -> bool { return cstr.len(self.err) != 0; }
+
+    func fail(self: *Vm, msg: str) -> void {
+        if (!self.failed()) { self.err = msg; }
+    }
+
+    func push(self: *Vm, v: i64) -> void {
+        if (self.stack.len() as i64 >= STACK_MAX) { self.fail("stack overflow"); return; }
+        self.stack.push(v);
+    }
+
+    func pop(self: *Vm) -> i64 {
+        if (self.stack.len() as i64 <= self.base) { self.fail("stack underflow"); return 0; }
+        return self.stack.pop();
+    }
+
+    // locals live at [base, base + nlocals); the frame is grown when entered
+    func load(self: *Vm, slot: i64) -> i64 {
+        let at: i64 = self.base + slot;
+        if (at < 0 || at >= self.stack.len() as i64) { self.fail("bad local slot"); return 0; }
+        return self.stack.get(at as usize);
+    }
+
+    func store(self: *Vm, slot: i64, v: i64) -> void {
+        let at: i64 = self.base + slot;
+        if (at < 0 || at >= self.stack.len() as i64) { self.fail("bad local slot"); return; }
+        self.stack.set(at as usize, v);
+    }
+
+    func arith(self: *Vm, op: i64) -> void {
+        if (op == OP_NEG) {
+            let a: i64 = self.pop();
+            self.push(0 - a);
+            return;
+        }
+        let b: i64 = self.pop();
+        let a: i64 = self.pop();
+        if (self.failed()) { return; }
+        if (op == OP_ADD) { self.push(a + b); }
+        else if (op == OP_SUB) { self.push(a - b); }
+        else if (op == OP_MUL) { self.push(a * b); }
+        else if (op == OP_DIV) {
+            if (b == 0) { self.fail("division by zero"); return; }
+            self.push(a / b);
+        }
+        else if (op == OP_MOD) {
+            if (b == 0) { self.fail("division by zero"); return; }
+            self.push(a % b);
+        }
+        else if (op == OP_LT) { self.push(bool_val(a < b)); }
+        else if (op == OP_LE) { self.push(bool_val(a <= b)); }
+        else if (op == OP_GT) { self.push(bool_val(a > b)); }
+        else if (op == OP_GE) { self.push(bool_val(a >= b)); }
+        else if (op == OP_EQ) { self.push(bool_val(a == b)); }
+        else if (op == OP_NE) { self.push(bool_val(a != b)); }
+        else { self.fail("unknown operator"); }
+    }
+
+    func call(self: *Vm, c: CallOp) -> void {
+        if (c.target < 0 || c.target >= self.chunk.fns.len() as i64) {
+            self.fail("call to an unknown function"); return;
+        }
+        if (self.frames.len() as i64 >= FRAME_MAX) { self.fail("call depth exceeded"); return; }
+        let info: FnInfo = self.chunk.fns.get(c.target as usize);
+        // the arguments are already on top of the stack, in order
+        let new_base: i64 = (self.stack.len() as i64) - c.argc;
+        if (new_base < 0) { self.fail("stack underflow at a call"); return; }
+        self.frames.push(Frame { ret_pc: self.pc, base: self.base, nlocals: info.nlocals });
+        self.base = new_base;
+        // locals beyond the parameters start at zero
+        let k: i64 = c.argc;
+        while (k < info.nlocals) {
+            self.push(0);
+            k = k + 1;
+        }
+        self.pc = info.entry;
+    }
+
+    func ret(self: *Vm) -> void {
+        let v: i64 = self.pop();
+        if (self.frames.len() == 0) { self.fail("return with no caller"); return; }
+        let f: Frame = self.frames.pop();
+        // drop the whole frame, then hand the result to the caller
+        while (self.stack.len() as i64 > self.base) { self.stack.pop(); }
+        self.base = f.base;
+        self.pc = f.ret_pc;
+        self.push(v);
+    }
+
+    func run(self: *Vm, limit: i64) -> bool {
+        self.pc = self.chunk.main_entry;
+        self.base = 0;
+        let k: i64 = 0;
+        while (k < self.chunk.main_locals) {      // the top level has locals too
+            self.push(0);
+            k = k + 1;
+        }
+        while (!self.failed()) {
+            if (self.steps >= limit) { self.fail("instruction limit reached"); return false; }
+            if (self.pc < 0 || self.pc >= self.chunk.len()) { self.fail("program counter out of range"); return false; }
+            let op: Op = self.chunk.code.get(self.pc as usize);
+            self.pc = self.pc + 1;
+            self.steps = self.steps + 1;
+            match (op) {
+                Op::Push(v) => { self.push(v); }
+                Op::Load(s) => { self.push(self.load(s)); }
+                Op::Store(s) => { let v: i64 = self.pop(); self.store(s, v); }
+                Op::Arith(o) => { self.arith(o); }
+                Op::Jump(t) => { self.pc = t; }
+                Op::JumpF(t) => { if (self.pop() == 0) { self.pc = t; } }
+                Op::Print => {
+                    let v: i64 = self.pop();
+                    self.out.push(v);
+                    io.out("{}", v);
+                }
+                Op::Call(c) => { self.call(c); }
+                Op::Ret => { self.ret(); }
+                Op::Pop => { self.pop(); }
+                Op::Halt => { return !self.failed(); }
+            }
+        }
+        return false;
+    }
+}
+
+func bool_val(b: bool) -> i64 { if (b) { return 1; } return 0; }
+
+// a readable dump of the bytecode, which is how you check a compiler by eye
+func disassemble(chunk: *Chunk) -> void {
+    let i: i64 = 0;
+    while (i < chunk.len()) {
+        let op: Op = chunk.code.get(i as usize);
+        match (op) {
+            Op::Push(v) => { io.out("{:4} push  {}", i, v); }
+            Op::Load(s) => { io.out("{:4} load  {}", i, s); }
+            Op::Store(s) => { io.out("{:4} store {}", i, s); }
+            Op::Arith(o) => { io.out("{:4} arith {}", i, o); }
+            Op::Jump(t) => { io.out("{:4} jmp   {}", i, t); }
+            Op::JumpF(t) => { io.out("{:4} jmpf  {}", i, t); }
+            Op::Print => { io.out("{:4} print", i); }
+            Op::Call(c) => { io.out("{:4} call  {} argc {}", i, c.target, c.argc); }
+            Op::Ret => { io.out("{:4} ret", i); }
+            Op::Pop => { io.out("{:4} pop", i); }
+            Op::Halt => { io.out("{:4} halt", i); }
+        }
+        i = i + 1;
+    }
+}
