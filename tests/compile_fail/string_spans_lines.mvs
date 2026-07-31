@@ -1,0 +1,9 @@
+//~ ERROR: cannot span lines
+// a raw line break inside a string would mean different bytes depending on how
+// the file was checked out, so it is rejected in favour of \n
+import { io } from "std";
+func main() -> i8 {
+    io.out("first
+second");
+    return 0;
+}

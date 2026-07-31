@@ -219,6 +219,17 @@ static Token read_string(Lexer *lx) {
     char *buf = (char *)malloc(strlen(lx->src + lx->pos) + 1);
     size_t bi = 0;
     while (peek(lx) != '"' && peek(lx) != '\0') {
+        /* A raw line break inside a string is rejected: it reads as a value that
+         * depends on how the file was checked out, since git rewrites CRLF to LF
+         * and back. Write \n or \r\n and the program means the same everywhere. */
+        if (peek(lx) == '\n' || peek(lx) == '\r') {
+            lx->had_error = 1;
+            fprintf(stderr, "%s:%d:%d: error: a string literal cannot span lines\n",
+                    lx->filename, lx->line, lx->col);
+            fprintf(stderr, "help: write the line break as \\n (or \\r\\n), which means the same "
+                            "on every platform\n");
+            break;
+        }
         char c = advance(lx);
         if (c == '\\') { /* handle escape sequence */
             if (peek(lx) == '\0') break; /* '\' at end of file: avoid reading past the buffer */

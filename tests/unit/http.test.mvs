@@ -293,10 +293,7 @@ func http_byte_helpers() -> void {
     test.eq(index_of("abc def", 32, 0), 3);          // ' '
     test.eq(index_of("abc def", 32, 4), 0 - 1);
     test.eq(index_of("", 32, 0), 0 - 1);
-    test.eq(header_end("GET / HTTP/1.1
-A: 1
-
-body"), 20);
+    test.eq(header_end("GET / HTTP/1.1\r\nA: 1\r\n\r\nbody"), 20);
     test.eq(header_end("no blank line here"), 0 - 1);
     let l: str = lower("Content-TYPE");
     test.eq(l, "content-type");
@@ -314,9 +311,7 @@ body"), 20);
 @test
 func http_default_fallback() -> void {
     // the handler a router uses when nothing else matched
-    let req: Request = parse_request("GET /x HTTP/1.1
-
-");
+    let req: Request = parse_request("GET /x HTTP/1.1\r\n\r\n");
     let direct: Response = default_fallback(&req);
     test.eq(direct.code(), 404);
     direct.drop();
@@ -324,9 +319,7 @@ func http_default_fallback() -> void {
 
     // a router with no fallback answers 404 by itself
     let app: Router = Router::new().route("/", get(hello));
-    let r: String = roundtrip(&app, "GET /missing HTTP/1.1
-
-");
+    let r: String = roundtrip(&app, "GET /missing HTTP/1.1\r\n\r\n");
     test.eq(response_status(r.as_str()), 404);
     let body: str = response_body(r.as_str());
     test.eq(body, "404 not found");
@@ -356,39 +349,26 @@ func http_method_router() -> void {
         .route("/opt", options(hello))
         .route("/wild", method_router("PROPFIND", hello));
 
-    let a: String = roundtrip(&app, "GET /thing HTTP/1.1
-
-");
+    let a: String = roundtrip(&app, "GET /thing HTTP/1.1\r\n\r\n");
     test.eq(response_status(a.as_str()), 200);
     a.drop();
-    let b: String = roundtrip(&app, "DELETE /thing HTTP/1.1
-
-");
+    let b: String = roundtrip(&app, "DELETE /thing HTTP/1.1\r\n\r\n");
     test.eq(response_status(b.as_str()), 204);
     b.drop();
-    let c: String = roundtrip(&app, "PATCH /thing HTTP/1.1
-Content-Length: 2
-
-hi");
+    let c: String = roundtrip(&app, "PATCH /thing HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi");
     let cb: str = response_body(c.as_str());
     test.eq(cb, "hi");
     mem.dealloc(cb as *u8);
     c.drop();
-    let d: String = roundtrip(&app, "OPTIONS /opt HTTP/1.1
-
-");
+    let d: String = roundtrip(&app, "OPTIONS /opt HTTP/1.1\r\n\r\n");
     test.eq(response_status(d.as_str()), 200);
     d.drop();
     // a method the path does not answer is a 405, not a 404
-    let e: String = roundtrip(&app, "TRACE /thing HTTP/1.1
-
-");
+    let e: String = roundtrip(&app, "TRACE /thing HTTP/1.1\r\n\r\n");
     test.eq(response_status(e.as_str()), 405);
     e.drop();
     // any method name works, not just the ones with a helper
-    let f: String = roundtrip(&app, "PROPFIND /wild HTTP/1.1
-
-");
+    let f: String = roundtrip(&app, "PROPFIND /wild HTTP/1.1\r\n\r\n");
     test.eq(response_status(f.as_str()), 200);
     f.drop();
     app.drop();
@@ -398,9 +378,7 @@ hi");
 func http_unfilled_method_slot() -> void {
     // the placeholder a fresh MethodRouter starts with never answers a request,
     // but calling it directly must still be safe
-    let req: Request = parse_request("GET / HTTP/1.1
-
-");
+    let req: Request = parse_request("GET / HTTP/1.1\r\n\r\n");
     let r: Response = no_handler(&req);
     test.eq(r.code(), 500);
     r.drop();
