@@ -234,6 +234,13 @@ static Token read_string(Lexer *lx) {
         if (c == '\\') { /* handle escape sequence */
             if (peek(lx) == '\0') break; /* '\' at end of file: avoid reading past the buffer */
             char e = advance(lx);
+            /* backslash at end of line splices the next line onto this one and
+             * contributes nothing, the way C does it. Both line endings are
+             * accepted so a CRLF checkout compiles to the same bytes as an LF one */
+            if (e == '\r' || e == '\n') {
+                if (e == '\r' && peek(lx) == '\n') advance(lx);
+                continue;
+            }
             switch (e) {
                 case 'n': buf[bi++] = '\n'; break;
                 case 't': buf[bi++] = '\t'; break;
