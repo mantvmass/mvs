@@ -1,0 +1,143 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "MVS",
+  "scopeName": "source.mvs",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#chars" },
+    { "include": "#attributes" },
+    { "include": "#definitions" },
+    { "include": "#keywords" },
+    { "include": "#builtins" },
+    { "include": "#constants" },
+    { "include": "#functions" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.block.mvs", "begin": "/\\*", "end": "\\*/" },
+        { "name": "comment.line.double-slash.mvs", "match": "//.*$" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.mvs",
+          "begin": "\"",
+          "end": "\"|(?<!\\\\)$",
+          "patterns": [
+            { "name": "constant.other.placeholder.mvs", "match": "\\{\\{|\\}\\}|\\{[^{}\"]*\\}" },
+            { "name": "constant.character.escape.mvs", "match": "\\\\(.|$)" }
+          ]
+        }
+      ]
+    },
+    "chars": {
+      "patterns": [
+        { "name": "string.quoted.single.mvs", "match": "'(?:\\\\.|[^'\\\\])'" }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        {
+          "match": "(@)([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "punctuation.definition.annotation.mvs" },
+            "2": { "name": "entity.name.function.decorator.mvs" }
+          }
+        }
+      ]
+    },
+    "definitions": {
+      "patterns": [
+        {
+          "match": "\\b(func)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.function.mvs" },
+            "2": { "name": "entity.name.function.mvs" }
+          }
+        },
+        {
+          "match": "\\b(struct|enum|trait)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.mvs" },
+            "2": { "name": "entity.name.type.mvs" }
+          }
+        },
+        {
+          "match": "\\b(impl)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(for)\\s+([A-Za-z_][A-Za-z0-9_]*))?",
+          "captures": {
+            "1": { "name": "storage.type.impl.mvs" },
+            "2": { "name": "entity.name.type.mvs" },
+            "3": { "name": "keyword.other.for.mvs" },
+            "4": { "name": "entity.name.type.mvs" }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        { "name": "keyword.control.import.mvs", "match": "\\b(import|from)\\b" },
+        { "name": "keyword.control.mvs", "match": "\\b(if|elseif|else|while|for|do|switch|case|default|break|continue|return|match)\\b" },
+        { "name": "storage.type.mvs", "match": "\\b(func|struct|enum|trait|impl|let|const)\\b" },
+        { "name": "storage.modifier.mvs", "match": "\\b(extern|export|dyn|where)\\b" },
+        { "name": "keyword.operator.cast.mvs", "match": "\\bas\\b" }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        { "name": "support.function.builtin.mvs", "match": "\\basm\\b(?=\\s*\\()" },
+        { "name": "variable.language.self.mvs", "match": "\\bself\\b" },
+        { "name": "entity.name.type.self.mvs", "match": "\\bSelf\\b" },
+        { "name": "entity.name.type.primitive.mvs", "match": "\\b(i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|isize|usize|bool|char|str|f32|f64|void)\\b" }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        { "name": "constant.language.boolean.mvs", "match": "\\b(true|false)\\b" },
+        { "name": "constant.language.wildcard.mvs", "match": "\\b_\\b(?=\\s*=>)" },
+        { "name": "constant.other.caps.mvs", "match": "\\b[A-Z][A-Z0-9_]+\\b(?![a-z])" }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        { "name": "entity.name.function.call.mvs", "match": "\\b([a-z_][A-Za-z0-9_]*)(?=\\s*\\()" },
+        { "name": "entity.name.function.call.mvs", "match": "\\b([a-z_][A-Za-z0-9_]*)(?=\\s*<[\\w\\s,*<>]*>\\s*\\()" },
+        { "name": "entity.name.function.constructor.mvs", "match": "\\b([A-Z][A-Za-z0-9_]*)(?=\\s*\\()" }
+      ]
+    },
+    "types": {
+      "patterns": [
+        { "name": "entity.name.type.mvs", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.mvs", "match": "\\b0x[0-9A-Fa-f]+\\b" },
+        { "name": "constant.numeric.binary.mvs", "match": "\\b0b[01]+\\b" },
+        { "name": "constant.numeric.float.mvs", "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?\\b" },
+        { "name": "constant.numeric.float.mvs", "match": "\\b\\d+[eE][+-]?\\d+\\b" },
+        { "name": "constant.numeric.integer.mvs", "match": "\\b\\d+\\b" }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.arrow.mvs", "match": "->|=>" },
+        { "name": "keyword.operator.variadic.mvs", "match": "\\.\\.\\." },
+        { "name": "keyword.operator.mvs", "match": "\\*\\*|<<|>>|<=|>=|==|!=|&&|\\|\\||\\+=|-=|\\*=|/=|\\+\\+|--|[-+*/%=<>!&|^~]" }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.separator.path.mvs", "match": "::" },
+        { "name": "punctuation.separator.mvs", "match": "[;,:.]" },
+        { "name": "punctuation.bracket.mvs", "match": "[(){}\\[\\]]" }
+      ]
+    }
+  }
+}

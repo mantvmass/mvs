@@ -1,0 +1,46 @@
+{
+  "name": "mvs",
+  "displayName": "MVS Language",
+  "description": "Syntax highlighting for the MVS language",
+  "version": "0.1.0",
+  "publisher": "mantvmass",
+  "license": "(MIT OR Apache-2.0)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mantvmass/mvs"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "mvs",
+        "aliases": [
+          "MVS",
+          "mvs"
+        ],
+        "extensions": [
+          ".mvs"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mvs",
+        "scopeName": "source.mvs",
+        "path": "./syntaxes/mvs.tmLanguage.json"
+      }
+    ]
+  },
+  "devDependencies": {
+    "vscode-tmgrammar-test": "^0.1.3"
+  },
+  "scripts": {
+    "test": "vscode-tmgrammar-snap -g syntaxes/mvs.tmLanguage.json tests/*.mvs"
+  }
+}

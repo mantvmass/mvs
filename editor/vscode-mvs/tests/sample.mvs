@@ -1,0 +1,66 @@
+// Tokenization sample: the same construct set the tree-sitter corpus covers.
+/* a block
+   comment */
+
+import { io, math } from "std";
+import { String } from "std/string";
+import mylib from "./mathlib.mvs";
+
+@compile(target_os = "linux", target_arch = "aarch64")
+extern func close(s: usize) -> i32;
+
+const LIB_BASE: i64 = 0xFF8800;
+
+struct Rect { w: i32; h: i32; }
+
+enum Shape {
+    Circle(f64),
+    Rect(f64, f64),
+    Nothing,
+}
+
+trait Area {
+    func area(self: *Self) -> i32;
+}
+
+impl Area for Rect {
+    func area(self: *Rect) -> i32 { return self.w * self.h; }
+}
+
+func describe<T: Area + Named>(s: T) -> i32 where T: Area { return s.area(); }
+
+func total(items: ...dyn Area) -> i64 { return 0; }
+
+@test
+func test_everything() -> void {
+    let v: Vec<i64> = Vec<i64>::new();
+    let n: Option<i64> = none<i64>();
+    let mask: u8 = 0b10100101;
+    let big: f64 = 6.02e23;
+    let small: f64 = 2.5e-3;
+    let c: char = '\n';
+    let s: str = "x = {} hex = {:04x} lit {{}} \"q\" \\";
+    let f: func(i32, i32) -> i32 = add;
+    let x: i64 = -2 ** 2;
+    let ok: bool = a < b && c > d;
+
+    for (let i: i32 = 0; i < 10; i++) {
+        if (i % 2 == 0) { continue; }
+        elseif (i > 7) { break; }
+        else { x += i as i64; }
+    }
+    do { x--; } while (x > 0);
+    switch (x) {
+        case 1: break;
+        default: x = 1;
+    }
+
+    let label: str = match (find(v, 30)) {
+        Some(i) => "found",
+        Shape::Circle(r) => "circle",
+        _ => "missing",
+    };
+
+    io.out("sum = {}", math.abs(-4) + LIB_BASE);
+    return asm("rdtsc", "shl rdx, 32", "or rax, rdx");
+}
