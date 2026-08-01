@@ -34,6 +34,28 @@ qemu-user.
 - Macros are deliberately not planned. Decorators plus intrinsics cover the
   current needs without a second language layer.
 
+## Codegen: an IR
+
+The biggest open decision. Today the pipeline is AST straight to assembly:
+`gen_expr` sees one node at a time, so it plays it safe with the temp stack,
+and `-O` can never grow past peephole patterns. An intermediate representation
+(three-address code between the AST and the backends) would change that:
+
+- AST lowers to IR once, replacing `gen_expr`/`gen_stmt` in all three
+  backend files; each backend then only translates IR to instructions.
+- Optimizations (CSE, strength reduction, constant folding, real register
+  allocation over every value, not just named locals) are IR-to-IR passes,
+  written once for all targets. A plain IR + regalloc compiler lands around
+  1.2-1.5x gcc -O2; the current stack machine sits at about 3x.
+- New features lower to IR once instead of being emitted three times.
+
+The price: rewriting three stable, golden-tested backends, and every golden
+diff breaks in the transition (the differential tests are the safety net).
+The deeper cost is the project's stated point: with an optimizer in the
+middle, `-S` output no longer maps line by line back to the source. Either
+the 3x gap is the price of readable output, or readability is the price of
+closing it. Undecided, so this stays a sketch.
+
 ## Core library
 
 `core` is the pure-MVS package that stays importable under `--nostd`. Shipped:
@@ -64,8 +86,8 @@ Roughly in order of value:
 - DWARF variable info. `-g` gives line info today; a debugger cannot print
   locals yet.
 - Performance: locals are register allocated and simple operands skip the temp
-  stack (about 3x gcc -O2 on the benchmark, from 8.4x), but everything else
-  still runs through the stack machine. Real instruction selection is open.
+  stack (about 3x gcc -O2 on the benchmark, from 8.4x). Going further means an
+  IR; see the codegen section above.
 - Deterministic release builds and a signed-artifact story.
 
 ## Tooling
