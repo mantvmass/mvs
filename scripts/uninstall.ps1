@@ -7,7 +7,15 @@ $ErrorActionPreference = "Stop"
 $dest = Join-Path $env:LOCALAPPDATA "Programs\mvs"
 
 if (Test-Path $dest) {
-    Remove-Item $dest -Recurse -Force
+    try {
+        Remove-Item $dest -Recurse -Force -ErrorAction Stop
+    } catch {
+        # A running mvs.exe cannot be deleted. Leave PATH and MVS_STD alone so
+        # the install stays consistent, and let the user retry.
+        Write-Host "error: could not remove $dest" -ForegroundColor Red
+        Write-Host "       close any running mvs.exe and run this script again"
+        exit 1
+    }
     Write-Host "removed $dest"
 } else {
     Write-Host "nothing installed at $dest"

@@ -17,7 +17,9 @@ fi
 profile="$HOME/.profile"
 if [ -f "$profile" ] && grep -qs "# mvs-install" "$profile"; then
     tmp="$profile.mvs_tmp"
-    grep -v "# mvs-install" "$profile" > "$tmp"
+    # grep -v exits 1 when nothing survives the filter (a profile holding only
+    # our lines), which set -e would turn into a mid-script death: allow it.
+    grep -v "# mvs-install" "$profile" > "$tmp" || true
     mv "$tmp" "$profile"
     echo "cleaned $profile"
 fi
