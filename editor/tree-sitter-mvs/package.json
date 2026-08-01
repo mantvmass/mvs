@@ -1,0 +1,36 @@
+{
+  "name": "tree-sitter-mvs",
+  "version": "0.1.0",
+  "description": "MVS grammar for tree-sitter (editor syntax highlighting)",
+  "repository": "github:mantvmass/mvs",
+  "license": "(MIT OR Apache-2.0)",
+  "author": "Phumin Maliwan",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "mvs",
+    "parser",
+    "highlighting"
+  ],
+  "files": [
+    "grammar.js",
+    "queries/*",
+    "src/**"
+  ],
+  "devDependencies": {
+    "tree-sitter-cli": "^0.25.0"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.mvs",
+      "file-types": [
+        "mvs"
+      ],
+      "highlights": "queries/highlights.scm"
+    }
+  ]
+}

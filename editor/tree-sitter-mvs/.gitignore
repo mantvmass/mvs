@@ -1,0 +1,19 @@
+node_modules/
+build/
+*.log
+*.wasm
+*.obj
+*.lib
+*.exp
+package-lock.json
+# generated bindings we do not ship; src/ (parser.c) IS committed so editors
+# can compile the parser without needing node
+bindings/
+Cargo.toml
+binding.gyp
+Makefile
+CMakeLists.txt
+go.mod
+setup.py
+pyproject.toml
+Package.swift

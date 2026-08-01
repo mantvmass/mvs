@@ -94,7 +94,9 @@ Roughly in order of value:
 
 - Growing the `-O` peephole: today it is safe two/three-line patterns;
   register-liveness-aware rules are open.
-- Editor support: a tree-sitter grammar for highlighting.
+- Editor support: the tree-sitter grammar shipped (`editor/tree-sitter-mvs`,
+  parses every `.mvs` in the repo at 100%). An LSP server would be the next
+  step, but it needs the compiler callable as a library first.
 
 Memory management stays manual by design; see
 [docs/rules.md](docs/rules.md) section 0.2.

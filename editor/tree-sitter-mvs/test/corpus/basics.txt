@@ -1,0 +1,621 @@
+================================================================================
+hello world
+================================================================================
+
+import { io } from "std";
+
+func main() -> i8 {
+    io.out("hello, {}!", "world");
+    return 0;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import_statement
+    (identifier)
+    (string_literal))
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (expression_statement
+        (call_expression
+          (member_expression
+            (identifier)
+            (identifier))
+          (argument_list
+            (string_literal)
+            (string_literal))))
+      (return_statement
+        (integer_literal)))))
+
+================================================================================
+struct, impl, method chaining
+================================================================================
+
+struct Rect { w: i32; h: i32; }
+
+impl Rect {
+    func area(self: *Rect) -> i32 { return self.w * self.h; }
+}
+
+func main() -> i8 {
+    let r: Rect = Rect { w: 3, h: 4 };
+    return r.area() as i8;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (struct_definition
+    (type_identifier)
+    (field_declaration
+      (identifier)
+      (primitive_type))
+    (field_declaration
+      (identifier)
+      (primitive_type)))
+  (impl_block
+    (type_identifier)
+    (function_definition
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (pointer_type
+            (type_identifier))))
+      (primitive_type)
+      (block
+        (return_statement
+          (binary_expression
+            (member_expression
+              (identifier)
+              (identifier))
+            (member_expression
+              (identifier)
+              (identifier)))))))
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (let_declaration
+        (identifier)
+        (type_identifier)
+        (struct_literal
+          (type_identifier)
+          (field_initializer
+            (identifier)
+            (integer_literal))
+          (field_initializer
+            (identifier)
+            (integer_literal))))
+      (return_statement
+        (cast_expression
+          (call_expression
+            (member_expression
+              (identifier)
+              (identifier))
+            (argument_list))
+          (primitive_type))))))
+
+================================================================================
+generics disambiguate from comparison
+================================================================================
+
+func main() -> i8 {
+    let v: Vec<i64> = Vec<i64>::new();
+    let n: Option<i64> = none<i64>();
+    let ok: bool = a < b;
+    let both: bool = a < b && c > d;
+    return 0;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (let_declaration
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (primitive_type)))
+        (call_expression
+          (path_expression
+            (generic_expression
+              (identifier)
+              (type_arguments
+                (primitive_type)))
+            (identifier))
+          (argument_list)))
+      (let_declaration
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (primitive_type)))
+        (call_expression
+          (generic_expression
+            (identifier)
+            (type_arguments
+              (primitive_type)))
+          (argument_list)))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (binary_expression
+          (identifier)
+          (identifier)))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (binary_expression
+          (binary_expression
+            (identifier)
+            (identifier))
+          (binary_expression
+            (identifier)
+            (identifier))))
+      (return_statement
+        (integer_literal)))))
+
+================================================================================
+enum and match, statement and expression
+================================================================================
+
+enum Shape {
+    Circle(f64),
+    Rect(f64, f64),
+    Nothing,
+}
+
+func label(s: Shape) -> str {
+    return match (s) {
+        Shape::Circle(r) => "circle",
+        Rect(w, h) => "rect",
+        _ => "nothing",
+    };
+}
+
+func act(s: Shape) -> void {
+    match (s) {
+        Shape::Nothing => { io.out("none"); }
+        _ => { io.out("some"); }
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (enum_definition
+    (type_identifier)
+    (enum_variant
+      (identifier)
+      (primitive_type))
+    (enum_variant
+      (identifier)
+      (primitive_type)
+      (primitive_type))
+    (enum_variant
+      (identifier)))
+  (function_definition
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (primitive_type)
+    (block
+      (return_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (pattern
+              (type_identifier)
+              (identifier)
+              (identifier))
+            (string_literal))
+          (match_arm
+            (pattern
+              (identifier)
+              (identifier)
+              (identifier))
+            (string_literal))
+          (match_arm
+            (pattern
+              (wildcard_pattern))
+            (string_literal))))))
+  (function_definition
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (primitive_type)
+    (block
+      (match_statement
+        (match_expression
+          (identifier)
+          (match_arm
+            (pattern
+              (type_identifier)
+              (identifier))
+            (block
+              (expression_statement
+                (call_expression
+                  (member_expression
+                    (identifier)
+                    (identifier))
+                  (argument_list
+                    (string_literal))))))
+          (match_arm
+            (pattern
+              (wildcard_pattern))
+            (block
+              (expression_statement
+                (call_expression
+                  (member_expression
+                    (identifier)
+                    (identifier))
+                  (argument_list
+                    (string_literal)))))))))))
+
+================================================================================
+traits, bounds, dyn, variadic
+================================================================================
+
+trait Area {
+    func area(self: *Self) -> i32;
+}
+
+impl Area for Rect {
+    func area(self: *Rect) -> i32 { return self.w * self.h; }
+}
+
+func describe<T: Area + Named>(s: T) -> i32 { return s.area(); }
+
+func total(items: ...dyn Area) -> i64 { return 0; }
+
+func take(s: dyn Area) -> i32 {
+    return s.area();
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (trait_definition
+    (type_identifier)
+    (function_signature
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (pointer_type
+            (type_identifier))))
+      (primitive_type)))
+  (impl_block
+    (type_identifier)
+    (type_identifier)
+    (function_definition
+      (identifier)
+      (parameter_list
+        (parameter
+          (identifier)
+          (pointer_type
+            (type_identifier))))
+      (primitive_type)
+      (block
+        (return_statement
+          (binary_expression
+            (member_expression
+              (identifier)
+              (identifier))
+            (member_expression
+              (identifier)
+              (identifier)))))))
+  (function_definition
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (trait_bound
+          (type_identifier)
+          (type_identifier))))
+    (parameter_list
+      (parameter
+        (identifier)
+        (type_identifier)))
+    (primitive_type)
+    (block
+      (return_statement
+        (call_expression
+          (member_expression
+            (identifier)
+            (identifier))
+          (argument_list)))))
+  (function_definition
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (variadic_type
+          (dyn_type
+            (type_identifier)))))
+    (primitive_type)
+    (block
+      (return_statement
+        (integer_literal))))
+  (function_definition
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (dyn_type
+          (type_identifier))))
+    (primitive_type)
+    (block
+      (return_statement
+        (call_expression
+          (member_expression
+            (identifier)
+            (identifier))
+          (argument_list))))))
+
+================================================================================
+control flow, power precedence, casts
+================================================================================
+
+func main() -> i8 {
+    let x: i64 = -2 ** 2;
+    for (let i: i32 = 0; i < 10; i++) {
+        if (i % 2 == 0) { continue; }
+        elseif (i > 7) { break; }
+        else { x += i as i64; }
+    }
+    do { x--; } while (x > 0);
+    switch (x) {
+        case 1: break;
+        case 2:
+        case 3: x = 0; break;
+        default: x = 1;
+    }
+    return x as i8;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (unary_expression
+          (binary_expression
+            (integer_literal)
+            (integer_literal))))
+      (for_statement
+        (let_declaration
+          (identifier)
+          (primitive_type)
+          (integer_literal))
+        (binary_expression
+          (identifier)
+          (integer_literal))
+        (update_expression
+          (identifier))
+        (block
+          (if_statement
+            (binary_expression
+              (binary_expression
+                (identifier)
+                (integer_literal))
+              (integer_literal))
+            (block
+              (continue_statement))
+            (elseif_clause
+              (binary_expression
+                (identifier)
+                (integer_literal))
+              (block
+                (break_statement)))
+            (else_clause
+              (block
+                (expression_statement
+                  (assignment_expression
+                    (identifier)
+                    (cast_expression
+                      (identifier)
+                      (primitive_type)))))))))
+      (do_while_statement
+        (block
+          (expression_statement
+            (update_expression
+              (identifier))))
+        (binary_expression
+          (identifier)
+          (integer_literal)))
+      (switch_statement
+        (identifier)
+        (switch_case
+          (integer_literal)
+          (break_statement))
+        (switch_case
+          (integer_literal))
+        (switch_case
+          (integer_literal)
+          (expression_statement
+            (assignment_expression
+              (identifier)
+              (integer_literal)))
+          (break_statement))
+        (default_case
+          (expression_statement
+            (assignment_expression
+              (identifier)
+              (integer_literal)))))
+      (return_statement
+        (cast_expression
+          (identifier)
+          (primitive_type))))))
+
+================================================================================
+attributes, extern, function pointers, asm
+================================================================================
+
+@compile(target_os = "linux", target_arch = "aarch64")
+extern func close(s: usize) -> i32;
+
+@test
+func test_add() -> void {
+    let f: func(i32, i32) -> i32 = add;
+    let t: [func(i32, i32) -> i32; 2] = [add, mul];
+    test.eq(f(1, 2), t[0](1, 2));
+}
+
+func timestamp() -> u64 {
+    return asm("rdtsc", "shl rdx, 32", "or rax, rdx");
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (attribute
+    (identifier)
+    (attribute_argument
+      (identifier)
+      (string_literal))
+    (attribute_argument
+      (identifier)
+      (string_literal)))
+  (extern_declaration
+    (identifier)
+    (parameter_list
+      (parameter
+        (identifier)
+        (primitive_type)))
+    (primitive_type))
+  (attribute
+    (identifier))
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (let_declaration
+        (identifier)
+        (function_type
+          (primitive_type)
+          (primitive_type)
+          (primitive_type))
+        (identifier))
+      (let_declaration
+        (identifier)
+        (array_type
+          (function_type
+            (primitive_type)
+            (primitive_type)
+            (primitive_type))
+          (integer_literal))
+        (array_literal
+          (identifier)
+          (identifier)))
+      (expression_statement
+        (call_expression
+          (member_expression
+            (identifier)
+            (identifier))
+          (argument_list
+            (call_expression
+              (identifier)
+              (argument_list
+                (integer_literal)
+                (integer_literal)))
+            (call_expression
+              (index_expression
+                (identifier)
+                (integer_literal))
+              (argument_list
+                (integer_literal)
+                (integer_literal))))))))
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (return_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (string_literal)
+            (string_literal)
+            (string_literal)))))))
+
+================================================================================
+literals
+================================================================================
+
+func main() -> i8 {
+    let color: u32 = 0xFF8800;
+    let mask: u8 = 0b10100101;
+    let big: f64 = 6.02e23;
+    let small: f64 = 2.5e-3;
+    let bare: f64 = 1e9;
+    let c: char = 'A';
+    let nl: char = '\n';
+    let s: str = "a {} b \"quoted\" \\";
+    return 0;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (integer_literal))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (integer_literal))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (float_literal))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (float_literal))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (float_literal))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (char_literal))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (char_literal))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (string_literal))
+      (return_statement
+        (integer_literal)))))
