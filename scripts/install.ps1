@@ -24,9 +24,28 @@ try {
     exit 1
 }
 
+# Replace a previous install wholesale (only after the download succeeded),
+# so a file dropped from a newer release cannot linger and shadow the new std.
+if (Test-Path $dest) {
+    $old = ""
+    try { $old = & (Join-Path $dest "mvs.exe") --version } catch {}
+    try {
+        Remove-Item -Recurse -Force $dest -ErrorAction Stop
+    } catch {
+        # A running mvs.exe cannot be deleted, but Windows does allow renaming
+        # a running executable: move it aside and clear everything else.
+        $exe = Join-Path $dest "mvs.exe"
+        if (Test-Path $exe) { Move-Item $exe "$exe.old" -Force }
+        Get-ChildItem $dest -Exclude "mvs.exe.old" | Remove-Item -Recurse -Force
+    }
+    if ($old) { Write-Host "replacing $old" }
+}
+
 New-Item -ItemType Directory -Force $dest | Out-Null
 Expand-Archive -Path $zip -DestinationPath $dest -Force
 Remove-Item $zip -Force
+# Drop the renamed-aside binary from a previous locked upgrade, if it is free now.
+Remove-Item (Join-Path $dest "mvs.exe.old") -Force -ErrorAction SilentlyContinue
 
 # user PATH (only append once)
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

@@ -24,6 +24,14 @@ else
     wget -q "$url" -O "$tmp" || { echo "error: download failed. Is there a published release yet?"; exit 1; }
 fi
 
+# Replace a previous install wholesale (only after the download succeeded),
+# so a file dropped from a newer release cannot linger and shadow the new std.
+if [ -d "$dest" ]; then
+    old=$("$dest/mvs" --version 2>/dev/null || true)
+    rm -rf "$dest"
+    [ -n "$old" ] && echo "replacing $old"
+fi
+
 mkdir -p "$dest"
 tar xzf "$tmp" -C "$dest"
 rm -f "$tmp"
