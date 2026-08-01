@@ -16,7 +16,6 @@ Contents:
 8. Current limitations
 9. Status and roadmap
 10. Gotchas
-11. Glossary
 
 ---
 
@@ -35,25 +34,12 @@ in the standard library (`std/*.mvs`) and must be imported. None of it is baked 
 ## 2. Source to executable
 
 ```
-file.mvs
-   │  lexer   (src/lexer.c)      characters  -> tokens
-   ▼
- tokens
-   │  parser  (src/parser.c)     tokens      -> AST
-   ▼
-  AST
-   │  module  (src/module.c)     merge imported files
-   ▼
- merged AST
-   │  codegen (src/arch/...)     walk AST    -> NASM assembly (.asm)
-   ▼
- .asm
-   │  nasm -f win64              assemble    -> object file (.obj)
-   ▼
- .obj
-   │  clang (linker)             link + C runtime -> executable
-   ▼
- .exe
+lexer   (src/lexer.c)     characters -> tokens
+parser  (src/parser.c)    tokens     -> AST
+module  (src/module.c)    merge imported files into one AST
+codegen (src/arch/...)    walk the AST -> NASM assembly (.asm)
+nasm -f win64             .asm -> .obj
+clang                     link with the C runtime -> .exe
 ```
 
 Build modes:
@@ -1441,15 +1427,6 @@ mvs.exe prog.mvs -S --keep      # produces a readable prog.asm
 
 Know the boundaries before relying on it (the roadmap for fixing these is in section 9).
 
-### Language / types
-
-- Full bitwise (`& | ^ ~ << >>`); power is `**` (e.g. `2 ** 8`, `2.0 ** 10`); a float base works (repeated
-  `mulsd` by an integer exponent); a negative exponent isn't supported (returns 1.0).
-- generics + overloading + traits are all present (monomorphization); overloads distinguish int **width**
-  (i32 vs i64 are separate), with an integer literal matched by category if there's a single int overload;
-  `trait`/`<T: A + B>`/`where`/default methods exist, and `dyn Trait` gives real vtable-based dynamic
-  dispatch (trait objects cannot be compared, used as conditions, or passed to extern C).
-
 ### Numbers
 
 - **Math always runs in 64-bit registers**: width is respected at load/store (correct truncate/extend, real
@@ -1520,183 +1497,52 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 
 ## 9. Status and roadmap
 
-Current state: the language works end to end on three targets (x86-64 Windows, x86-64
-Linux/ELF, AArch64 Linux), all CI-tested against the same golden outputs. The forward
-plan lives in [../ROADMAP.md](../ROADMAP.md).
+The language works end to end on three targets (x86-64 Windows, x86-64
+Linux/ELF, AArch64 Linux), all CI-tested against the same golden outputs.
+Everything section 4 describes is implemented and tested; the one command that
+runs every check there is (golden suites, feature matrices, differential tests
+against C, sanitizers, the fuzzer) is `sh scripts/audit.sh`.
 
-### Done
+What is left lives in [../ROADMAP.md](../ROADMAP.md): nested patterns, more
+collections, more `core` modules, a macOS target. Known minor limits, low
+risk and not yet fixed:
 
-- Hand-written lexer (keywords, numbers, strings + escapes, chars, 1-2 char operators, `//` and block comments).
-- Recursive-descent parser with full operator precedence.
-- `let`/`const` (local + global), arithmetic `+ - * / % **`, comparison, logic `&& || !`, bitwise `& | ^ ~ << >>`.
-- `if/else if/else` (`elseif` is accepted too), `while`, `for`, `do-while`, `switch/case/default`, `break`, `continue`.
-- Functions + parameters (5+ via stack) + return + recursion.
-- Real integer width (i8..i64, u8..u64, real unsigned div/mod/compare, real wrap), `i128`/`u128` stored as 16 bytes.
-- `f32` (real 4 bytes) / `f64` via SSE; int↔float conversion; floats across the C boundary both ways.
-- Pointers, pointer arithmetic scaled by sizeof, function pointers (value + indirect `call rax`).
-- structs: literals, member access (read/write), nested, struct return (sret), by-value parameters,
-  struct-result-as-rvalue; methods (`impl`) + associated functions (`Type::new`) + chaining.
-- Generics (monomorphization) + overloading (by category, splitting int width) + traits (`impl Trait for`,
-  `<T: Trait>`, default methods) with static dispatch and compile-time bound checking.
-- `as` cast; compile-time type checking (incl. call argument type/count); scope shadowing (scope-aware in every
-  analysis pass).
-- Module system: three import forms + checks (symbol exists, duplicates, namespace binding, circular import).
-- `io.out` Rust-style (`{}`, `{:x}`, structs, unlimited args); tree-shaking.
-- stdlib in MVS: `io` (out/print/in), `fs` (write/read), `net` (TcpServer/TcpClient,
-  cross-platform via `@compile`), `string` (`String` on the heap), `fmt` (`Display` +
-  `println`/`print` + `outf`), `math` (libm + overloaded helpers), `mem` (alloc + mem ops).
-- C interop (`extern`/`export` + `-c`); `--nostd` freestanding (proven self-contained via `llvm-nm`).
-- `const` enforcement (initializer required, writes are compile errors); default parameter values
-  (functions + methods, compile-time filled); compound assignment evaluates its lvalue exactly once;
-  `**` binds tighter than unary minus; import-form mixing is reported instead of silently deduped.
-- `f32` complete across the C boundary: narrowed/widened in every ABI position including stack
-  slots 5+, for extern C calls, C callers of exports, and MVS callers of its own exports.
-- Golden test suite (`make test`): run-pass output diffs, compile-only, and compile-fail
-  (expected-error) tests in `tests/`, run by CI.
-- ELF/SysV backend (`--target elf64`): `src/arch/x86_64/sysv.c` reusing `common.c`, with the
-  System V calling convention (6 GPR args + a separate xmm class, no shadow space, AL for
-  variadic calls), `nasm -f elf64` output, and a `.note.GNU-stack` section. The test suite
-  links and RUNS the ELF binaries inside WSL, diffing against the same goldens as win64;
-  `--nostd --target elf64` yields a freestanding ELF that GNU ld links directly (GRUB path).
-- `dyn Trait` trait objects: 16-byte fat pointers {data, vtable}, per-(Type, Trait) vtables
-  emitted in `.data`, run-time dispatch through the vtable, dyn variables/parameters/returns/
-  array elements, plus multi-bound generics (`<T: A + B>` and `where` clauses).
-- Full 128-bit `i128`/`u128` arithmetic: address-as-value convention (like structs), pair-wise
-  qword add/sub/mul/bitwise/shift/compare, software shift-subtract division emitted as helper
-  routines (`mvs_u128_divmod` and friends), decimal printing via `io.out`, and hidden-pointer
-  parameter/return passing.
-- Real `[T; N]` array type: stack/.bss storage, literals with exact-length checking, indexing
-  (arrays and pointers, `p[i]` = `*(p + i)`), `a.len`, compile-time bounds check for constant
-  indices, arrays in structs and structs in arrays, io.out expansion (`[1, 2, 3]`), and decay
-  to `*T` at call sites.
-- Rust-style diagnostics (`src/diag.c`): every error shows `file:line:col`, the offending
-  source line with a caret, and a `help:` note; the parser recovers at `;`/`}` and reports
-  many errors per run (capped at 20); non-void functions must return on every path
-  (conservative control-flow analysis incl. `while (true)` without `break`); warnings for
-  unused variables/parameters (prefix `_` to silence) and unreachable code, emitted for the
-  entry file only so imported modules stay quiet.
-- ARM64 backend (`--target arm64`): `src/arch/arm64/linux.c`, AAPCS64 (x0-x7 + d0-d7,
-  sret in x8), GNU as syntax, assembled with the AArch64 cross gcc; the full example
-  suite runs under qemu-aarch64 in CI against the same goldens as both x86 targets.
-- Conditional compilation: `@compile(target_os = ...)` / `@compile(target_arch = ...)`
-  on any top-level item, filtered in the module loader (section 4.13); `std/net` uses it
-  to select Winsock vs POSIX sockets in one file.
-- Hex/binary literals (`0xFF`, `0b1010`) with a hard error on literals past 64 bits.
-- Namespace-consistent resolution everywhere: typecheck/defaults/monomorphize use the
-  same module-first lookup as codegen, `ns.func(...)` reaches module externs, overload
-  sets are per-namespace, and namespaced calls get full argument checking.
+- Generic params beyond 4 are clamped; arrays of arrays (`[[T; N]; M]`) are
+  not supported yet.
+- Function pointers (v1): the type doesn't take varargs in its signature;
+  can't overload by function-pointer type (all mangle to `func`); assignment
+  to a func-ptr variable is type-checked leniently; pointing one at a C extern
+  taking or returning `f32` won't narrow double to single (function pointers
+  are meant for MVS functions).
 
-Verified by running, not just compiling: the net loopback example round-trips real TCP on
-all three targets; C calls `mvs_square`/`mvs_sum_to` through a `.obj`; the freestanding
-`.obj` has no undefined symbols.
+A note on io.out: the library path is complete. `fmt.outf(f, args...)` is a
+pure-MVS formatted print built on Display impls and variadic `...dyn Display`
+slices. `io.out` itself stays an intrinsic because printing an arbitrary
+struct uses compile-time reflection, which a library cannot express.
 
-Late additions, each detailed in its own language-reference section: generic
-structs + `Option`/`Result`/`Vec<T>` (4.15), threads + Mutex (4.16), Rust-style
-enums + exhaustive `match` (4.17), the `core` package and `::` paths (4.12),
-`*.test.mvs` testing (4.14), and the `-O` peephole on all three backends.
-
-### Remaining
-
-See [../ROADMAP.md](../ROADMAP.md) for the full plan. Next up:
-
-- `match` phase 2: match as an EXPRESSION, nested patterns, generic enums
-  (which would let `Option`/`Result` become true enums).
-- A hash map on top of `Vec<T>`.
-- macOS target (Mach-O + its SysV quirks).
-
-Note on io.out: the library path is COMPLETE. `fmt.outf(f, args...)` is a pure-MVS formatted
-print built on impl-on-primitive Display impls, variadic `...dyn Display` slices, and run-time
-dispatch. `io.out` itself remains an intrinsic because compile-time struct reflection (printing
-any struct without an impl) cannot be expressed as a library.
-
-### Known minor limits (low risk, not yet fixed)
-
-- Generic params beyond 4 are clamped; arrays of arrays (`[[T; N]; M]`) are not supported yet.
-- Function pointers (v1): the type doesn't take varargs in its signature; can't overload by function-pointer type
-  (all mangle to `func`); assignment to a func-ptr variable is type-checked leniently; pointing a func-ptr at a C
-  `extern` taking/returning `f32` won't narrow double↔single (func pointers are meant for MVS functions).
-
-About `--nostd` for OS dev: it produces self-contained x86-64 with no undefined symbols and no CRT/OS
-dependency (runnable on bare metal). Combine it with `--target elf64` to get a freestanding ELF object
-that plain GNU ld links directly (verified: `ld file.o` produces a static ELF executable), which is the
-GRUB multiboot path; without `--target` the object is COFF/PE for the LLVM/lld side.
-
-### Where to edit when adding a feature
-
-| To add... | Edit |
-|-----------|------|
-| a token/keyword | `src/token.h`, `src/lexer.c` (the `KEYWORDS` table) |
-| new syntax | `src/parser.c` (+ new `ND_*` in `src/ast.h`) |
-| instruction emission | `src/arch/x86_64/win.c` (`gen_expr` / `gen_stmt`) |
-| shared logic (type/struct/symtab/tree-shake) | `src/arch/common.c` (+ `common.h`) |
-| import behavior | `src/module.c` (`handle_import` / `load_module`) |
-| a stdlib function | `std/*.mvs` (MVS + `extern` into libc) |
-| a new architecture | `src/arch/<arch>/<os>.c` (reuse `common.c`) + `TargetArch` + a case in `codegen.c` |
+For where to edit when adding a feature, see the table in
+[../CLAUDE.md](../CLAUDE.md).
 
 ---
 
-## 10. Gotchas (learned the hard way)
+## 10. Gotchas
 
-- **16-byte stack alignment:** temp pushes use 16 bytes, not 8 (see `push_tmp`). Switching to 8 crashes `printf`
-  in expressions with nested calls.
-- **clang warnings:** you need `-D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations` or MSVC headers flood you
-  with warnings (fopen/strdup/strcpy).
-- **Link flags:** `-llegacy_stdio_definitions` (else `scanf` won't link, UCRT inlines it) and `-lws2_32` (net);
-  set in `src/main.c`.
-- **float in printf:** it's variadic, so a float must be placed in both the GPR and `xmm<n>` (see io.out), or it
-  prints wrong.
-- **struct return:** a struct-returning function uses a hidden pointer (rcx); only call it storing the result
-  into a variable (otherwise error).
-- **method `ns` vs `mod`:** a method's `ns` is the struct name (for the label); `mod` is the module (for resolving
-  internal calls). Using ns as cur_ns makes a method call itself in a loop (e.g. `send` calling extern `send`);
-  use `fn->mod`.
-- **NASM keywords:** an extern/export name equal to a nasm reserved word (`abs`, `rel`, `seg`, `wrt`) won't
-  assemble; avoid those names.
-- **--nostd:** no package imports, no CRT linkage, emits a `.obj`; reachability roots = main + exports.
-- **Don't nest `/*` inside a block comment:** clang warns `-Wcomment`.
-- **scope shadowing:** fully supported (codegen uses the visible stack; every type-analysis pass is scope-aware);
-  same-named variables of different types/scopes work correctly.
-- **global init:** globals are initialized at the **start of main**, not in `.data`. See the loop in `gen_func`
-  that checks `strcmp(fn->name, "main")`; with no `main`, global init doesn't run.
-- **modules:** io needs `import { io } from "std";` first, else "undefined function 'io.out'".
-- **std dir:** found via `MVS_STD` or `<dir of mvs.exe>/std`; set `MVS_STD` if you run mvs.exe from elsewhere.
-- **printf variadic:** you can pass more arguments than the `extern` declares (codegen doesn't check arg count
-  against the signature).
-- **callee-saved registers (win64):** `rbx, rbp, rdi, rsi, rsp, r12-r15` must not be clobbered without restoring.
-  Memory copy uses `gen_memcpy()` (r10/r11 volatile), never `rep movsb` (it uses rsi/rdi). Proven: C sets rsi/rdi,
-  calls MVS (struct copy), and rsi/rdi survive.
-- **pointer arithmetic must scale everywhere:** `p+1`, `p+=1`, `p++`, and `p - q` (divide by sizeof) all the same
-  (there used to be a bug where compound/`++`/ptr-ptr didn't scale; fixed).
-- **shift/div/mod signedness follows the left operand only** (not an OR of both sides); otherwise `signed >> n`
-  becomes a logical shift. Comparison treats "either side unsigned = unsigned" (so a big u64 isn't seen as negative).
-- **struct declaration order is free:** layout is computed by fixpoint (`layout_structs`), supporting fields that
-  are structs declared later.
-- **overload:** resolution counts nested-call arguments first (recurse children first); a same-category signature
-  clash (i32 vs i64) reports a clear error.
-- **malformed input** (trailing escape, unclosed `{`) must not read past the buffer: guards exist; internal tables
-  have bounds checks (`MAX_*`).
-- **No gcc/ld/flex/bison on the machine**: don't write scripts/Makefiles that call them.
+The compiler-internal rules (ABI, label naming, pass order) live in
+[rules.md](rules.md). These are the ones that bite when writing MVS programs:
 
----
-
-## 11. Glossary
-
-| Term | Meaning |
-|------|---------|
-| Token | the smallest meaningful unit (keyword, number, operator) |
-| Lexer | turns characters into tokens |
-| Parser | assembles tokens into a syntax tree |
-| AST | Abstract Syntax Tree: the tree representing the program |
-| Codegen | turns the AST into assembly |
-| ABI | Application Binary Interface: the function-call contract (registers, stack) |
-| Stack frame | one function call's stack region (where locals live) |
-| Prologue/Epilogue | the function's entry/exit code that reserves/releases the frame |
-| Shadow space | the 32 bytes the caller reserves for the callee (win64 rule) |
-| sret | structure return: returning a struct through a hidden caller-provided pointer |
-| rbp / rsp | base / stack pointer |
-| RIP-relative | addressing relative to the instruction pointer (`default rel` in NASM) |
-| Tree-shaking | dropping unreferenced functions from the output |
-| Intrinsic | a feature the compiler handles itself (e.g. `io.out`), not an ordinary function |
-| Freestanding | code with no OS/runtime dependency, for writing an OS / bare-metal |
+- Globals are initialized at the start of `main`, not baked into `.data`.
+  An object with no `main` never runs global initializers.
+- `io.out` needs `import { io } from "std";` first, or you get
+  "undefined function 'io.out'".
+- The std folder is found via `MVS_STD` or `<dir of mvs.exe>/std`; set
+  `MVS_STD` when running mvs.exe from somewhere else.
+- Codegen does not check argument count against an `extern` signature, so you
+  can pass printf more arguments than declared. Variadic C relies on this.
+- Shift/div/mod signedness follows the left operand only; a comparison is
+  unsigned when either side is unsigned (so a big u64 is not seen as negative).
+- Struct declaration order is free: layout is computed by fixpoint
+  (`layout_structs`), so a field may be a struct declared later in the file.
+- Pointer arithmetic scales by sizeof everywhere: `p+1`, `p+=1`, `p++`, and
+  `p - q` (which divides) all behave the same.
 
 If this doc and the code disagree, trust the code and update the doc.

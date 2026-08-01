@@ -45,11 +45,10 @@ mvs examples/12_http/main.mvs
 ./examples/12_http/main
 ```
 
-It runs the client and the server in one process, which is what makes the
-output identical on every run and on every target: each request is sent first,
-then `serve_once` accepts it. Output is byte-identical on x86-64 Windows,
-x86-64 Linux and AArch64 Linux, and the program is clean under
-AddressSanitizer with leak detection ON.
+It runs the client and the server in one process: each request is sent first,
+then `serve_once` accepts it. That is what makes the output byte-identical on
+every run and every target, and the program is clean under AddressSanitizer
+with leak detection on.
 
 To serve a real port instead, replace the driver with `serve(&l, &app)` and use
 curl:
@@ -84,6 +83,6 @@ segment that is just `*` (`/assets/*`) matches the rest of the path.
 
 No TLS, no chunked transfer encoding, no keep-alive (every response closes the
 connection), no multipart bodies, and one connection at a time. A request over
-64 KB is refused rather than growing a buffer forever. Those are the honest
-limits of a framework that fits in one std module; `std/thread` is there if you
-want to hand each connection to a worker.
+64 KB is refused rather than growing a buffer forever. That is what fits in
+one std module; `std/thread` is there if you want to hand each connection to a
+worker.

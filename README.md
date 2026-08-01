@@ -2,26 +2,22 @@
 
 # The MVS Compiler
 
-**A small low-level language with Rust-flavored syntax and a compiler written by hand in plain C.**
-
+A small low-level language with Rust-flavored syntax, compiled by hand in plain C.
 No LLVM, no flex, no bison: the output is real assembly you can read.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/mantvmass/mvs/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI)](https://github.com/mantvmass/mvs/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](#license)
 [![Platforms](https://img.shields.io/badge/platforms-win64%20%C2%B7%20elf64%20%C2%B7%20arm64-8250df?style=flat-square)](ROADMAP.md)
-[![Written in C](https://img.shields.io/badge/written%20in-plain%20C-A8B9CC?style=flat-square&logo=c&logoColor=white)](src/)
 
 [Install](#install) · [Build](#build-from-source) · [Docs](#documentation) · [Examples](docs/examples.md) · [Roadmap](ROADMAP.md)
 
 </div>
 
-> **For education.** This project exists to show how a real compiler works end to
-> end (lexer, parser, type checker, and three code generators, all hand-written).
-> It is a learning subset, not a production toolchain.
->
-> **Memory is managed by hand, on purpose.** No GC, no reference counting, no
-> destructors: you allocate, you free, exactly like C. See
-> [docs/rules.md](docs/rules.md) section 0.2 for the reasoning.
+For education. This project exists to show how a real compiler works end to end: lexer, parser,
+type checker, and three code generators, all written by hand. It is a learning
+subset, not a production toolchain. Memory is managed by hand, on purpose: no GC,
+no reference counting, no destructors. You allocate, you free, exactly like C
+(the reasoning is in [docs/rules.md](docs/rules.md) section 0.2).
 
 ```txt
 import { io, math } from "std";
@@ -41,15 +37,13 @@ func main() -> i8 {
 }
 ```
 
-The language has structs, methods, traits (static and `dyn` dispatch), generics
-(functions AND structs: `Vec<i64>::new()`), Rust-style enums with exhaustive
-`match`, `Option`/`Result`, threads + Mutex, overloading, real `[T; N]` arrays,
-128-bit integers, conditional compilation (`@compile`), a std library plus a
-freestanding `core` package, built-in testing (`mvs test` + `*.test.mvs`),
-C interop in both directions, Rust-style diagnostics, and a `--nostd` mode for
-OS work. Three backends (x86-64 Windows, x86-64 Linux/ELF, AArch64 Linux) share
-one architecture-independent core and are CI-tested against the same golden
-outputs.
+Despite the size, the language covers a lot: structs and methods, traits with
+both static and `dyn` dispatch, generics over functions and structs, Rust-style
+enums with exhaustive `match`, `Option`/`Result`, threads, 128-bit integers,
+real `[T; N]` arrays, C interop in both directions, a std library plus a
+freestanding `core` package, built-in testing, and a `--nostd` mode for OS work.
+Three backends (x86-64 Windows, x86-64 Linux, AArch64 Linux) share one
+architecture-independent core and are CI-tested against the same golden outputs.
 
 ## Install
 
@@ -84,10 +78,10 @@ Cross targets (`--target elf64` / `--target arm64`), the generated assembly
 
 | Where | What |
 |-------|------|
-| [docs/guide.md](docs/guide.md) | the language reference, memory model, real emitted assembly, internals |
-| [docs/rules.md](docs/rules.md) | design rules, ABI details, and gotchas for working on the compiler |
-| [docs/examples.md](docs/examples.md) | the full list of example programs (in [examples/](examples/)) |
-| [ROADMAP.md](ROADMAP.md) | planned platforms and the core library plan |
+| [docs/guide.md](docs/guide.md) | language reference, memory model, real emitted assembly, internals |
+| [docs/rules.md](docs/rules.md) | design rules, ABI details, gotchas for working on the compiler |
+| [docs/examples.md](docs/examples.md) | the example programs (in [examples/](examples/)) |
+| [ROADMAP.md](ROADMAP.md) | what is planned, what is under consideration |
 | [CLAUDE.md](CLAUDE.md) | working notes for AI assistants and contributors |
 
 ## License

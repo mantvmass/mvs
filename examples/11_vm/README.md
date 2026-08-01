@@ -54,14 +54,11 @@ Everything is `i64`. A function without an explicit `return` gives 0.
 | [vm.mvs](vm.mvs) | the stack machine, plus a disassembler |
 | [main.mvs](main.mvs) | the CLI and the demo suite that the golden test runs |
 
-## What it exercises in the compiler
-
-Enums with struct payloads inside a `Vec`, `HashMap<str, i64>` for scope and
-function tables, `Option` returned from a map lookup and matched, methods on
-structs held behind pointers, recursion through several modules, `match` as a
-statement and as the body of a function that returns from every arm, and a
-program whose own error paths must be reported rather than crashed on.
+In the compiler it exercises enums with struct payloads inside a `Vec`,
+`HashMap<str, i64>` for scope and function tables, `Option` matched from map
+lookups, methods behind pointers, recursion through several modules, and
+`match` both as a statement and as a whole function body.
 
 Every runtime failure the VM can hit (stack underflow, bad slot, division by
-zero, a jump out of range, exceeding the step limit) stops the machine with a
-message. A VM that trusts its bytecode is not a VM.
+zero, a jump out of range, the step limit) stops the machine with a message.
+A VM that trusts its bytecode is not a VM.

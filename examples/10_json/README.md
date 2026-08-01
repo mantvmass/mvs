@@ -25,13 +25,10 @@ mvs examples/10_json/main.mvs
 ./main stats   '{"a":[1,2,{"b":"c"}]}'
 ```
 
-## What it exercises
-
-Nearly every feature of the language at once: enums with payloads and `match`
-(including bare patterns and match used as a value), generic structs
-(`Vec<T>`, `HashMap<K, V>`, `Option<T>`, `Result<T, E>`), methods and
-associated functions (`Doc::new`), recursion, string handling through `core`,
-manual memory with a single arena owner, and a CLI reading `argv`.
+It leans on most of the language at once: enums with payloads and `match`,
+`Vec`/`HashMap`/`Option`/`Result`, methods and associated functions,
+recursion, string handling through `core`, manual memory with a single arena
+owner, and a CLI reading `argv`.
 
 ## What it found
 
@@ -49,9 +46,9 @@ change:
    still what the operator does, but the compiler now warns and points at
    `cstr.eq`.
 
-The program itself runs identically on x86-64 Windows, x86-64 Linux, and
-AArch64 under qemu, and it is clean under AddressSanitizer with leak detection
-on: every `Doc` and `String` it creates is released.
+The program runs identically on all three targets and is clean under
+AddressSanitizer with leak detection on: every `Doc` and `String` it creates
+is released.
 
 ## Limits
 

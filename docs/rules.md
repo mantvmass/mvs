@@ -1,334 +1,320 @@
 # RULES: developer rules and gotchas for the MVS compiler
 
-Read this before touching the code. Breaking these rules tends to produce silently
-wrong output rather than a clean failure. For language reference and current status see
-[guide.md](guide.md).
+Read this before touching the code. Breaking these rules tends to produce
+silently wrong output rather than a clean failure. Language reference and
+status live in [guide.md](guide.md).
 
-A reminder on language: everything in this project is **English only**. Source comments
-(detailed, explaining what/why/how), everything the program prints (stdout and error
-messages), and these docs.
+Everything in this project is English only: source comments, everything the
+program prints, and these docs.
 
 ---
 
 ## 0. Design philosophy: freestanding by default
 
-The language core must not depend on the OS or the C runtime. That is what lets you write
-an OS, a bootloader, firmware, or bare-metal code with it.
+The language core must not depend on the OS or the C runtime. That is what lets
+you write an OS, a bootloader, or bare-metal code with it.
 
-- Nothing in the compiler core emits I/O or pulls in an OS dependency. Anything that touches
-  the OS or CRT (printing, files, sockets, input) lives in `std/*.mvs` and must be imported
-  explicitly by the user.
-- `io.out` is an intrinsic, but it is gated behind `import { io }`. No import, no `io.out`.
-- Codegen uses the x86-64 / win64 calling convention. That is the ABI of *calling a function*,
-  not an OS API; you can write an OS for the same architecture using the same convention.
-- `--nostd` is the real freestanding mode: no package imports, no CRT linkage, emits a `.obj`
-  you link or embed yourself (e.g. into a kernel image).
-- When adding a feature, never bake an OS/CRT dependency into the core. If you genuinely need
-  the OS, reach it through `extern` from inside `std/*.mvs`.
+- Nothing in the compiler core emits I/O or pulls in an OS dependency. Anything
+  that touches the OS or CRT (printing, files, sockets, input) lives in
+  `std/*.mvs` and must be imported explicitly.
+- `io.out` is an intrinsic, but it is gated behind `import { io }`.
+- Codegen uses the win64 calling convention by default. That is the ABI of
+  calling a function, not an OS API; an OS for the same architecture can use
+  the same convention.
+- `--nostd` is the real freestanding mode: no package imports, no CRT linkage,
+  emits an object you link or embed yourself.
+- When adding a feature, never bake an OS/CRT dependency into the core. If you
+  genuinely need the OS, reach it through `extern` from inside `std/*.mvs`.
 
-A note on object format for OS authors: `--nostd` produces self-contained x86-64 (provable
-with `llvm-nm`, no undefined symbols). By default the object is **COFF/PE + win64** (`nasm -f
-win64`, links with LLVM/lld); add `--target elf64` for a freestanding **ELF + SysV** object
-that plain GNU ld links directly, which is the GRUB multiboot path. "win" in the default
-backend's name means the calling convention, not a dependency on Windows.
+For OS authors: `--nostd` produces self-contained x86-64 with no undefined
+symbols (provable with `llvm-nm`). By default the object is COFF/PE (links with
+LLVM/lld); add `--target elf64` for a freestanding ELF that plain GNU ld links
+directly, which is the GRUB multiboot path. "win" in the default backend's name
+means the calling convention, not a dependency on Windows.
 
 ## 0.2 Design philosophy: memory management belongs to the programmer
 
-This is a deliberate choice, not a missing feature, and it will not change.
+A deliberate choice, not a missing feature, and it will not change.
 
-MVS manages memory exactly like C: **no garbage collector, no reference
-counting, no destructors, no RAII, no ownership or borrow checker, no hidden
-allocation anywhere**. A value lives on the stack, in `.data`/`.bss`, or in a
-block you asked an allocator for and must hand back yourself. Nothing in the
-language allocates behind your back: `Vec`, `HashMap`, and `String` call
-`malloc`/`realloc` only because their code does so visibly, and each of them
-gives you a `drop()` to call when you are done.
+MVS manages memory exactly like C: no garbage collector, no reference counting,
+no destructors, no RAII, no ownership checker, no hidden allocation anywhere.
+A value lives on the stack, in `.data`/`.bss`, or in a block you asked an
+allocator for and must hand back yourself. `Vec`, `HashMap`, and `String` call
+`malloc`/`realloc` only because their code does so visibly, and each gives you
+a `drop()` to call when you are done.
 
-Why: the point of MVS is to be a readable language at C's level that can build
-an OS, a bootloader, or bare-metal firmware. Every automatic memory scheme
-needs a runtime, and a runtime is precisely what must not exist in the core
-(see §0). A `Vec` that frees itself would need destructors, destructors need
-unwinding decisions, and that machinery would have to live somewhere the
-freestanding target cannot afford.
+Why: every automatic memory scheme needs a runtime, and a runtime is precisely
+what must not exist in the core (see section 0). A `Vec` that frees itself
+needs destructors, destructors need unwinding decisions, and that machinery
+would have to live somewhere the freestanding target cannot afford.
 
-What that means for you, and what the compiler does and does not promise:
+What the compiler does and does not promise:
 
-- Every `malloc` is yours to `free`. Leaks, double frees, dangling pointers,
-  and use-after-free are programmer errors, exactly as in C. The compiler
-  neither detects nor prevents them.
+- Every `malloc` is yours to `free`. Leaks, double frees, and use-after-free
+  are programmer errors, as in C. The compiler neither detects nor prevents them.
 - A pointer carries no length, so `p[i]` is never bounds-checked. A `[T; N]`
   array does carry its length, so a non-constant index into one IS checked at
-  run time (see the guide, section 4.2); `--no-check` turns that off.
-- Sharing memory between threads is unchecked: `std/sync` gives you a `Mutex`,
-  and using it is your discipline. There is no `Send`/`Sync` analysis.
-- The library convention is explicit ownership in the type's own API: whoever
-  creates calls `drop`, containers do not free the elements they hold, and any
-  function that returns memory says so in its comment.
-- `core/mem` and `core/ptr` are the freestanding tools for this work (pure MVS,
-  no CRT); `std/mem` is the hosted wrapper around the C allocator.
+  run time (guide section 4.2); `--no-check` turns that off.
+- Sharing memory between threads is unchecked. `std/sync` gives you a `Mutex`;
+  using it is your discipline. There is no Send/Sync analysis.
+- The library convention is explicit ownership: whoever creates calls `drop`,
+  containers do not free their elements, and a function that returns memory
+  says so in its comment.
+- `core/mem` and `core/ptr` are the freestanding tools (pure MVS, no CRT);
+  `std/mem` is the hosted wrapper around the C allocator.
 
-When you need automatic cleanup, write it: an arena that frees in one call, a
-bump allocator (see `examples/09_no_std/bump_alloc.mvs`), or a `drop` at the
-end of the scope that owns the value.
+When you need automatic cleanup, write it: an arena freed in one call, a bump
+allocator (`examples/09_no_std/bump_alloc.mvs`), or a `drop` at the end of the
+owning scope.
 
 ## 0.5 C interop
 
-- **MVS calling C:** `extern func name(...) -> T;` uses the raw symbol name, matching C.
-- **C calling MVS:** `export func name(...) -> T { ... }` emits a raw symbol name plus `global`.
-- **Object output:** `mvs file.mvs -c` (or `--emit-obj`) produces a `.obj` you can link into a C program.
-- Ordinary MVS functions use the `mvs_<...>` label prefix to avoid clashes. Only `export` uses raw names.
+- MVS calling C: `extern func name(...) -> T;` uses the raw symbol name.
+- C calling MVS: `export func name(...) -> T { ... }` emits a raw symbol name
+  plus `global`.
+- `mvs file.mvs -c` (or `--emit-obj`) produces a `.obj` to link into a C program.
+- Ordinary MVS functions get the `mvs_<...>` label prefix to avoid clashes;
+  only `export` uses raw names.
 
 ## 1. Hard constraints
 
 - No LLVM, ever. All assembly is generated by hand.
 - No flex / bison. The lexer and parser are hand-written.
-- No gcc. The target machine only has `clang` and `nasm` (no GNU gcc/ld/as/make).
+- No gcc on the dev machine: only `clang` and `nasm` (Linux CI has gcc).
 - The compiler itself is plain C99/C11 + libc only.
 
-## 2. Comments (important)
+## 2. Comments
 
-- Comments are detailed English, explaining what/why/how, not a literal restatement
-  of the code. No Thai (or any other language) anywhere in the codebase.
-- Every function should have a header comment describing its job; every file opens with a block
-  comment describing its role.
-- Everything the program prints (output and error messages) is plain English.
-- Never use em dash or en dash in comments, output, or docs. Use comma, period, colon,
-  semicolon, or hyphen instead.
-- Don't nest `/*` or `*/` inside a block comment: clang warns with `-Wcomment`. If you need to
-  mention a comment delimiter, describe it in words instead.
+- Comments are detailed English explaining what/why/how, not a restatement of
+  the code. No Thai (or any other language) anywhere in the codebase.
+- Every function gets a header comment; every file opens with a block comment
+  describing its role.
+- Never use em dash or en dash in comments, output, or docs. Comma, period,
+  colon, semicolon, or hyphen instead.
+- Don't nest `/*` or `*/` inside a block comment: clang warns with `-Wcomment`.
 
 ## 3. Toolchain and pipeline
 
 ```
-.mvs → lexer → parser → AST → monomorphize → resolve_overloads → typecheck → codegen → .asm → nasm -f win64 → .obj → clang → .exe
+.mvs -> lexer -> parser -> AST -> monomorphize -> resolve_overloads -> typecheck
+     -> codegen -> .asm -> nasm -f win64 -> .obj -> clang -> .exe
 ```
 
-- **Pass order matters:** `typecheck()` (in `generic.c`) must run *after* monomorphize and
-  resolve_overloads, when every type is concrete (generic instances and overloads resolved).
-  Run it earlier and it false-positives.
-- `typecheck` is scope-aware (it builds the var map incrementally with `add_bind` + push/pop)
-  and deliberately strict only where something is clearly wrong, so it won't reject correct
-  low-level code (ptr±int, comparing a ptr to 0, mixing int widths, `str`↔`*u8`). Changing a
-  rule means re-sweeping every example.
-- `typecheck` checks call **arguments** (type and count) for both plain functions and methods
-  (`argoff=1` skips self). It skips extern (variadic C), generic templates, and namespaced
-  free functions (`ns.f`).
-- Type conversion happens only through `as` (`ND_CAST`). There is no implicit narrowing or
-  float↔int except where mixed arithmetic introduces it deliberately.
-- `type_of`/`infer` on `ND_BINARY` must promote order-independently: `int <op> float` → float
-  (widest), `int <op> int` → the wider int type (`int_rank`/`type_size`), `ptr±int` → ptr,
-  `ptr-ptr` → isize. Never return `type_of(lhs)` directly: that picks the wrong format/overload
-  and depends on operand order.
-- `scan_calls` must go children-first (resolve the inner generic call before the outer). Otherwise
-  a nested generic `f(g(x))` infers the outer from an un-instantiated template and gets raw `T`.
-- **Buffers built from identifiers:** identifiers are capped at 100 chars (lexer); labels use
-  `LABEL_MAX` (720) + snprintf; signatures use `SIGCAP` (256) + bounded `sig_append`; mangled
-  instances use snprintf. Never use raw `sprintf`/`strcpy` on user names.
-- `~` must mask its result to the type width (`~(u8)0` = 255). `u64`↔`f64` casts of values ≥ 2^63
-  must use the unsigned path (`cvtsi2sd` is signed).
-- int↔float must coerce at the edges (var init / assign / return / argument) via `gen_coerce_num`;
-  the backend only converts inside mixed expressions. Otherwise `let x: f64 = 5`, `takesF(5)`, and
-  `return 5` (from an f64 function) yield garbage bit-patterns. `int as bool` must normalize to 0/1.
-- Global labels use the prefix `mvs_gv_` (not `mvs_g_`) so they don't collide with function/method
-  labels `mvs_<ns>_<name>` (e.g. a struct named `g`).
-- The parser has a depth guard (`MAX_PARSE_DEPTH` in `parse_expr`/`parse_block`/`parse_unary`) to
-  stop deeply nested input from overflowing the stack.
-- A struct containing itself by value is an error (`struct_has_cycle` in `layout_structs`), and
-  `expand_struct` has a depth cap; both guard against unbounded loops.
-- Overload signatures (`width_code`/`cat_code`) must include pointer depth + pointee (`*i32`→`pi32`),
-  otherwise `f(*i32)` and `f(*u8)` collide (false duplicate / duplicate label).
-- Every analysis pass (`typecheck`/`scan_ov`/`scan_calls`) must call `seed_globals()` before adding
-  params, or globals get inferred as i64, and it must scan **global initializers**, not just
-  function bodies.
-- `io.out` printing a struct returned from a function (`io.out("{}", mk())`) must materialize once
-  via `ND_FRAMEREF` (referencing the temp slot reserved by `collect_struct_temps`), or each field
-  re-runs `gen_call` → duplicated side effects / wrong values.
+- Pass order matters: `typecheck()` (in `generic.c`) must run after monomorphize
+  and resolve_overloads, when every type is concrete. Run it earlier and it
+  false-positives.
+- `typecheck` is scope-aware (`add_bind` + push/pop) and deliberately strict
+  only where something is clearly wrong, so it won't reject correct low-level
+  code (ptr plus int, comparing a ptr to 0, mixing int widths, `str` as `*u8`).
+  Changing a rule means re-sweeping every example.
+- `typecheck` checks call arguments (type and count) for plain functions and
+  methods (`argoff=1` skips self). It skips extern (variadic C), generic
+  templates, and namespaced free functions.
+- Type conversion happens only through `as` (`ND_CAST`). No implicit narrowing.
+- `type_of`/`infer` on `ND_BINARY` must promote order-independently:
+  int op float gives float, int op int gives the wider int, ptr plus int gives
+  ptr, ptr minus ptr gives isize. Never return `type_of(lhs)` directly: that
+  picks the wrong format/overload depending on operand order.
+- `scan_calls` must go children-first, or a nested generic `f(g(x))` infers the
+  outer call from an un-instantiated template and gets raw `T`.
+- Buffers built from identifiers: identifiers cap at 100 chars (lexer); labels
+  use `LABEL_MAX` (720) + snprintf; signatures use `SIGCAP` (256) + bounded
+  `sig_append`. Never raw `sprintf`/`strcpy` on user names.
+- `~` must mask its result to the type width (`~(u8)0` = 255). `u64` to `f64`
+  casts of values >= 2^63 must use the unsigned path (`cvtsi2sd` is signed).
+- int/float must coerce at the edges (var init, assign, return, argument) via
+  `gen_coerce_num`; the backend only converts inside mixed expressions.
+  Otherwise `let x: f64 = 5` yields a garbage bit-pattern. `int as bool` must
+  normalize to 0/1.
+- Global labels use the prefix `mvs_gv_` (not `mvs_g_`) so a struct named `g`
+  cannot collide with them.
+- The parser has a depth guard (`MAX_PARSE_DEPTH`) so deeply nested input
+  cannot overflow the stack; `struct_has_cycle` and the `expand_struct` depth
+  cap guard the struct side.
+- Overload signatures (`width_code`/`cat_code`) must include pointer depth and
+  pointee (`*i32` becomes `pi32`), or `f(*i32)` and `f(*u8)` collide.
+- Every analysis pass (`typecheck`/`scan_ov`/`scan_calls`) must call
+  `seed_globals()` before adding params, or globals get inferred as i64, and it
+  must scan global initializers, not just function bodies.
+- `io.out` printing a struct returned from a function must materialize it once
+  via `ND_FRAMEREF` (the temp slot from `collect_struct_temps`), or each field
+  re-runs `gen_call`: duplicated side effects, wrong values.
 
-Build / assemble / link:
+Build, assemble, link:
 
-- **Build the compiler:** `clang ... -o mvs.exe` (see the Makefile).
-- **Assemble:** `nasm -f win64 x.asm -o x.obj`.
-- **Link:** `clang x.obj -o x.exe -llegacy_stdio_definitions -lws2_32`.
-  - `legacy_stdio_definitions` is required because UCRT inlines `printf`/`scanf` (otherwise `scanf`
-    fails to link).
-  - `ws2_32` is for the net module (always linked; harmless for programs that don't use it).
-- Assembly is NASM Intel syntax with `default rel` (RIP-relative).
+- Assemble: `nasm -f win64 x.asm -o x.obj`.
+- Link: `clang x.obj -o x.exe -llegacy_stdio_definitions -lws2_32`.
+  UCRT inlines `printf`/`scanf`, so without `legacy_stdio_definitions` scanf
+  fails to link. `ws2_32` is for net; harmless when unused.
+- Assembly is NASM Intel syntax with `default rel`.
 
 ## 4. win64 ABI: the rules that fail silently when missed
 
-- First four integer args: rcx, rdx, r8, r9; arg 5+ go on the stack above the shadow space.
-- Float args: xmm0-xmm3 by position (variadic calls like printf fill both the GPR and the xmm).
-- Reserve **32 bytes of shadow space** before every `call` (`sub rsp,32` / `add rsp,32`).
-- rsp must be 16-byte aligned at the `call`.
-  - At function entry rsp ≡ 8 (mod 16); `push rbp` makes it ≡ 0.
-  - Frame size must be a multiple of 16.
-  - Temp pushes use **16 bytes each** (`sub rsp,16`), not 8, so alignment survives nested calls
-    inside an expression. Don't switch them to 8-byte push/pop.
-- Return value is in rax; `main` uses rax/al as the exit code.
-- Callee-saved (nonvolatile) registers on win64: rbx, rbp, rdi, rsi, rsp, r12-r15. Functions we
-  emit must not clobber these without saving/restoring, especially **rsi/rdi** (easy to miss
-  because `rep movsb` uses them). Break this and C code that calls an exported MVS function breaks.
-  - Copy memory with `gen_memcpy()` (src in r10, dst in r11, scratch rax). Don't use `rep movsb`.
-  - **`gen_memcpy` must not touch an argument register.** The prologue copies 16-byte parameters
-    while LATER parameters are still sitting in their registers, so a counter in rcx (argument 4
-    under SysV) makes the next parameter get copied from address zero: a crash that only shows up
-    with three or more parameters where a later one is a struct, `dyn`, or `i128`. It unrolls the
-    copy for sizes up to 128 bytes and saves/restores the counter for bigger ones.
-  - Free scratch (volatile) registers: rax, rcx, rdx, r8, r9, r10, r11, xmm0-5.
-  - **rbx, r12, r13 and r14 belong to the register allocator** (x19 to x22 on arm64). A function
-    that borrows them parks them in its frame in the prologue and restores them at every return,
-    so emitting code that clobbers one without saving it corrupts a live variable.
+- First four integer args: rcx, rdx, r8, r9; arg 5+ on the stack above the
+  shadow space. Float args: xmm0-xmm3 by position (variadic calls fill both
+  the GPR and the xmm).
+- Reserve 32 bytes of shadow space before every `call`.
+- rsp must be 16-byte aligned at the `call`. At function entry rsp is 8 mod 16;
+  `push rbp` makes it 0. Frame size must be a multiple of 16. Temp pushes use
+  16 bytes each, not 8, so alignment survives nested calls; don't change that.
+- Return value in rax; `main` uses rax/al as the exit code.
+- Callee-saved on win64: rbx, rbp, rdi, rsi, rsp, r12-r15. Emitted code must
+  not clobber these without saving, especially rsi/rdi. Break this and C code
+  calling an exported MVS function breaks.
+  - Copy memory with `gen_memcpy()` (src r10, dst r11, scratch rax), never
+    `rep movsb` (it uses rsi/rdi).
+  - `gen_memcpy` must not touch an argument register. The prologue copies
+    16-byte parameters while later parameters still sit in their registers, so
+    a counter in rcx (argument 4 under SysV) makes the next parameter get
+    copied from address zero. It unrolls up to 128 bytes and saves/restores
+    the counter above that.
+  - Free scratch registers: rax, rcx, rdx, r8, r9, r10, r11, xmm0-5.
+  - rbx, r12, r13, r14 belong to the register allocator (x19-x22 on arm64).
+    A function that borrows them parks them in its frame and restores them at
+    every return; clobbering one without saving corrupts a live variable.
 
 ## 5. Label naming (don't collide with the C runtime)
 
-| Thing                       | Label form          | Note                              |
-|-----------------------------|---------------------|-----------------------------------|
-| function `main`             | `main`              | exported for the CRT              |
-| user function (no ns)       | `mvs_<name>`        | avoids clashing with libc         |
-| function in a module (ns)   | `mvs_<ns>_<name>`   | e.g. io.out → `mvs_io_out`        |
-| foreign function (extern)   | `<name>` (raw)      | e.g. `printf` must match C        |
-| global variable             | `mvs_gv_<name>`     |                                   |
-| string constant             | `mvs_str_<idx>`     | declared in `.data`               |
-| internal label (loop/if/sw) | `.L<prefix><id>`    | local label, `id` from `new_label()` |
+| Thing | Label | Note |
+|-------|-------|------|
+| `main` | `main` | exported for the CRT |
+| user function (no ns) | `mvs_<name>` | avoids clashing with libc |
+| function in a module | `mvs_<ns>_<name>` | io.out becomes `mvs_io_out` |
+| extern | `<name>` (raw) | must match C |
+| global variable | `mvs_gv_<name>` | |
+| string constant | `mvs_str_<idx>` | in `.data` |
+| internal label | `.L<prefix><id>` | local, `id` from `new_label()` |
 
-See `func_label_of()` and `find_func()` in `arch/common.c` for the source of truth.
+`func_label_of()` and `find_func()` in `arch/common.c` are the source of truth.
 
-## 5.5 struct / pointer / float / ABI details
+## 5.5 struct / pointer / float details
 
-- **Type width:** variables are allocated at their real size (`type_size`); stores truncate to size
-  (al/ax/eax/rax), loads extend with `movsx`/`movzx` by sign (`is_signed_type`), but math still
-  runs in 64-bit registers.
-- **lvalue/address:** `gen_addr()` puts an address into rax; shared by member access, `&`, `*`, assignment.
-- **struct return (sret):** functions returning a struct use a hidden pointer in rcx, with the real
-  params shifted by one slot. struct values (literal/copy/call result) are written via `gen_store_struct()`.
-- **args beyond 4:** arg 5+ sit on the stack above the shadow space; the callee reads them at
-  `[rbp + 48 + (pos-4)*8]`.
-- **float:** stored as the double's bit-pattern in rax (like an int), moved into xmm only for math
-  (`movq`/`cvtsi2sd` → `addsd`/`ucomisd` → `movq` back). `f32` is stored in a real 4 bytes
-  (load `movd`+`cvtss2sd`, store `cvtsd2ss`+`movd`).
-  - printf is variadic: a float arg must go into both the GPR and the matching `xmm<n>` (see io.out).
-  - Floats cross the C boundary both ways (arg in `xmm<pos>`, return in xmm0). For f32 across that
-    boundary: an export taking f32 does `cvtss2sd` on entry, and `cvtsd2ss` before `ret` when
-    returning f32 (C uses single, MVS uses double internally).
-  - Every float operation must be handled in xmm; don't apply integer instructions to the bit-pattern.
-    `**` is a `mulsd` loop; unary `-` is an xor of the sign bit (not `neg`). `%`, `++`/`--`, and
-    `switch` on a float are compile errors (caught in typecheck/codegen).
+- Variables are allocated at their real size (`type_size`); stores truncate,
+  loads extend with `movsx`/`movzx` by sign, but math runs in 64-bit registers.
+- `gen_addr()` puts an lvalue's address in rax; shared by member access, `&`,
+  `*`, and assignment.
+- sret: a struct-returning function takes a hidden pointer in rcx, real params
+  shifted one slot. Struct values are written via `gen_store_struct()`.
+- Arg 5+ sit above the shadow space; the callee reads `[rbp + 48 + (pos-4)*8]`.
+- Floats are stored as the double's bit-pattern in rax, moved into xmm only for
+  math. `f32` is stored in a real 4 bytes (`movd`+`cvtss2sd` load,
+  `cvtsd2ss`+`movd` store).
+  - printf is variadic: a float arg must go into both the GPR and the matching
+    xmm register.
+  - Floats cross the C boundary in xmm both ways. For f32: an export taking f32
+    does `cvtss2sd` on entry and `cvtsd2ss` before returning f32 (C uses
+    single, MVS computes in double).
+  - Every float operation goes through xmm; never apply integer instructions to
+    the bit-pattern. `**` is a `mulsd` loop; unary minus is an xor of the sign
+    bit. `%`, `++`/`--`, and `switch` on a float are compile errors.
 
-## 5.6 struct methods (impl), Rust-style
+## 5.6 struct methods (impl)
 
-- Declared as `impl StructName { func method(self: *StructName, ...) -> T {...} }`.
-- A method gets `ns = struct name` (for the label `mvs_<Struct>_<method>`) and `is_method = 1`.
-- Called as `obj.method(args)`: the compiler injects `self` (a pointer to obj) as the first argument.
-  - If `obj` is a struct value → pass `&obj`; if it's already a pointer → pass it directly.
-- **Chaining** works when a method returns a pointer (`*Struct`), e.g. a builder `v.setX(1).setY(2)`.
-- **`ns` vs `mod`** (on the `Node`). Don't confuse them:
-  - `ns` = the namespace of the **symbol label** (module for ordinary funcs, struct name for methods).
-  - `mod` = the namespace of the **owning module**, used to resolve unqualified calls (`g->cur_ns = fn->mod`).
-  - If a method (ns = struct) used ns as cur_ns it would call itself in a loop (e.g. method `send`
-    calling extern `send`).
-- Unqualified calls inside a method resolve in the module first, then globally; to call a sibling
-  method use `self.x()`.
+- `impl StructName { func method(self: *StructName, ...) -> T {...} }`.
+- A method gets `ns` = struct name (label `mvs_<Struct>_<method>`) and
+  `is_method = 1`. `obj.method(args)` injects `&obj` (or the pointer as is) as
+  the first argument. Chaining works when a method returns `*Struct`.
+- `ns` vs `mod` on the `Node`, don't confuse them: `ns` is the namespace of the
+  symbol label (module for functions, struct name for methods); `mod` is the
+  owning module, used to resolve unqualified calls (`g->cur_ns = fn->mod`).
+  If a method used ns as cur_ns it would call itself in a loop (method `send`
+  calling extern `send`).
+- Unqualified calls inside a method resolve module-first, then globally; a
+  sibling method is called through `self.x()`.
 
-## 5.7 trait + associated function + generic bound
+## 5.7 trait / associated function / generic bound
 
-- **Associated function** = a func in `impl` with no `self`, called as `Type::func(..)` (`::` = `TK_COLONCOLON`).
-  - Its AST is identical to a method call (`ND_MEMBER` base = the type name); `gen_call` tells them apart
-    by the base: a struct variable → inject self (method); a type/module name → no self (associated/namespaced).
-- **trait** (`ND_TRAIT`) holds only signatures; **`impl Trait for Type`** creates ordinary methods (ns=Type)
-  plus an `ND_TRAIT_IMPL` marker (name=trait, type_name=type) used for checking.
-- **`<T: Trait>`** is stored in `Node.gen_bound[]` and checked during monomorphize: the concrete type must
-  implement the trait (have an `ND_TRAIT_IMPL`). If not, `monomorphize()` returns a nonzero error count and
-  main stops.
-- **Dispatch is static and free:** after monomorphize T is concrete, so `x.method()` resolves by type on its
-  own. No vtable: a trait is mostly "syntax + checking" and codegen needn't know about traits.
-- codegen/typecheck **skip** `ND_TRAIT`/`ND_TRAIT_IMPL` (they aren't `ND_FUNC`); don't accidentally emit them
-  as functions.
-- Extra checks: an `impl` must provide every method the trait declares, and the referenced trait must exist
-  (`check_trait_impls` in generic.c).
+- An associated function is a func in `impl` with no `self`, called
+  `Type::func(..)`. Its AST is a member call; `gen_call` tells method from
+  associated by the base: struct variable injects self, type or module name
+  does not.
+- `ND_TRAIT` holds only signatures; `impl Trait for Type` creates ordinary
+  methods (ns=Type) plus an `ND_TRAIT_IMPL` marker used for checking.
+- `<T: Trait>` lives in `Node.gen_bound[]`, checked during monomorphize: the
+  concrete type must have a matching `ND_TRAIT_IMPL` or compilation stops.
+- Dispatch is static and free: after monomorphize T is concrete, so
+  `x.method()` resolves by type. Codegen needn't know about traits.
+- codegen/typecheck skip `ND_TRAIT`/`ND_TRAIT_IMPL`; don't emit them as
+  functions. `check_trait_impls` verifies an impl provides every declared
+  method and the trait exists.
 
-## 6. Current codegen limits
+## 6. Codegen notes
 
-- **Scope shadowing works** (a visibility stack `g->visible[]` pushed/popped per block; `find_var` searches
-  most-recent-first; each variable gets its own slot even when names repeat). Every type-analysis pass
-  (`typecheck`/`scan_ov`/`scan_calls`) is scope-aware too. (It used to use a flat map via `collect_vars`,
-  which made overload/generic resolution pick the wrong type and segfault on differently-typed shadows; fixed.)
-- Math still runs in 64-bit registers (width respected only at load/store), so mid-expression overflow is 64-bit.
-- Passing a struct **by value as a parameter** works (caller passes &arg, callee copies), and a struct **result
-  from a function is usable as an rvalue** (`g(make())`, `make().field`) via temps reserved by
+- Scope shadowing works everywhere: a visibility stack in codegen, and every
+  analysis pass is scope-aware. (It used to use a flat var map, which made
+  overload resolution pick the wrong type on shadows; fixed.)
+- Math runs in 64-bit registers, so mid-expression overflow is 64-bit; width
+  applies at load/store.
+- Struct by-value parameters work (caller passes the address, callee copies),
+  and a struct result is usable as an rvalue via temps from
   `collect_struct_temps`.
-- A struct literal with a nested struct field accepts only a literal/lvalue (see `gen_store_struct`).
-- **extern/export names must not collide with NASM reserved words** (`abs`, `rel`, `seg`, `wrt`) since they use
-  raw symbol names → nasm syntax error. Wrap or rename (e.g. C `abs` can't be used directly).
+- A struct literal with a nested struct field accepts only a literal/lvalue.
+- extern/export names must not collide with NASM reserved words (`abs`, `rel`,
+  `seg`, `wrt`): they use raw symbol names and nasm errors out. Rename or wrap.
 
-## 6.5 Module system (import): rules and behavior
+## 6.5 Module system
 
-- Import resolution lives in `src/module.c` (the front-end still parses one file at a time).
-- **Three forms, the path decides** (see `handle_import`):
-  - `import { io } from "std"`: path is a **bare package** → names in `{}` are **submodules**, loaded as a
+- Import resolution lives in `src/module.c`; the parser still works one file
+  at a time.
+- Three forms, the path decides (`handle_import`):
+  - `import { io } from "std"`: bare package, names are submodules, used as a
     namespace (`io.xxx`).
-  - `import { S } from "std/x"` / `from "./f.mvs"`: path is a **specific module** → names in `{}` are
-    **symbols**, pulled in directly (ns="").
-  - `import alias from "std/x"` / `from "./f.mvs"`: **no `{}`** → the whole module becomes a **namespace =
-    alias** (stored in `imp->name`).
-  - Relative file vs package submodule: ending in `.mvs` = a file (relative to base_dir); otherwise
-    `<stddir>/<sub>.mvs`.
-- **Import checks (all are immediate errors):**
-  - symbol import: the name must exist in the module (`collect_defs`/`defs_has` → "no exported symbol").
-  - duplicate struct/trait/func (ns+name+sig) → `check_duplicates()` in `generic.c` (before monomorphize;
-    different-type overloads don't count; duplicate extern is allowed).
-  - a namespace/alias bound to two different modules → `register_ns` (`Loader.ns_name/ns_canon`).
-  - circular import → `Loader.loading[]` (the in-flight stack); `loaded[]` is registered on **completion**
-    (so diamonds work).
-- The std folder is found via `MVS_STD` first, else `<dir of mvs.exe>/std`.
-- std is real MVS (16 modules; the table in [guide.md](guide.md) section 4.12 is the
-  authority), imported before use, working through `extern` into the C runtime /
-  libm / sockets / threads (Windows or POSIX halves selected per target with
-  `@compile`). The `core` package is the pure-MVS subset importable under `--nostd`.
-- structs/traits are **not namespaced yet** (always global), so import a type with a symbol import
-  (`import { String } from "std/string"`). Alias/namespace only affects **free functions** (methods/associated
-  functions are already tied to the struct name).
-- `io.out` is a compiler intrinsic (like Rust's `println!`): it parses `{}`/`{:x}` at compile time and picks a
-  format by arg type; see `build_c_format()` in `arch/common.c`; gated on whether io has been imported.
-- **Tree-shaking:** only functions reachable from main are emitted (`reach_func`/`reach_node`); unreferenced
-  functions are dropped.
-- Cross-module name clashes (same ns+name+sig) are caught by `check_duplicates` (extern excepted, deduped later).
+  - `import { S } from "std/x"` or `"./f.mvs"`: specific module, names are
+    symbols, pulled in directly.
+  - `import alias from "std/x"`: no braces, the whole module becomes namespace
+    `alias`.
+  - A path ending in `.mvs` is a relative file; otherwise `<stddir>/<sub>.mvs`.
+- Immediate errors: a symbol import that doesn't exist; duplicate
+  struct/trait/func (same ns+name+sig, checked in `check_duplicates` before
+  monomorphize; overloads and duplicate externs are fine); one namespace bound
+  to two modules (`register_ns`); circular import (`Loader.loading[]` is the
+  in-flight stack, `loaded[]` registers on completion so diamonds work).
+- The std folder is found via `MVS_STD`, else `<dir of mvs.exe>/std`. std is
+  real MVS (the table in [guide.md](guide.md) section 4.12 is the authority),
+  reaching the OS through `extern`, with per-OS halves selected by `@compile`.
+  `core` is the pure-MVS subset importable under `--nostd`.
+- structs/traits are not namespaced yet (always global); import a type with a
+  symbol import. Alias/namespace affects free functions only.
+- `io.out` parses `{}` at compile time and picks a format per argument
+  (`build_c_format()` in `arch/common.c`); gated on io being imported.
+- Tree-shaking: only functions reachable from main (and exports) are emitted.
 
 ## 7. Multi-architecture structure (don't break this)
 
-The backend splits into a shared part and an arch-specific part:
-
 ```
 src/arch/
-  common.h / common.c       shared (arch-independent): type system, struct layout,
-                            symbol table, variable allocation, reachability, build_c_format
-  x86_64/win.c              x86-64 Windows: instruction emission + win64 ABI
-  x86_64/sysv.c             x86-64 Linux/ELF: SysV ABI (args rdi,rsi,rdx,rcx,r8,r9 plus a
-                            separate xmm class, no shadow space, AL count for variadic C)
-  (future) arm64/linux.c    new register/instruction set
+  common.h/.c    shared, arch-independent: type system, struct layout,
+                 symbol table, variable allocation, reachability, build_c_format
+  x86_64/win.c   win64 ABI, NASM
+  x86_64/sysv.c  SysV ABI, NASM: 6 GPR args + xmm class, no shadow space,
+                 AL count for variadic C
+  arm64/linux.c  AAPCS64, GNU as syntax
 ```
 
-- `src/lexer`, `src/parser`, `src/ast`, `src/module` must not depend on any architecture.
-- The shared part (`common.c`) must not emit instructions; it holds only logic (type/struct/symtab/
-  reachability). Functions that emit asm (gen_expr/gen_stmt/gen_call/gen_func etc.) live in the backend file.
-- To add an arch/os: create `src/arch/<arch>/<os>.c` that `#include "../common.h"`, write only the emission
-  part, add a value to `TargetArch` (codegen.h), and add a case to `codegen_generate()`. Don't touch the
-  front-end; reuse `common.c` as much as possible.
-- `type_size` in common assumes 8-byte pointers (a 64-bit target). For a 32-bit target it needs parameterizing.
+- `lexer`, `parser`, `ast`, `module` must not depend on any architecture.
+- `common.c` must not emit instructions; emission lives in the backend files.
+- To add a target: `src/arch/<arch>/<os>.c` including `../common.h`, a value in
+  `TargetArch` (codegen.h), a case in `codegen_generate()`. Don't touch the
+  front end.
+- `type_size` assumes 8-byte pointers; a 32-bit target needs it parameterized.
 
 ## 8. Definition of done
 
-1. `make` passes with no warnings (`-Wall -Wextra` on; deprecation silenced by flag). No dead code.
-2. `make test` passes: golden output diffs + compile-only + compile-fail tests (`scripts/test.ps1`).
-3. New feature → add an example under `examples/`, register it in `scripts/test.ps1` and the Makefile
-   `EXAMPLES` list, regenerate goldens (`scripts/test.ps1 -Update`), and EYEBALL the new golden file;
-   bad codegen often assembles and links fine but runs wrong, and `-Update` records whatever ran.
-4. New compiler error → add a `tests/compile_fail/*.mvs` with a `//~ ERROR: <substring>` first line.
+1. `make` passes with no warnings (`-Wall -Wextra`). No dead code.
+2. `make test` passes: golden output, compile-only, and compile-fail suites.
+3. New feature: add an example under `examples/`, register it in
+   `scripts/test.ps1` and the Makefile `EXAMPLES` list, regenerate goldens with
+   `scripts/test.ps1 -Update`, and EYEBALL the new golden file. Bad codegen
+   often assembles and links fine but runs wrong, and `-Update` records
+   whatever ran.
+4. New compiler error: add a `tests/compile_fail/*.mvs` with a
+   `//~ ERROR: <substring>` first line.
 
 ## 9. Code style
 
 - Follow the surrounding files: 4-space indent, opening brace on the same line.
-- Backend state lives in a single `Gen` struct (the compiler works one file at a time).
-- Report front-end errors through `diag_print()` (diag.h): file:line:col, the quoted source
-  line with a caret, and a `diag_help()` note when there is an obvious fix. Warnings must be
-  gated on `diag_is_primary()` so imported modules stay quiet. Codegen-internal errors may
-  still use plain `fprintf(stderr, ...)`; all messages are English.
+- Backend state lives in one `Gen` struct; the compiler works one file at a time.
+- Front-end errors go through `diag_print()` (file:line:col, quoted source line
+  with a caret, `diag_help()` when there is an obvious fix). Warnings are gated
+  on `diag_is_primary()` so imported modules stay quiet. Codegen-internal
+  errors may use plain `fprintf(stderr, ...)`. All messages in English.

@@ -1,42 +1,38 @@
 # MVS example programs
 
-Examples are grouped by topic, and **every file has a header with its build/run command.**
-Start with [demo.mvs](demo.mvs) for the overview, then dig into whatever group interests you.
-
-## Building and running
+Examples are grouped by topic; every file has a header with its build/run
+command. Start with [demo.mvs](../examples/demo.mvs), then dig into whatever
+group interests you.
 
 ```powershell
-mvs.exe examples/<group>/<file>.mvs     # builds <file>.exe next to the source (calls nasm + clang)
+mvs.exe examples/<group>/<file>.mvs     # builds <file>.exe next to the source
 examples\<group>\<file>.exe             # run it
-mvs.exe examples/<group>/<file>.mvs -S  # inspect the generated assembly (no nasm/clang)
+mvs.exe examples/<group>/<file>.mvs -S  # look at the generated assembly instead
 ```
 
-You need **clang** and **nasm** on your PATH. mvs.exe warns if either is missing and prints the
-versions it uses.
-
----
+You need `clang` and `nasm` on PATH; mvs.exe warns if either is missing.
 
 ## demo.mvs
 
-A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/while, hex.
+A grab-bag showcase: io.out, variables, functions, arithmetic, control flow.
 
 ## 01_language: language core
 
 | File | Contents |
 |------|----------|
 | `hello.mvs` | the first program |
-| `types.mvs` | every data type (i8..i128, u8..u128, isize/usize, bool, char, str, f32, f64, pointer) |
-| `operators.mvs` | arithmetic/comparison/logic, `**` power, break/continue, args > 4 |
-| `bitwise.mvs` | `& \| ^ ~ << >>` + bitmask/flags |
+| `types.mvs` | every data type |
+| `operators.mvs` | arithmetic/comparison/logic, `**` power, args > 4 |
+| `bitwise.mvs` | `& \| ^ ~ << >>`, bitmask/flags |
 | `casts.mvs` | `as` conversions + compile-time type checking |
-| `control.mvs` | if/elseif/else, while, for, do-while, switch/case |
+| `control.mvs` | if/elseif/else, while, for, do-while, switch |
 | `args.mvs` | command-line args via `main(argc, argv)` |
-| `arrays.mvs` | `[T; N]` arrays: literals, indexing, `.len`, structs, decay to `*T` |
-| `int128.mvs` | full 128-bit arithmetic: mul/div/mod past 64 bits, u128 max, shifts |
-| `shadow.mvs` | scope shadowing: blocks, type-changing shadows, loop variables |
-| `compile_attr.mvs` | conditional compilation: `@compile(target_os/target_arch)` on funcs and globals |
-| `hexbin.mvs` | hex (`0x`) and binary (`0b`) integer literals + `{:x}` output |
-| `enums.mvs` | Rust-style enums + match: payload variants, unit variants, `_`, nested match, exhaustiveness |
+| `arrays.mvs` | `[T; N]`: literals, indexing, `.len`, decay to `*T` |
+| `int128.mvs` | 128-bit arithmetic past 64 bits |
+| `shadow.mvs` | scope shadowing |
+| `compile_attr.mvs` | `@compile(target_os/target_arch)` |
+| `hexbin.mvs` | hex and binary literals, `{:x}` output |
+| `enums.mvs` | enums + match: payloads, `_`, exhaustiveness |
 
 ## 02_functions: functions / generics / overloading
 
@@ -44,123 +40,94 @@ A grab-bag showcase: io.out, variables/const, functions, arithmetic, if/for/whil
 |------|----------|
 | `recursion.mvs` | self-recursion + mutual recursion |
 | `generics.mvs` | generic functions (monomorphization) |
-| `overload.mvs` | overloading by type + a generic calling an overload |
-| `funcptr.mvs` | function pointers: `func(...) -> T` as a value, pass/store/call (indirect) |
-| `defaults.mvs` | default parameter values (functions + methods, filled at compile time) |
+| `overload.mvs` | overloading by type, a generic calling an overload |
+| `funcptr.mvs` | function pointers as values, indirect calls |
+| `defaults.mvs` | default parameter values |
 
 ## 03_structs: struct / method / pointer
 
 | File | Contents |
 |------|----------|
 | `structs.mvs` | structs, members, struct return, io.out on a struct |
-| `methods.mvs` | methods + associated `Type::new` + chaining |
-| `pointers.mvs` | `&`/`*`/`**`, pointer arithmetic, arrays via malloc |
-| `compound.mvs` | compound assignment evaluates its lvalue (incl. calls) exactly once |
-| `blob_fields.mvs` | i128/f64/f32 fields initialized from plain literals (widen/convert) + i128 accumulation |
-| `generic_structs.mvs` | generic structs: `Pair<T, U>` + `impl` methods + nested `Boxed<Pair<i64, i64>>` |
+| `methods.mvs` | methods, `Type::new`, chaining |
+| `pointers.mvs` | `&`/`*`/`**`, pointer arithmetic, malloc'd arrays |
+| `compound.mvs` | compound assignment evaluates its lvalue exactly once |
+| `blob_fields.mvs` | i128/f64/f32 fields initialized from plain literals |
+| `generic_structs.mvs` | `Pair<T, U>` + `impl` methods + nesting |
 
-## 04_traits: trait / Display
-
-| File | Contents |
-|------|----------|
-| `traits.mvs` | trait + `impl Trait for` + `<T: Trait>` (static dispatch) |
-| `display.mvs` | trait `Display` + `fmt.println` (library-style formatting) |
-| `dynamic.mvs` | `dyn Trait` objects: vtable dispatch, dyn arrays/params, `where T: A + B` |
-
-## 05_strings: strings
+## 04_traits
 
 | File | Contents |
 |------|----------|
-| `strings.mvs` | `String` (heap, owned): `from`/`from_int`/`push_str`/`as_str`/`drop` |
+| `traits.mvs` | trait, `impl Trait for`, `<T: Trait>` static dispatch |
+| `display.mvs` | trait `Display` + `fmt.println` |
+| `dynamic.mvs` | `dyn Trait`: vtable dispatch, dyn arrays/params, `where` |
 
-## 06_modules: module system
+## 05_strings
 
 | File | Contents |
 |------|----------|
-| `use_import.mvs` | the three import forms (namespace / symbol / alias) |
-| `mathlib.mvs` | a user-written module (imported by the above) |
-| `shadow_std.mvs` | user functions sharing names with std functions resolve correctly per namespace |
+| `strings.mvs` | `String` on the heap: `from`/`push_str`/`as_str`/`drop` |
 
-## 07_c_interop: working with C
+## 06_modules
+
+| File | Contents |
+|------|----------|
+| `use_import.mvs` | the three import forms |
+| `mathlib.mvs` | a user-written module, imported by the above |
+| `shadow_std.mvs` | user functions sharing names with std resolve per namespace |
+
+## 07_c_interop
 
 | File | Contents |
 |------|----------|
 | `extern_c.mvs` | MVS calling C (strlen/atoi from the CRT) |
-| `use_c.mvs` + `mathops.c` | MVS calling functions from our own C file (link .obj + .c) |
-| `export_lib.mvs` + `caller.c` | C calling MVS (`export func` + a C-side prototype) |
-| `freestanding.mvs` | `--nostd` mode (no std/CRT/OS) for OS / bare-metal |
+| `use_c.mvs` + `mathops.c` | MVS calling our own C file |
+| `export_lib.mvs` + `caller.c` | C calling MVS (`export func`) |
+| `freestanding.mvs` | `--nostd`: no std, no CRT, no OS |
 
-## 08_stdlib: the standard library
+## 08_stdlib
 
 | File | Contents |
 |------|----------|
-| `io_demo.mvs` | io.out in every form (`{}`, `{:x}`, struct, many args) + io.print |
-| `floats.mvs` | floating point + C math (`sqrt`) |
+| `io_demo.mvs` | io.out in every form |
+| `floats.mvs` | floating point + C math |
 | `files.mvs` | `fs.write`/`fs.read` + `io.in` |
-| `net_client.mvs` / `net_server.mvs` | TCP client/server skeletons (`TcpSocket::connect` / `TcpServer::bind`) |
-| `net_loop.mvs` | TCP loopback round trip in one process; cross-platform sockets via `@compile` |
-| `lib_out.mvs` | `fmt.outf`: io.out as a pure-MVS library (variadic `...dyn Display`, impl-on-primitive) |
-| `lib_math.mvs` | `std/math`: libm wrappers + overloaded `abs`/`min`/`max`/`clamp`, `gcd`/`lcm`/`ipow` |
-| `lib_mem.mvs` | `std/mem`: alloc/copy/set/eq/swap/grow over raw `*u8` buffers |
-| `lib_rand.mvs` | `std/rand`: pure-MVS xorshift64, identical sequences on every platform |
-| `lib_sys.mvs` | `std/time` + `std/env` + `std/process` (prints deterministic properties) |
-| `out_width.mvs` | io.out width/precision specs: `{:8.2}` `{:08}` `{:.3}` `{:04x}` |
-| `option_result.mvs` | `Option<T>` / `Result<T, E>`: Some/None/Ok/Err, unwrap and fallbacks |
-| `lib_vec.mvs` | `Vec<T>` growable array: push/get/set/pop over i64, f64, and struct elements |
-| `lib_map.mvs` | `HashMap<K, V>`: i64 and str keys, `get` returning `Option<V>`, growth + overwrite |
-| `threads.mvs` | OS threads + Mutex: 4 workers, mutex-exact counter, per-thread slots, join |
+| `net_client.mvs` / `net_server.mvs` | TCP client/server skeletons |
+| `net_loop.mvs` | TCP loopback round trip in one process |
+| `lib_out.mvs` | `fmt.outf`: io.out as a pure-MVS library |
+| `lib_math.mvs` | `std/math`: libm wrappers + overloaded helpers |
+| `lib_mem.mvs` | `std/mem`: alloc/copy/set/eq/swap/grow |
+| `lib_rand.mvs` | `std/rand`: xorshift64, platform-identical sequences |
+| `lib_sys.mvs` | `std/time` + `std/env` + `std/process` |
+| `out_width.mvs` | io.out width/precision: `{:8.2}` `{:08}` `{:04x}` |
+| `option_result.mvs` | `Option` / `Result`: unwrap and fallbacks |
+| `lib_vec.mvs` | `Vec<T>`: push/get/set/pop over several element types |
+| `lib_map.mvs` | `HashMap<K, V>`: i64 and str keys, growth, overwrite |
+| `threads.mvs` | OS threads + Mutex: 4 workers, join |
 
-## 09_no_std: freestanding (OS / bare-metal, `--nostd`)
+## 09_no_std: freestanding (`--nostd`)
 
 | File | Contents |
 |------|----------|
-| `kernel.mvs` | OS-style skeleton: VGA text writer + exported `kmain` entry (links with GNU ld) |
-| `bump_alloc.mvs` | a freestanding bump allocator (no malloc, state in a caller-owned struct) |
-| `use_core.mvs` | the `core` package under `--nostd`: mem/cmp/ptr/cstr/bits/slice, zero undefined symbols |
-| `intrinsics.mvs` | `core/arch` + `asm()`: hints, barriers, hardware counter, all freestanding |
+| `kernel.mvs` | OS-style skeleton: VGA writer + exported `kmain` |
+| `bump_alloc.mvs` | a freestanding bump allocator |
+| `use_core.mvs` | the `core` package with zero undefined symbols |
+| `intrinsics.mvs` | `core/arch` + `asm()`: barriers, hardware counter |
 
-## 10_json: a real program (1084 lines of MVS)
+## The big ones
 
-A complete JSON library and CLI: tokenizer, arena-backed value tree, recursive
-descent parser with `Result` errors, compact and pretty serializers, and a
-command line front end. See [examples/10_json/README.md](../examples/10_json/README.md)
-for the breakdown and for the four compiler gaps writing it uncovered.
+Three real programs, each with its own README:
 
-| File | What it is |
-|------|------------|
-| `lexer.mvs` | tokenizer: escapes, `\uXXXX`, numbers, byte offsets |
-| `value.mvs` | `Json` enum + `Doc` arena, `get`/`path` returning `Option` |
-| `parser.mvs` | recursive descent, errors as values, depth cap |
-| `writer.mvs` | serialization, compact and pretty, round-trip stable |
-| `main.mvs` | the `jsontool` CLI plus a demo suite |
+- [10_json](../examples/10_json/README.md): a JSON library and CLI, 1084 lines.
+  Tokenizer, arena value tree, recursive descent parser with `Result` errors,
+  serializers, command line.
+- [11_vm](../examples/11_vm/README.md): a whole language pipeline for a toy
+  language, 1393 lines. Lexer, parser, arena AST, bytecode compiler, stack
+  machine, disassembler.
+- [12_http](../examples/12_http/README.md): a web application on `std/http`,
+  the axum-shaped framework in the standard library. Routes with path
+  parameters, query strings, JSON, redirects, a custom 404.
 
-## 11_vm: the second real program (1393 lines of MVS)
-
-A whole language pipeline for a toy language called *mini*: tokenizer,
-recursive descent parser, arena syntax tree, a compiler that resolves names to
-numbered slots and emits bytecode, and a stack machine that runs it, plus a
-disassembler and a CLI. See [examples/11_vm/README.md](../examples/11_vm/README.md).
-Byte-identical output on all three targets, clean under AddressSanitizer with
-leak detection ON.
-
-| File | What it is |
-|------|------------|
-| `lexer.mvs` | text to `Vec<Token>`: keywords, numbers, two-character operators, comments |
-| `ast.mvs` | the arena: nodes in one vector, child lists in another, addressed by index |
-| `parser.mvs` | recursive descent with precedence climbing, the first error stops the parse |
-| `compiler.mvs` | two passes: collect functions, then emit bytecode with patched jumps |
-| `vm.mvs` | the stack machine and the disassembler, every runtime failure reported |
-| `main.mvs` | the `minivm` CLI plus the demo suite the golden test runs |
-
-## 12_http: a web application on the built-in framework
-
-`std/http` is the HTTP framework in the standard library, written in MVS on top
-of `std/net`, in axum's shape: `Router::new().route("/users/:id", get(show).post(create))`.
-This example is a full application on it: routes with path parameters and a
-wildcard, query strings, a POST body, JSON, a redirect, custom headers, a 405,
-a custom 404, one path answering several methods, and the access log.
-See [examples/12_http/README.md](../examples/12_http/README.md).
-
-Client and server run in one process, so the output is identical on every run
-and on all three targets, and the program is clean under AddressSanitizer with
-leak detection ON.
+All three run byte-identically on the three targets and are clean under
+AddressSanitizer with leak detection on.
