@@ -80,5 +80,91 @@ func main() -> i8 {
     }
     io.out("{}", nested);
 
+    // --- axis: @compile blocks in every control-flow context ---
+
+    // inside if body
+    let in_if: str = "miss";
+    if (true) {
+        @compile(target_os = "windows") {
+            in_if = "if ok";
+        }
+        @compile(target_os = "linux") {
+            in_if = "if ok";
+        }
+    }
+    io.out("{}", in_if);
+
+    // inside else body
+    let in_else: str = "miss";
+    if (false) {
+        in_else = "wrong";
+    } else {
+        @compile(target_os = "windows") {
+            in_else = "else ok";
+        }
+        @compile(target_os = "linux") {
+            in_else = "else ok";
+        }
+    }
+    io.out("{}", in_else);
+
+    // inside elseif body (3-level chain: the exact bug pattern we fixed)
+    let in_elseif: str = "miss";
+    if (false) {
+        in_elseif = "wrong";
+    } else if (false) {
+        in_elseif = "wrong";
+    } else if (true) {
+        @compile(target_os = "windows") {
+            in_elseif = "elseif ok";
+        }
+        @compile(target_os = "linux") {
+            in_elseif = "elseif ok";
+        }
+    } else {
+        in_elseif = "wrong";
+    }
+    io.out("{}", in_elseif);
+
+    // inside while body
+    let in_while: str = "miss";
+    let i: i32 = 0;
+    while (i < 1) {
+        @compile(target_os = "windows") {
+            in_while = "while ok";
+        }
+        @compile(target_os = "linux") {
+            in_while = "while ok";
+        }
+        i = i + 1;
+    }
+    io.out("{}", in_while);
+
+    // inside for body
+    let in_for: str = "miss";
+    for (let j: i32 = 0; j < 1; j = j + 1) {
+        @compile(target_os = "windows") {
+            in_for = "for ok";
+        }
+        @compile(target_os = "linux") {
+            in_for = "for ok";
+        }
+    }
+    io.out("{}", in_for);
+
+    // non-matching @compile block is removed (no dead code emitted)
+    let removed: str = "removed ok";
+    @compile(target_os = "windows") {
+        @compile(not(target_os = "windows")) {
+            removed = "FAIL";
+        }
+    }
+    @compile(target_os = "linux") {
+        @compile(not(target_os = "linux")) {
+            removed = "FAIL";
+        }
+    }
+    io.out("{}", removed);
+
     return 0;
 }

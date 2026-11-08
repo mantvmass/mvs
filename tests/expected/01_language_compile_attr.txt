@@ -6,3 +6,9 @@ not linux
 win block
 not aarch64
 nested ok
+if ok
+else ok
+elseif ok
+while ok
+for ok
+removed ok
