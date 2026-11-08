@@ -1,0 +1,11 @@
+// std/io: stderr output and handle access
+import { io } from "std";
+
+func main() -> void {
+    io.eprint("stderr line ");
+    io.eprintln("with newline");
+    let si: *u8 = io.get_stdin();
+    let se: *u8 = io.get_stderr();
+    io.out("stdin handle valid = {}", si != 0 as *u8);
+    io.out("stderr handle valid = {}", se != 0 as *u8);
+}

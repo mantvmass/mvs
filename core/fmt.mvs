@@ -1,0 +1,181 @@
+/*
+ * core/fmt.mvs - freestanding number-to-string formatting (no CRT; --nostd safe)
+ *
+ * Unlike std/string (which uses malloc/sprintf), everything here writes into a
+ * caller-provided buffer. This is how bare-metal code prints numbers.
+ *
+ * Usage:
+ *     import { fmt } from "core";
+ *     let buf: [u8; 32] = [...];
+ *     let n: usize = fmt.u64_to_dec(buf, 32, 12345);    // "12345", returns 5
+ *     let n: usize = fmt.i64_to_dec(buf, 32, 0 - 42);   // "-42", returns 3
+ *     let n: usize = fmt.u64_to_hex(buf, 32, 255);       // "ff", returns 2
+ */
+
+// write the decimal representation of v into buf[0..cap-1], NUL-terminated.
+// Returns the number of characters written (not counting NUL).
+func u64_to_dec(buf: *u8, cap: usize, v: u64) -> usize {
+    if (cap == 0) { return 0; }
+    if (v == 0) {
+        buf[0] = 48;
+        if (cap > 1) { buf[1] = 0; }
+        return 1;
+    }
+    let tmp: [u8; 20] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let n: usize = 0;
+    let x: u64 = v;
+    while (x > 0) {
+        tmp[n] = (x % 10) as u8 + 48;
+        x = x / 10;
+        n = n + 1;
+    }
+    let w: usize = n;
+    if (w >= cap) { w = cap - 1; }
+    let i: usize = 0;
+    while (i < w) {
+        buf[i] = tmp[n - 1 - i];
+        i = i + 1;
+    }
+    buf[w] = 0;
+    return w;
+}
+
+// signed decimal
+func i64_to_dec(buf: *u8, cap: usize, v: i64) -> usize {
+    if (cap == 0) { return 0; }
+    if (v >= 0) { return u64_to_dec(buf, cap, v as u64); }
+    buf[0] = 45;
+    return 1 + u64_to_dec(buf + 1, cap - 1, (0 - v) as u64);
+}
+
+// lowercase hexadecimal (no "0x" prefix)
+func u64_to_hex(buf: *u8, cap: usize, v: u64) -> usize {
+    if (cap == 0) { return 0; }
+    if (v == 0) {
+        buf[0] = 48;
+        if (cap > 1) { buf[1] = 0; }
+        return 1;
+    }
+    let hex: str = "0123456789abcdef";
+    let hp: *u8 = hex;
+    let tmp: [u8; 16] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let n: usize = 0;
+    let x: u64 = v;
+    while (x > 0) {
+        tmp[n] = hp[x & 15];
+        x = x >> 4;
+        n = n + 1;
+    }
+    let w: usize = n;
+    if (w >= cap) { w = cap - 1; }
+    let i: usize = 0;
+    while (i < w) {
+        buf[i] = tmp[n - 1 - i];
+        i = i + 1;
+    }
+    buf[w] = 0;
+    return w;
+}
+
+// uppercase hexadecimal
+func u64_to_hex_upper(buf: *u8, cap: usize, v: u64) -> usize {
+    if (cap == 0) { return 0; }
+    if (v == 0) {
+        buf[0] = 48;
+        if (cap > 1) { buf[1] = 0; }
+        return 1;
+    }
+    let hex: str = "0123456789ABCDEF";
+    let hp: *u8 = hex;
+    let tmp: [u8; 16] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let n: usize = 0;
+    let x: u64 = v;
+    while (x > 0) {
+        tmp[n] = hp[x & 15];
+        x = x >> 4;
+        n = n + 1;
+    }
+    let w: usize = n;
+    if (w >= cap) { w = cap - 1; }
+    let i: usize = 0;
+    while (i < w) {
+        buf[i] = tmp[n - 1 - i];
+        i = i + 1;
+    }
+    buf[w] = 0;
+    return w;
+}
+
+// parse a NUL-terminated decimal string into a u64; returns 0 on empty input.
+// Stops at the first non-digit byte.
+func atou(s: str) -> u64 {
+    let p: *u8 = s as *u8;
+    let v: u64 = 0;
+    let i: usize = 0;
+    while (p[i] >= 48 && p[i] <= 57) {
+        v = v * 10 + (p[i] - 48) as u64;
+        i = i + 1;
+    }
+    return v;
+}
+
+// parse a NUL-terminated decimal string (optionally negative) into an i64.
+func atoi(s: str) -> i64 {
+    let p: *u8 = s as *u8;
+    let i: usize = 0;
+    let neg: bool = false;
+    if (p[0] == 45) { neg = true; i = 1; }
+    let v: i64 = 0;
+    while (p[i] >= 48 && p[i] <= 57) {
+        v = v * 10 + (p[i] - 48) as i64;
+        i = i + 1;
+    }
+    if (neg) { return 0 - v; }
+    return v;
+}
+
+// parse a hexadecimal string (no "0x" prefix) into a u64.
+func htou(s: str) -> u64 {
+    let p: *u8 = s as *u8;
+    let v: u64 = 0;
+    let i: usize = 0;
+    while (p[i] != 0) {
+        let c: u8 = p[i];
+        if (c >= 48 && c <= 57) { v = v * 16 + (c - 48) as u64; }
+        else if (c >= 97 && c <= 102) { v = v * 16 + (c - 97 + 10) as u64; }
+        else if (c >= 65 && c <= 70) { v = v * 16 + (c - 65 + 10) as u64; }
+        else { return v; }
+        i = i + 1;
+    }
+    return v;
+}
+
+// binary representation
+func u64_to_bin(buf: *u8, cap: usize, v: u64) -> usize {
+    if (cap == 0) { return 0; }
+    if (v == 0) {
+        buf[0] = 48;
+        if (cap > 1) { buf[1] = 0; }
+        return 1;
+    }
+    let tmp: [u8; 64] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let n: usize = 0;
+    let x: u64 = v;
+    while (x > 0) {
+        tmp[n] = (x & 1) as u8 + 48;
+        x = x >> 1;
+        n = n + 1;
+    }
+    let w: usize = n;
+    if (w >= cap) { w = cap - 1; }
+    let i: usize = 0;
+    while (i < w) {
+        buf[i] = tmp[n - 1 - i];
+        i = i + 1;
+    }
+    buf[w] = 0;
+    return w;
+}

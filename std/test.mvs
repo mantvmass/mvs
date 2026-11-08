@@ -77,6 +77,68 @@ func eq(got: str, want: str) -> void {
     }
 }
 
+func eq(got: bool, want: bool) -> void {
+    if (got != want) {
+        prefix();
+        if (want) { io.out("expected true but got false"); }
+        else { io.out("expected false but got true"); }
+        exit(1);
+    }
+}
+func eq(got: u64, want: u64) -> void {
+    if (got != want) {
+        prefix();
+        io.out("expected {} but got {}", want, got);
+        exit(1);
+    }
+}
+
+// not-equal assertions
+func ne(got: i64, want: i64) -> void {
+    if (got == want) {
+        prefix();
+        io.out("expected != {} but got {}", want, got);
+        exit(1);
+    }
+}
+func ne(got: str, want: str) -> void {
+    if (strcmp(got, want) == 0) {
+        prefix();
+        io.out("expected != {} but got {}", want, got);
+        exit(1);
+    }
+}
+
+// ordering assertions
+func lt(got: i64, bound: i64) -> void {
+    if (got >= bound) {
+        prefix();
+        io.out("expected < {} but got {}", bound, got);
+        exit(1);
+    }
+}
+func gt(got: i64, bound: i64) -> void {
+    if (got <= bound) {
+        prefix();
+        io.out("expected > {} but got {}", bound, got);
+        exit(1);
+    }
+}
+func le(got: i64, bound: i64) -> void {
+    if (got > bound) {
+        prefix();
+        io.out("expected <= {} but got {}", bound, got);
+        exit(1);
+    }
+}
+func ge(got: i64, bound: i64) -> void {
+    if (got < bound) {
+        prefix();
+        io.out("expected >= {} but got {}", bound, got);
+        exit(1);
+    }
+}
+
 // float equality within a tolerance
 func near(got: f64, want: f64, eps: f64) -> void {
     let d: f64 = got - want;

@@ -1,0 +1,34 @@
+// std/map: HashMap.remove + tombstone coverage
+import { io } from "std";
+import { HashMap } from "std/map";
+import { Option, Some, None } from "std/option";
+
+func main() -> void {
+    let m: HashMap<i64, i64> = HashMap<i64, i64>::new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    m.insert(3, 30);
+    io.out("before remove, len = {}", m.len());
+
+    // remove returns the old value
+    match (m.remove(2)) {
+        Some(v) => { io.out("removed 2 -> {}", v); }
+        None => { io.out("2 not found"); }
+    }
+    io.out("after remove(2), len = {}", m.len());
+    io.out("contains(2) = {}", m.contains(2));
+
+    // re-insert into tombstone slot
+    m.insert(2, 22);
+    match (m.get(2)) {
+        Some(v) => { io.out("re-inserted 2 -> {}", v); }
+        None => { io.out("2 still missing"); }
+    }
+    io.out("final len = {}", m.len());
+
+    // clear
+    m.clear();
+    io.out("after clear, len = {}, is_empty = {}", m.len(), m.is_empty());
+
+    m.drop();
+}

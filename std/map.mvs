@@ -16,7 +16,7 @@
  *
  * Key types: i64 and str (each needs a map_hash/map_eq overload below; add a
  * pair to support another key type). Values may be any type incl. structs.
- * Grows by doubling at 70% load. No remove() yet (see ROADMAP).
+ * Grows by doubling at 70% load. remove() uses tombstone deletion.
  */
 import { Option, Some, None } from "std/option";
 
@@ -51,7 +51,7 @@ func map_eq(a: str, b: str) -> bool { return strcmp(a, b) == 0; }
 struct HashMap<K, V> {
     keys: *K;
     vals: *V;
-    state: *u8;      // 0 = empty, 1 = occupied
+    state: *u8;      // 0 = empty, 1 = occupied, 2 = tombstone
     cap: usize;
     len: usize;
 }
@@ -103,15 +103,18 @@ impl HashMap<K, V> {
 
     // insert or overwrite
     func insert(self: *HashMap<K, V>, k: K, v: V) -> void {
-        if (self.len * 10 >= self.cap * 7) { self.grow(); }   // incl. the empty map
+        if (self.len * 10 >= self.cap * 7) { self.grow(); }
         let i: usize = map_hash(k) % self.cap;
-        while (self.state[i] == 1) {
-            if (map_eq(self.keys[i], k)) {
-                self.vals[i] = v;                              // overwrite existing key
+        let tomb: i64 = 0 - 1;
+        while (self.state[i] != 0) {
+            if (self.state[i] == 1 && map_eq(self.keys[i], k)) {
+                self.vals[i] = v;
                 return;
             }
+            if (self.state[i] == 2 && tomb < 0) { tomb = i as i64; }
             i = (i + 1) % self.cap;
         }
+        if (tomb >= 0) { i = tomb as usize; }
         self.state[i] = 1;
         self.keys[i] = k;
         self.vals[i] = v;
@@ -122,8 +125,10 @@ impl HashMap<K, V> {
     func get(self: *HashMap<K, V>, k: K) -> Option<V> {
         if (self.cap == 0) { return None<V>(); }
         let i: usize = map_hash(k) % self.cap;
-        while (self.state[i] == 1) {
-            if (map_eq(self.keys[i], k)) { return Some(self.vals[i]); }
+        while (self.state[i] != 0) {
+            if (self.state[i] == 1 && map_eq(self.keys[i], k)) {
+                return Some(self.vals[i]);
+            }
             i = (i + 1) % self.cap;
         }
         return None<V>();
@@ -134,7 +139,33 @@ impl HashMap<K, V> {
         return r.is_some();
     }
 
-    // release the buffers (manual memory management, like everything in MVS)
+    // remove a key and return its value; None when absent.
+    // Uses tombstone state (2) so probe chains stay valid.
+    func remove(self: *HashMap<K, V>, k: K) -> Option<V> {
+        if (self.cap == 0) { return None<V>(); }
+        let i: usize = map_hash(k) % self.cap;
+        while (self.state[i] != 0) {
+            if (self.state[i] == 1 && map_eq(self.keys[i], k)) {
+                let v: V = self.vals[i];
+                self.state[i] = 2;
+                self.len = self.len - 1;
+                return Some(v);
+            }
+            i = (i + 1) % self.cap;
+        }
+        return None<V>();
+    }
+
+    // remove all entries but keep the buffer
+    func clear(self: *HashMap<K, V>) -> void {
+        let i: usize = 0;
+        while (i < self.cap) {
+            self.state[i] = 0;
+            i = i + 1;
+        }
+        self.len = 0;
+    }
+
     func drop(self: *HashMap<K, V>) -> void {
         if (self.cap > 0) {
             free(self.keys as *u8);

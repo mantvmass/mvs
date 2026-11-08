@@ -19,6 +19,18 @@ extern func ceil(x: f64) -> f64;
 extern func round(x: f64) -> f64;
 extern func fabs(x: f64) -> f64;
 extern func fmod(a: f64, b: f64) -> f64;
+extern func sin(x: f64) -> f64;
+extern func cos(x: f64) -> f64;
+extern func tan(x: f64) -> f64;
+extern func asin(x: f64) -> f64;
+extern func acos(x: f64) -> f64;
+extern func atan(x: f64) -> f64;
+extern func atan2(y: f64, x: f64) -> f64;
+extern func log(x: f64) -> f64;
+extern func log2(x: f64) -> f64;
+extern func log10(x: f64) -> f64;
+extern func exp(x: f64) -> f64;
+extern func exp2(x: f64) -> f64;
 
 // mathematical constants (as functions; module-level constants stay local to std)
 func pi() -> f64 { return 3.141592653589793; }
@@ -98,4 +110,29 @@ func ipow(base: i64, exp: i64) -> i64 {
         n = n / 2;
     }
     return result;
+}
+
+// trigonometric and log/exp: the extern declarations above are accessible as
+// math.sin(), math.cos(), math.log(), math.exp(), etc. through the namespace.
+// ln is an alias for the C log() function (a more familiar name for some users).
+func ln(x: f64) -> f64 { return log(x); }
+
+// the hypotenuse without overflow: sqrt(a*a + b*b)
+func hypot(a: f64, b: f64) -> f64 { return sqrt(a * a + b * b); }
+
+// convert degrees to radians and back
+func to_radians(deg: f64) -> f64 { return deg * 3.141592653589793 / 180.0; }
+func to_degrees(rad: f64) -> f64 { return rad * 180.0 / 3.141592653589793; }
+
+// IEEE classification: NaN is the only value not equal to itself
+func is_nan(x: f64) -> bool { return x != x; }
+
+// infinity: value larger than any finite number
+func is_inf(x: f64) -> bool {
+    if (x != x) { return false; }
+    return x - x != 0.0;
+}
+
+func is_finite(x: f64) -> bool {
+    return !is_nan(x) && !is_inf(x);
 }

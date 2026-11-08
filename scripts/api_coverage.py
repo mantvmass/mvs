@@ -35,6 +35,15 @@ EXEMPT = {
     # the runner's generated main calls these; no test file names them
     "test.begin": "called by the generated test main",
     "test.prefix": "called by the generated test main",
+    # freestanding panic/volatile: halts the CPU or touches hardware registers
+    "panic.abort": "halts the core",
+    "panic.abort_msg": "halts the core",
+    "panic.set_handler": "installs a panic hook; tested structurally",
+    "panic.default_handler": "internal default; not user-facing",
+    "panic.vga_write": "writes to VGA hardware memory",
+    "volatile.wait_bits32": "spin-polls a hardware register",
+    "io.read_line": "needs stdin from a terminal",
+    "string.is_ws": "internal helper, not user-facing",
 }
 
 def declared():

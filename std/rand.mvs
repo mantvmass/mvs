@@ -41,3 +41,36 @@ func range(lo: i64, hi: i64) -> i64 {
 func unit() -> f64 {
     return ((next() >> 11) as i64 as f64) / 9007199254740992.0;
 }
+
+// random boolean (50/50)
+func coin() -> bool {
+    return (next() & 1) == 1;
+}
+
+// fill a buffer with pseudo-random bytes
+func bytes(buf: *u8, n: usize) -> void {
+    let i: usize = 0;
+    while (i < n) {
+        let v: u64 = next();
+        let j: usize = 0;
+        while (j < 8 && i < n) {
+            buf[i] = (v & 0xFF) as u8;
+            v = v >> 8;
+            i = i + 1;
+            j = j + 1;
+        }
+    }
+}
+
+// shuffle an i64 array in place (Fisher-Yates)
+func shuffle_i64(arr: *i64, n: usize) -> void {
+    if (n < 2) { return; }
+    let i: usize = n - 1;
+    while (i > 0) {
+        let j: usize = (next() % (i + 1) as u64) as usize;
+        let t: i64 = arr[i];
+        arr[i] = arr[j];
+        arr[j] = t;
+        i = i - 1;
+    }
+}

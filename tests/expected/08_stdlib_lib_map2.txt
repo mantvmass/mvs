@@ -1,0 +1,7 @@
+before remove, len = 3
+removed 2 -> 20
+after remove(2), len = 2
+contains(2) = 0
+re-inserted 2 -> 22
+final len = 3
+after clear, len = 0, is_empty = 1

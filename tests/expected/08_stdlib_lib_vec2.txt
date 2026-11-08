@@ -1,0 +1,8 @@
+last = 50
+as_ptr valid = 1
+remove(1) = 20
+swap_remove(0) = 10
+after swap_remove, len = 3
+after reverse, first = 40
+after truncate(2), len = 2
+after extend, len = 4

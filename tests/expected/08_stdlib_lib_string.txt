@@ -1,0 +1,22 @@
+hello, world
+len = 12
+as_ptr = 1
+char_at(0) = 104
+byte_at(0) = 104
+clone = hello, world
+contains(",") = 1
+index_of("world") = 7
+last_index_of("l") = 10
+starts_with("hello") = 1
+ends_with("world") = 1
+substring(0,5) = hello
+trim = hi
+trim_start = hi  
+trim_end =   hi
+to_upper = ABC
+to_lower = xyz
+repeat(3) = hahaha
+replace = a-b-c
+count("X") = 2
+truncate(3) = abc
+after clear, is_empty = 1

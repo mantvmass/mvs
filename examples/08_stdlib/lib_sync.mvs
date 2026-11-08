@@ -1,0 +1,11 @@
+// std/sync: RwLock coverage (single-threaded exercise of the API)
+import { io, sync } from "std";
+
+func main() -> void {
+    let rw: RwLock = RwLock::new();
+    rw.read_lock();
+    rw.read_unlock();
+    rw.write_lock();
+    rw.write_unlock();
+    io.out("RwLock ok");
+}

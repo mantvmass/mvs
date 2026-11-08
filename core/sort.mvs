@@ -1,0 +1,165 @@
+/*
+ * core/sort.mvs - in-place sorting and searching (no CRT, no OS; --nostd safe)
+ *
+ * Insertion sort: O(n^2) worst case, but it is in-place, stable, and the code
+ * is small. Good for short sequences (the kind bare-metal code typically
+ * sorts). For large n, a quicksort is faster; this trades speed for simplicity
+ * and zero auxiliary memory.
+ *
+ * All functions take a raw pointer and an element count. Comparison uses the
+ * built-in < and > operators, so these work on any numeric type.
+ *
+ *     import { sort } from "core";
+ *     let a: [i64; 5] = [3, 1, 4, 1, 5];
+ *     sort.i64s(a, 5);         // [1, 1, 3, 4, 5]
+ *     let idx: i64 = sort.bsearch_i64(a, 5, 4);  // 3
+ */
+
+// sort i64 array ascending (insertion sort)
+func i64s(arr: *i64, n: usize) -> void {
+    let i: usize = 1;
+    while (i < n) {
+        let key: i64 = arr[i];
+        let j: usize = i;
+        while (j > 0 && arr[j - 1] > key) {
+            arr[j] = arr[j - 1];
+            j = j - 1;
+        }
+        arr[j] = key;
+        i = i + 1;
+    }
+}
+
+// sort u64 array ascending
+func u64s(arr: *u64, n: usize) -> void {
+    let i: usize = 1;
+    while (i < n) {
+        let key: u64 = arr[i];
+        let j: usize = i;
+        while (j > 0 && arr[j - 1] > key) {
+            arr[j] = arr[j - 1];
+            j = j - 1;
+        }
+        arr[j] = key;
+        i = i + 1;
+    }
+}
+
+// sort i32 array ascending
+func i32s(arr: *i32, n: usize) -> void {
+    let i: usize = 1;
+    while (i < n) {
+        let key: i32 = arr[i];
+        let j: usize = i;
+        while (j > 0 && arr[j - 1] > key) {
+            arr[j] = arr[j - 1];
+            j = j - 1;
+        }
+        arr[j] = key;
+        i = i + 1;
+    }
+}
+
+// sort u8 array ascending (useful for byte buffers)
+func u8s(arr: *u8, n: usize) -> void {
+    let i: usize = 1;
+    while (i < n) {
+        let key: u8 = arr[i];
+        let j: usize = i;
+        while (j > 0 && arr[j - 1] > key) {
+            arr[j] = arr[j - 1];
+            j = j - 1;
+        }
+        arr[j] = key;
+        i = i + 1;
+    }
+}
+
+// reverse an i64 array in place
+func reverse_i64s(arr: *i64, n: usize) -> void {
+    if (n < 2) { return; }
+    let lo: usize = 0;
+    let hi: usize = n - 1;
+    while (lo < hi) {
+        let t: i64 = arr[lo];
+        arr[lo] = arr[hi];
+        arr[hi] = t;
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+}
+
+// reverse a u64 array in place
+func reverse_u64s(arr: *u64, n: usize) -> void {
+    if (n < 2) { return; }
+    let lo: usize = 0;
+    let hi: usize = n - 1;
+    while (lo < hi) {
+        let t: u64 = arr[lo];
+        arr[lo] = arr[hi];
+        arr[hi] = t;
+        lo = lo + 1;
+        hi = hi - 1;
+    }
+}
+
+// binary search a sorted i64 array; returns the index or -1
+func bsearch_i64(arr: *i64, n: usize, target: i64) -> i64 {
+    let lo: i64 = 0;
+    let hi: i64 = n as i64 - 1;
+    while (lo <= hi) {
+        let mid: i64 = lo + (hi - lo) / 2;
+        if (arr[mid as usize] == target) { return mid; }
+        if (arr[mid as usize] < target) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    return 0 - 1;
+}
+
+// binary search a sorted u64 array; returns the index or -1
+func bsearch_u64(arr: *u64, n: usize, target: u64) -> i64 {
+    let lo: i64 = 0;
+    let hi: i64 = n as i64 - 1;
+    while (lo <= hi) {
+        let mid: i64 = lo + (hi - lo) / 2;
+        if (arr[mid as usize] == target) { return mid; }
+        if (arr[mid as usize] < target) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    return 0 - 1;
+}
+
+// is the i64 array sorted ascending?
+func is_sorted_i64(arr: *i64, n: usize) -> bool {
+    if (n < 2) { return true; }
+    let i: usize = 1;
+    while (i < n) {
+        if (arr[i] < arr[i - 1]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// find the minimum value in an i64 array (returns 0 on empty)
+func min_i64(arr: *i64, n: usize) -> i64 {
+    if (n == 0) { return 0; }
+    let m: i64 = arr[0];
+    let i: usize = 1;
+    while (i < n) {
+        if (arr[i] < m) { m = arr[i]; }
+        i = i + 1;
+    }
+    return m;
+}
+
+// find the maximum value in an i64 array
+func max_i64(arr: *i64, n: usize) -> i64 {
+    if (n == 0) { return 0; }
+    let m: i64 = arr[0];
+    let i: usize = 1;
+    while (i < n) {
+        if (arr[i] > m) { m = arr[i]; }
+        i = i + 1;
+    }
+    return m;
+}

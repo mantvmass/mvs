@@ -1,0 +1,7 @@
+hypot(3,4) = 5.000000
+ln(1) = 0.000000
+to_radians(180) = 3.141593
+to_degrees(pi) = 180.000000
+is_nan(0/0) = 1
+is_inf(1/0) = 1
+is_finite(42) = 1

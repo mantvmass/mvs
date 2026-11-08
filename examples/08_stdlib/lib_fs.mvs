@@ -1,0 +1,39 @@
+// std/fs: filesystem operations (extended coverage)
+import { io, fs } from "std";
+
+func main() -> void {
+    let dir: str = "examples/08_stdlib/_test_fs_tmp";
+    fs.create_dir(dir);
+
+    let path: str = "examples/08_stdlib/_test_fs_tmp/test.txt";
+    fs.write(path, "hello\nworld");
+    io.out("exists = {}", fs.exists(path));
+    io.out("size = {}", fs.size(path));
+
+    let line: str = fs.read_line(path);
+    io.out("read_line = {}", line);
+
+    fs.append(path, "\nextra");
+    let all: str = fs.read(path);
+    io.out("after append, read = {}", all);
+
+    let copy_path: str = "examples/08_stdlib/_test_fs_tmp/copy.txt";
+    fs.copy(path, copy_path);
+    io.out("copy exists = {}", fs.exists(copy_path));
+
+    let move_path: str = "examples/08_stdlib/_test_fs_tmp/moved.txt";
+    fs.move(copy_path, move_path);
+    io.out("moved exists = {}", fs.exists(move_path));
+
+    let bdata: [u8; 4] = [65, 66, 67, 0];
+    let bpath: str = "examples/08_stdlib/_test_fs_tmp/bin.dat";
+    fs.write_bytes(bpath, bdata as *u8, 3);
+    let blen: usize = 0;
+    let _bp: *u8 = fs.read_bytes(bpath, &blen);
+    io.out("bytes len = {}", blen);
+
+    // cleanup
+    fs.delete(path);
+    fs.delete(move_path);
+    fs.delete(bpath);
+}

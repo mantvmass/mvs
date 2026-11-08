@@ -1,0 +1,56 @@
+/*
+ * core/hash.mvs - pure hash functions (no CRT, no OS; --nostd safe)
+ *
+ * FNV-1a and splitmix64, the same algorithms std/map uses internally,
+ * exposed for freestanding code that needs hashing without the full HashMap.
+ *
+ *     import { hash } from "core";
+ *     let h: u64 = hash.fnv1a(data, len);
+ *     let m: u64 = hash.splitmix64(seed);
+ */
+
+// FNV-1a over raw bytes (len bytes starting at data)
+func fnv1a(data: *u8, len: usize) -> u64 {
+    let h: u64 = 0xCBF29CE484222325;
+    let i: usize = 0;
+    while (i < len) {
+        h = (h ^ data[i]) * 0x100000001B3;
+        i = i + 1;
+    }
+    return h;
+}
+
+// FNV-1a over a NUL-terminated string
+func fnv1a_str(s: str) -> u64 {
+    let p: *u8 = s as *u8;
+    let h: u64 = 0xCBF29CE484222325;
+    let i: usize = 0;
+    while (p[i] != 0) {
+        h = (h ^ p[i]) * 0x100000001B3;
+        i = i + 1;
+    }
+    return h;
+}
+
+// splitmix64 finalizer: mix a u64 into a well-distributed hash
+func splitmix64(x: u64) -> u64 {
+    let v: u64 = x;
+    v = (v ^ (v >> 30)) * 0xBF58476D1CE4E5B9;
+    v = (v ^ (v >> 27)) * 0x94D049BB133111EB;
+    return v ^ (v >> 31);
+}
+
+// combine two hashes (for hashing structs field by field)
+func combine(a: u64, b: u64) -> u64 {
+    return a ^ (b + 0x9E3779B97F4A7C15 + (a << 6) + (a >> 2));
+}
+
+// hash a u64 (convenience: feeds the value through splitmix64)
+func hash_u64(v: u64) -> u64 {
+    return splitmix64(v);
+}
+
+// hash an i64
+func hash_i64(v: i64) -> u64 {
+    return splitmix64(v as u64);
+}

@@ -1,0 +1,3 @@
+stderr line with newline
+stdin handle valid = 1
+stderr handle valid = 1

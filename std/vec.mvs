@@ -9,9 +9,9 @@
  *     v.push(10);
  *     v.push(20);
  *     io.out("{} items, first = {}", v.len(), v.get(0));
- *     v.drop();                       // manual memory: free it yourself
+ *     v.drop();
  *
- * Out-of-range get/set/pop abort the program (like Rust's panics).
+ * Out-of-range get/set/pop/insert/remove abort the program (like Rust's panics).
  * The element size comes from scaled pointer arithmetic (data + 1 advances
  * exactly one element), so no sizeof operator is needed.
  */
@@ -20,6 +20,7 @@ extern func realloc(p: *u8, n: usize) -> *u8;
 extern func free(p: *u8) -> void;
 extern func printf(fmt: str) -> i32;
 extern func exit(code: i32) -> void;
+extern func memmove(dst: *u8, src: *u8, n: usize) -> *u8;
 
 struct Vec<T> {
     data: *T;
@@ -28,36 +29,45 @@ struct Vec<T> {
 }
 
 impl Vec<T> {
-    // an empty vector: let v: Vec<i64> = Vec<i64>::new();
     func new() -> Vec<T> {
+        return Vec<T> { data: 0, len: 0, cap: 0 };
+    }
+
+    // pre-allocate capacity for at least n elements
+    func with_capacity(n: usize) -> Vec<T> {
         let v: Vec<T> = Vec<T> { data: 0, len: 0, cap: 0 };
+        if (n > 0) {
+            v.data = realloc(0, n * v.esize()) as *T;
+            v.cap = n;
+        }
         return v;
     }
 
-    // number of elements
     func len(self: *Vec<T>) -> usize { return self.len; }
-
-    // is the vector empty?
     func is_empty(self: *Vec<T>) -> bool { return self.len == 0; }
 
-    // size of one element in bytes (pointer arithmetic scales by the element type)
     func esize(self: *Vec<T>) -> usize {
         return ((self.data + 1) as usize) - (self.data as usize);
     }
 
-    // append one element (grows the buffer by doubling; realloc(0) acts as malloc)
+    // raw pointer to the buffer
+    func as_ptr(self: *Vec<T>) -> *T { return self.data; }
+
+    // grow the buffer to hold at least need elements
+    func reserve(self: *Vec<T>, need: usize) -> void {
+        if (need <= self.cap) { return; }
+        let ncap: usize = self.cap * 2;
+        if (ncap < need) { ncap = need; }
+        self.data = realloc(self.data as *u8, ncap * self.esize()) as *T;
+        self.cap = ncap;
+    }
+
     func push(self: *Vec<T>, v: T) -> void {
-        if (self.len == self.cap) {
-            let ncap: usize = self.cap * 2;
-            if (ncap == 0) { ncap = 4; }
-            self.data = realloc(self.data as *u8, ncap * self.esize()) as *T;
-            self.cap = ncap;
-        }
+        self.reserve(self.len + 1);
         self.data[self.len] = v;
         self.len = self.len + 1;
     }
 
-    // element at index i; aborts when out of range
     func get(self: *Vec<T>, i: usize) -> T {
         if (i >= self.len) {
             printf("panic: Vec index out of range\n");
@@ -66,7 +76,6 @@ impl Vec<T> {
         return self.data[i];
     }
 
-    // overwrite the element at index i; aborts when out of range
     func set(self: *Vec<T>, i: usize, v: T) -> void {
         if (i >= self.len) {
             printf("panic: Vec index out of range\n");
@@ -75,7 +84,6 @@ impl Vec<T> {
         self.data[i] = v;
     }
 
-    // remove and return the last element; aborts when empty
     func pop(self: *Vec<T>) -> T {
         if (self.len == 0) {
             printf("panic: pop() on an empty Vec\n");
@@ -85,10 +93,114 @@ impl Vec<T> {
         return self.data[self.len];
     }
 
-    // drop all elements but keep the buffer
+    // the first element; aborts when empty
+    func first(self: *Vec<T>) -> T {
+        if (self.len == 0) {
+            printf("panic: first() on an empty Vec\n");
+            exit(1);
+        }
+        return self.data[0];
+    }
+
+    // the last element; aborts when empty
+    func last(self: *Vec<T>) -> T {
+        if (self.len == 0) {
+            printf("panic: last() on an empty Vec\n");
+            exit(1);
+        }
+        return self.data[self.len - 1];
+    }
+
+    // insert v at index i, shifting later elements right; aborts when i > len
+    func insert(self: *Vec<T>, i: usize, v: T) -> void {
+        if (i > self.len) {
+            printf("panic: Vec insert index out of range\n");
+            exit(1);
+        }
+        self.reserve(self.len + 1);
+        if (i < self.len) {
+            let es: usize = self.esize();
+            let dst: *u8 = (self.data + i + 1) as *u8;
+            let src: *u8 = (self.data + i) as *u8;
+            memmove(dst, src, (self.len - i) * es);
+        }
+        self.data[i] = v;
+        self.len = self.len + 1;
+    }
+
+    // remove and return the element at index i, shifting later elements left
+    func remove(self: *Vec<T>, i: usize) -> T {
+        if (i >= self.len) {
+            printf("panic: Vec remove index out of range\n");
+            exit(1);
+        }
+        let v: T = self.data[i];
+        self.len = self.len - 1;
+        if (i < self.len) {
+            let es: usize = self.esize();
+            let dst: *u8 = (self.data + i) as *u8;
+            let src: *u8 = (self.data + i + 1) as *u8;
+            memmove(dst, src, (self.len - i) * es);
+        }
+        return v;
+    }
+
+    // swap elements at indices i and j
+    func swap(self: *Vec<T>, i: usize, j: usize) -> void {
+        if (i >= self.len || j >= self.len) {
+            printf("panic: Vec swap index out of range\n");
+            exit(1);
+        }
+        let tmp: T = self.data[i];
+        self.data[i] = self.data[j];
+        self.data[j] = tmp;
+    }
+
+    // reverse the elements in place
+    func reverse(self: *Vec<T>) -> void {
+        if (self.len < 2) { return; }
+        let lo: usize = 0;
+        let hi: usize = self.len - 1;
+        while (lo < hi) {
+            let tmp: T = self.data[lo];
+            self.data[lo] = self.data[hi];
+            self.data[hi] = tmp;
+            lo = lo + 1;
+            hi = hi - 1;
+        }
+    }
+
+    // append all elements from another Vec
+    func extend(self: *Vec<T>, other: *Vec<T>) -> void {
+        let i: usize = 0;
+        while (i < other.len) {
+            self.push(other.data[i]);
+            i = i + 1;
+        }
+    }
+
+    // remove the element at i by swapping it with the last element; O(1)
+    // but does NOT preserve order. Aborts when i >= len.
+    func swap_remove(self: *Vec<T>, i: usize) -> T {
+        if (i >= self.len) {
+            printf("panic: Vec swap_remove index out of range\n");
+            exit(1);
+        }
+        let v: T = self.data[i];
+        self.len = self.len - 1;
+        if (i < self.len) {
+            self.data[i] = self.data[self.len];
+        }
+        return v;
+    }
+
+    // keep only the first n elements (no-op when already shorter)
+    func truncate(self: *Vec<T>, n: usize) -> void {
+        if (n < self.len) { self.len = n; }
+    }
+
     func clear(self: *Vec<T>) -> void { self.len = 0; }
 
-    // release the buffer (manual memory management, like everything in MVS)
     func drop(self: *Vec<T>) -> void {
         free(self.data as *u8);
         self.data = 0;

@@ -1,0 +1,17 @@
+// std/convert: parse numbers from strings and validate formats
+import { io, convert } from "std";
+
+func main() -> void {
+    io.out("parse_int(\"42\") = {}", convert.parse_int("42"));
+    io.out("parse_int(\"-7\") = {}", convert.parse_int("-7"));
+    io.out("parse_uint(\"100\") = {}", convert.parse_uint("100"));
+    io.out("parse_hex(\"FF\") = {}", convert.parse_hex("FF"));
+    io.out("parse_hex(\"1a\") = {}", convert.parse_hex("1a"));
+    io.out("parse_bin(\"1010\") = {}", convert.parse_bin("1010"));
+    io.out("parse_float(\"3.14\") = {}", convert.parse_float("3.14"));
+    io.out("parse_float(\"-1.5e2\") = {}", convert.parse_float("-1.5e2"));
+    io.out("is_int(\"123\") = {}", convert.is_int("123"));
+    io.out("is_int(\"abc\") = {}", convert.is_int("abc"));
+    io.out("is_float(\"3.14\") = {}", convert.is_float("3.14"));
+    io.out("is_float(\"nope\") = {}", convert.is_float("nope"));
+}

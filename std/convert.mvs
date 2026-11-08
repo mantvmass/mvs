@@ -1,0 +1,146 @@
+/*
+ * std/convert.mvs - parse numbers from strings, format numbers to strings
+ *
+ * Usage:
+ *     import { convert } from "std";
+ *     let n: i64 = convert.parse_int("42");          // 42
+ *     let f: f64 = convert.parse_float("3.14");      // 3.14
+ *     let h: i64 = convert.parse_hex("FF");          // 255
+ *     let b: i64 = convert.parse_bin("1010");        // 10
+ *
+ * All parse functions return 0 when the input is empty or invalid (there is no
+ * Result type overhead here; use the string content to distinguish "parsed 0"
+ * from "not a number" if you need to).
+ */
+
+extern func strlen(s: str) -> usize;
+
+// parse a decimal integer (with optional leading '-')
+func parse_int(s: str) -> i64 {
+    let p: *u8 = s;
+    let i: usize = 0;
+    let neg: bool = false;
+    if (p[i] == 45) { neg = true; i = i + 1; }
+    if (p[i] == 43) { i = i + 1; }
+    let n: i64 = 0;
+    while (p[i] >= 48 && p[i] <= 57) {
+        n = n * 10 + (p[i] - 48) as i64;
+        i = i + 1;
+    }
+    if (neg) { return 0 - n; }
+    return n;
+}
+
+// parse an unsigned integer
+func parse_uint(s: str) -> u64 {
+    let p: *u8 = s;
+    let i: usize = 0;
+    if (p[i] == 43) { i = i + 1; }
+    let n: u64 = 0;
+    while (p[i] >= 48 && p[i] <= 57) {
+        n = n * 10 + (p[i] - 48) as u64;
+        i = i + 1;
+    }
+    return n;
+}
+
+// parse a hex string (no "0x" prefix): "FF" -> 255
+func parse_hex(s: str) -> i64 {
+    let p: *u8 = s;
+    let i: usize = 0;
+    let n: i64 = 0;
+    while (p[i] != 0) {
+        let c: u8 = p[i];
+        if (c >= 48 && c <= 57)       { n = n * 16 + (c - 48) as i64; }
+        else if (c >= 65 && c <= 70)  { n = n * 16 + (c - 55) as i64; }
+        else if (c >= 97 && c <= 102) { n = n * 16 + (c - 87) as i64; }
+        else { return n; }
+        i = i + 1;
+    }
+    return n;
+}
+
+// parse a binary string (no "0b" prefix): "1010" -> 10
+func parse_bin(s: str) -> i64 {
+    let p: *u8 = s;
+    let i: usize = 0;
+    let n: i64 = 0;
+    while (p[i] == 48 || p[i] == 49) {
+        n = n * 2 + (p[i] - 48) as i64;
+        i = i + 1;
+    }
+    return n;
+}
+
+// parse a floating point number (handles optional sign, integer part, fractional
+// part, and 'e'/'E' exponent notation)
+func parse_float(s: str) -> f64 {
+    let p: *u8 = s;
+    let i: usize = 0;
+    let neg: bool = false;
+    if (p[i] == 45) { neg = true; i = i + 1; }
+    if (p[i] == 43) { i = i + 1; }
+    let n: f64 = 0.0;
+    while (p[i] >= 48 && p[i] <= 57) {
+        n = n * 10.0 + (p[i] - 48) as f64;
+        i = i + 1;
+    }
+    if (p[i] == 46) {
+        i = i + 1;
+        let frac: f64 = 0.1;
+        while (p[i] >= 48 && p[i] <= 57) {
+            n = n + (p[i] - 48) as f64 * frac;
+            frac = frac * 0.1;
+            i = i + 1;
+        }
+    }
+    if (p[i] == 101 || p[i] == 69) {
+        i = i + 1;
+        let eneg: bool = false;
+        if (p[i] == 45) { eneg = true; i = i + 1; }
+        if (p[i] == 43) { i = i + 1; }
+        let e: i64 = 0;
+        while (p[i] >= 48 && p[i] <= 57) {
+            e = e * 10 + (p[i] - 48) as i64;
+            i = i + 1;
+        }
+        let mul: f64 = 1.0;
+        let j: i64 = 0;
+        while (j < e) { mul = mul * 10.0; j = j + 1; }
+        if (eneg) { n = n / mul; }
+        else { n = n * mul; }
+    }
+    if (neg) { return 0.0 - n; }
+    return n;
+}
+
+// is the string a valid decimal integer (optional sign + digits)?
+func is_int(s: str) -> bool {
+    let p: *u8 = s;
+    let i: usize = 0;
+    if (p[i] == 45 || p[i] == 43) { i = i + 1; }
+    if (p[i] < 48 || p[i] > 57) { return false; }
+    while (p[i] >= 48 && p[i] <= 57) { i = i + 1; }
+    return p[i] == 0;
+}
+
+// is the string a valid float (integer part, optional '.', optional exponent)?
+func is_float(s: str) -> bool {
+    let p: *u8 = s;
+    let i: usize = 0;
+    if (p[i] == 45 || p[i] == 43) { i = i + 1; }
+    let digits: bool = false;
+    while (p[i] >= 48 && p[i] <= 57) { digits = true; i = i + 1; }
+    if (p[i] == 46) {
+        i = i + 1;
+        while (p[i] >= 48 && p[i] <= 57) { digits = true; i = i + 1; }
+    }
+    if (!digits) { return false; }
+    if (p[i] == 101 || p[i] == 69) {
+        i = i + 1;
+        if (p[i] == 45 || p[i] == 43) { i = i + 1; }
+        if (p[i] < 48 || p[i] > 57) { return false; }
+        while (p[i] >= 48 && p[i] <= 57) { i = i + 1; }
+    }
+    return p[i] == 0;
+}

@@ -1,0 +1,170 @@
+// comprehensive test of every core module under --nostd.
+// build: mvs.exe examples/09_no_std/use_core_all.mvs --nostd
+import { mem, cmp, ptr, cstr, bits } from "core";
+import { Slice } from "core/slice";
+import { fmt, hash, sort, math, volatile } from "core";
+import { Option, Some, None } from "core/option";
+import { Result, Ok, Err } from "core/result";
+
+// a tiny static arena
+let arena: [u8; 128] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+
+export func kmain() -> i64 {
+    let a: *u8 = arena;
+
+    // --- core/mem ---
+    mem.set(a, 65, 8);
+    if (a[0] != 65) { return 1; }
+    mem.zero(a, 4);
+    if (a[0] != 0 || a[4] != 65) { return 2; }
+
+    // --- core/cmp ---
+    if (cmp.max(3, 9) != 9) { return 3; }
+    if (cmp.min(3, 9) != 3) { return 4; }
+    if (cmp.clamp(15, 0, 10) != 10) { return 5; }
+
+    // --- core/ptr ---
+    ptr.write32(a, 305419896);
+    if (ptr.read32(a) != 305419896) { return 6; }
+    if (ptr.align_up(13, 8) != 16) { return 7; }
+
+    // --- core/cstr ---
+    if (cstr.len("hello") != 5) { return 8; }
+    if (!cstr.eq("abc", "abc")) { return 9; }
+
+    // --- core/bits ---
+    if (bits.popcount(255) != 8) { return 10; }
+    if (bits.ctz64(64) != 6) { return 11; }
+
+    // --- core/slice ---
+    mem.set(a, 7, 8);
+    let s: Slice<u8> = Slice<u8>::new(a, 8);
+    if (s.len() != 8 || s.get(0) != 7) { return 12; }
+
+    // --- core/option ---
+    let some: Option<i64> = Some(42);
+    let none: Option<i64> = None<i64>();
+    if (!some.is_some()) { return 13; }
+    if (!none.is_none()) { return 14; }
+    if (some.unwrap() != 42) { return 15; }
+    if (none.unwrap_or(99) != 99) { return 16; }
+
+    // --- core/result ---
+    let ok: Result<i64, i64> = Ok<i64, i64>(10);
+    let err: Result<i64, i64> = Err<i64, i64>(0 - 1);
+    if (!ok.is_ok()) { return 17; }
+    if (!err.is_err()) { return 18; }
+    if (ok.unwrap() != 10) { return 19; }
+    if (err.unwrap_or(0) != 0) { return 20; }
+    if (err.unwrap_err() != 0 - 1) { return 21; }
+
+    // --- core/fmt ---
+    let buf: [u8; 32] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];
+    let bp: *u8 = buf;
+    let n: usize = fmt.u64_to_dec(bp, 32, 12345);
+    if (n != 5) { return 22; }
+    if (!cstr.eq(bp, "12345")) { return 23; }
+
+    let n2: usize = fmt.i64_to_dec(bp, 32, 0 - 42);
+    if (n2 != 3) { return 24; }
+    if (!cstr.eq(bp, "-42")) { return 25; }
+
+    let n3: usize = fmt.u64_to_hex(bp, 32, 255);
+    if (n3 != 2) { return 26; }
+    if (!cstr.eq(bp, "ff")) { return 27; }
+
+    if (fmt.atoi("-123") != 0 - 123) { return 28; }
+    if (fmt.atou("456") != 456) { return 29; }
+    if (fmt.htou("ff") != 255) { return 30; }
+
+    let n4: usize = fmt.u64_to_hex_upper(bp, 32, 255);
+    if (n4 != 2) { return 52; }
+    if (!cstr.eq(bp, "FF")) { return 53; }
+
+    let n5: usize = fmt.u64_to_bin(bp, 32, 10);
+    if (n5 != 4) { return 54; }
+    if (!cstr.eq(bp, "1010")) { return 55; }
+
+    // --- core/math ---
+    if (math.abs(0 - 5) != 5) { return 31; }
+    if (math.sign(0 - 3) != 0 - 1) { return 32; }
+    if (math.gcd(48, 18) != 6) { return 33; }
+    if (math.lcm(4, 6) != 24) { return 34; }
+    if (math.ipow(2, 10) != 1024) { return 35; }
+    if (!math.is_power_of_two(64)) { return 36; }
+    if (math.is_power_of_two(65)) { return 37; }
+    if (math.next_power_of_two(5) != 8) { return 38; }
+    if (math.log2(256) != 8) { return 39; }
+    if (math.sat_add(0xFFFFFFFFFFFFFFFF, 1) != 0xFFFFFFFFFFFFFFFF) { return 40; }
+    if (math.sat_sub(3, 10) != 0) { return 41; }
+    if (math.div_safe(10, 0) != 0) { return 56; }
+    if (math.mod_pos(0 - 7, 3) != 2) { return 57; }
+    let ov: bool = false;
+    math.mul_check(3, 4, &ov);
+    if (ov) { return 58; }
+
+    // --- core/hash ---
+    if (hash.fnv1a_str("hello") == 0) { return 42; }
+    if (hash.splitmix64(42) == 0) { return 43; }
+    let h1: u64 = hash.hash_i64(1);
+    let h2: u64 = hash.hash_i64(2);
+    if (h1 == h2) { return 44; }
+    if (hash.hash_u64(100) == 0) { return 59; }
+    if (hash.combine(h1, h2) == 0) { return 60; }
+
+    // --- core/sort ---
+    let arr: [i64; 5] = [3, 1, 4, 1, 5];
+    let ap: *i64 = arr;
+    sort.i64s(ap, 5);
+    if (ap[0] != 1 || ap[1] != 1 || ap[2] != 3 || ap[3] != 4 || ap[4] != 5) { return 45; }
+    if (!sort.is_sorted_i64(ap, 5)) { return 46; }
+    if (sort.bsearch_i64(ap, 5, 4) != 3) { return 47; }
+    if (sort.bsearch_i64(ap, 5, 2) != 0 - 1) { return 48; }
+    if (sort.min_i64(ap, 5) != 1) { return 49; }
+    if (sort.max_i64(ap, 5) != 5) { return 50; }
+
+    sort.reverse_i64s(ap, 5);
+    if (ap[0] != 5 || ap[4] != 1) { return 51; }
+
+    let ua: [u64; 3] = [30, 10, 20];
+    let up: *u64 = ua;
+    sort.u64s(up, 3);
+    if (up[0] != 10 || up[1] != 20 || up[2] != 30) { return 61; }
+    if (sort.bsearch_u64(up, 3, 20) != 1) { return 62; }
+    sort.reverse_u64s(up, 3);
+    if (up[0] != 30) { return 63; }
+
+    let i32a: [i32; 3] = [5, 2, 8];
+    let i32p: *i32 = i32a;
+    sort.i32s(i32p, 3);
+    if (i32p[0] != 2) { return 64; }
+
+    let ba: [u8; 4] = [4, 2, 3, 1];
+    sort.u8s(ba as *u8, 4);
+    if (ba[0] != 1 || ba[3] != 4) { return 65; }
+
+    // --- core/volatile (use arena as a memory-mapped region) ---
+    volatile.write8(a, 42);
+    if (volatile.read8(a) != 42) { return 66; }
+    volatile.write16(a, 1000);
+    if (volatile.read16(a) != 1000) { return 67; }
+    volatile.write32(a, 123456);
+    if (volatile.read32(a) != 123456) { return 68; }
+    volatile.write64(a, 9999999);
+    if (volatile.read64(a) != 9999999) { return 69; }
+    volatile.write32(a, 0);
+    volatile.set_bits32(a, 0xFF);
+    if (volatile.read32(a) != 255) { return 70; }
+    volatile.clear_bits32(a, 0x0F);
+    if (volatile.read32(a) != 240) { return 71; }
+
+    return 0;
+}

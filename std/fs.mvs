@@ -1,38 +1,174 @@
 /*
- * std/fs.mvs - the fs (filesystem) module of the standard library, written in MVS
+ * std/fs.mvs - filesystem operations
  *
- * Uses foreign functions from the C runtime (fopen/fputs/fgets/fclose)
+ * Uses foreign functions from the C runtime.
  * Usage:
  *     import { fs } from "std";
  *     fs.write("out.txt", "hello");
  *     let s: str = fs.read("out.txt");
+ *     if (fs.exists("out.txt")) { fs.remove("out.txt"); }
  */
 
-extern func fopen(path: str, mode: str) -> *u8;     // returns FILE* (as a pointer)
+extern func fopen(path: str, mode: str) -> *u8;
 extern func fputs(s: str, stream: *u8) -> i32;
-extern func fgets(buf: *u8, n: i32, stream: *u8) -> *u8;
+extern func fread(buf: *u8, size: usize, count: usize, stream: *u8) -> usize;
+extern func fwrite(buf: *u8, size: usize, count: usize, stream: *u8) -> usize;
+extern func fseek(stream: *u8, offset: i64, whence: i32) -> i32;
+extern func ftell(stream: *u8) -> i64;
 extern func fclose(stream: *u8) -> i32;
 extern func malloc(n: usize) -> *u8;
+extern func realloc(p: *u8, n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func strlen(s: str) -> usize;
 
-// write a string to a file (overwrite); returns 0 on success, -1 if the file cannot be opened
+@compile(target_os = "windows")
+extern func _access(path: str, mode: i32) -> i32;
+@compile(target_os = "linux")
+extern func access(path: str, mode: i32) -> i32;
+
+@compile(target_os = "windows")
+extern func remove(path: str) -> i32;
+@compile(target_os = "linux")
+extern func remove(path: str) -> i32;
+
+@compile(target_os = "windows")
+extern func rename(old: str, new: str) -> i32;
+@compile(target_os = "linux")
+extern func rename(old: str, new: str) -> i32;
+
+@compile(target_os = "windows")
+extern func _mkdir(path: str) -> i32;
+@compile(target_os = "linux")
+extern func mkdir(path: str, mode: u32) -> i32;
+
+// write a string to a file (overwrite); returns 0 on success, -1 on failure
 func write(path: str, content: str) -> i32 {
     let f: *u8 = fopen(path, "w");
-    if (f == 0) {
-        return -1;
-    }
+    if (f == 0) { return 0 - 1; }
     fputs(content, f);
     fclose(f);
     return 0;
 }
 
-// read a file (first line, up to ~4095 bytes) as a string; returns "" if the file cannot be opened
+// append a string to a file; returns 0 on success, -1 on failure
+func append(path: str, content: str) -> i32 {
+    let f: *u8 = fopen(path, "a");
+    if (f == 0) { return 0 - 1; }
+    fputs(content, f);
+    fclose(f);
+    return 0;
+}
+
+// read the ENTIRE file as a string; returns "" when the file cannot be opened.
+// The returned pointer is malloc'd; the caller is responsible for freeing it
+// (or just letting it leak for short-lived programs).
 func read(path: str) -> str {
-    let f: *u8 = fopen(path, "r");
-    if (f == 0) {
-        return "";
-    }
-    let buf: *u8 = malloc(4096);
-    fgets(buf, 4096, f);
+    let f: *u8 = fopen(path, "rb");
+    if (f == 0) { return ""; }
+    fseek(f, 0, 2);
+    let size: usize = ftell(f) as usize;
+    fseek(f, 0, 0);
+    let buf: *u8 = malloc(size + 1);
+    fread(buf, 1, size, f);
+    buf[size] = 0;
     fclose(f);
     return buf;
 }
+
+// write raw bytes to a file; returns 0 on success
+func write_bytes(path: str, data: *u8, n: usize) -> i32 {
+    let f: *u8 = fopen(path, "wb");
+    if (f == 0) { return 0 - 1; }
+    fwrite(data, 1, n, f);
+    fclose(f);
+    return 0;
+}
+
+// read raw bytes; returns the pointer and sets *out_len to the size.
+// Returns 0 (null) on failure.
+func read_bytes(path: str, out_len: *usize) -> *u8 {
+    let f: *u8 = fopen(path, "rb");
+    if (f == 0) { *out_len = 0; return 0; }
+    fseek(f, 0, 2);
+    let size: usize = ftell(f) as usize;
+    fseek(f, 0, 0);
+    let buf: *u8 = malloc(size);
+    fread(buf, 1, size, f);
+    fclose(f);
+    *out_len = size;
+    return buf;
+}
+
+// does the file exist and is it readable?
+@compile(target_os = "windows")
+func exists(path: str) -> bool {
+    return _access(path, 0) == 0;
+}
+@compile(target_os = "linux")
+func exists(path: str) -> bool {
+    return access(path, 0) == 0;
+}
+
+// delete a file; returns 0 on success
+func delete(path: str) -> i32 {
+    return remove(path);
+}
+
+// rename or move a file; returns 0 on success
+func move(old_path: str, new_path: str) -> i32 {
+    return rename(old_path, new_path);
+}
+
+// create a directory; returns 0 on success
+@compile(target_os = "windows")
+func create_dir(path: str) -> i32 {
+    return _mkdir(path);
+}
+@compile(target_os = "linux")
+func create_dir(path: str) -> i32 {
+    return mkdir(path, 493);
+}
+
+// file size in bytes; returns -1 on failure
+func size(path: str) -> i64 {
+    let f: *u8 = fopen(path, "rb");
+    if (f == 0) { return 0 - 1; }
+    fseek(f, 0, 2);
+    let n: i64 = ftell(f);
+    fclose(f);
+    return n;
+}
+
+// copy a file (binary); returns 0 on success
+func copy(src: str, dst: str) -> i32 {
+    let fin: *u8 = fopen(src, "rb");
+    if (fin == 0) { return 0 - 1; }
+    let fout: *u8 = fopen(dst, "wb");
+    if (fout == 0) { fclose(fin); return 0 - 1; }
+    let buf: *u8 = malloc(4096);
+    let n: usize = fread(buf, 1, 4096, fin);
+    while (n > 0) {
+        fwrite(buf, 1, n, fout);
+        n = fread(buf, 1, 4096, fin);
+    }
+    free(buf);
+    fclose(fout);
+    fclose(fin);
+    return 0;
+}
+
+// read one line from a file (up to ~4095 bytes); returns "" on error or EOF.
+// The newline at the end is stripped.
+func read_line(path: str) -> str {
+    let f: *u8 = fopen(path, "r");
+    if (f == 0) { return ""; }
+    let buf: *u8 = malloc(4096);
+    let r: *u8 = fgets(buf, 4096, f);
+    fclose(f);
+    if (r == 0) { buf[0] = 0; return buf; }
+    let n: usize = strlen(buf);
+    if (n > 0 && buf[n - 1] == 10) { buf[n - 1] = 0; }
+    return buf;
+}
+
+extern func fgets(buf: *u8, n: i32, stream: *u8) -> *u8;

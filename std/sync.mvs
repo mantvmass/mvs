@@ -53,3 +53,59 @@ impl Mutex {
     func lock(self: *Mutex) -> void { pthread_mutex_lock(&self.a); }
     func unlock(self: *Mutex) -> void { pthread_mutex_unlock(&self.a); }
 }
+
+/*
+ * RwLock: a readers-writer lock (multiple readers XOR one writer).
+ *
+ * Windows: SRWLock supports both shared (read) and exclusive (write) modes,
+ * same 8-byte zero-initialized structure as used for Mutex.
+ * Linux: pthread_rwlock_t (56 bytes on glibc, fits in 64 bytes).
+ *
+ *     let rw: RwLock = RwLock::new();
+ *     rw.read_lock();    // shared
+ *     rw.read_unlock();
+ *     rw.write_lock();   // exclusive
+ *     rw.write_unlock();
+ */
+
+@compile(target_os = "windows")
+extern func AcquireSRWLockShared(p: *u64) -> void;
+@compile(target_os = "windows")
+extern func ReleaseSRWLockShared(p: *u64) -> void;
+
+@compile(target_os = "linux")
+extern func pthread_rwlock_init(p: *u64, attr: *u8) -> i32;
+@compile(target_os = "linux")
+extern func pthread_rwlock_rdlock(p: *u64) -> i32;
+@compile(target_os = "linux")
+extern func pthread_rwlock_wrlock(p: *u64) -> i32;
+@compile(target_os = "linux")
+extern func pthread_rwlock_unlock(p: *u64) -> i32;
+
+struct RwLock {
+    a: u64; b: u64; c: u64; d: u64;
+    e: u64; f: u64; g: u64; h: u64;
+}
+
+impl RwLock {
+    func new() -> RwLock {
+        let rw: RwLock = RwLock { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0 };
+        return rw;
+    }
+}
+
+@compile(target_os = "windows")
+impl RwLock {
+    func read_lock(self: *RwLock) -> void { AcquireSRWLockShared(&self.a); }
+    func read_unlock(self: *RwLock) -> void { ReleaseSRWLockShared(&self.a); }
+    func write_lock(self: *RwLock) -> void { AcquireSRWLockExclusive(&self.a); }
+    func write_unlock(self: *RwLock) -> void { ReleaseSRWLockExclusive(&self.a); }
+}
+
+@compile(target_os = "linux")
+impl RwLock {
+    func read_lock(self: *RwLock) -> void { pthread_rwlock_rdlock(&self.a); }
+    func read_unlock(self: *RwLock) -> void { pthread_rwlock_unlock(&self.a); }
+    func write_lock(self: *RwLock) -> void { pthread_rwlock_wrlock(&self.a); }
+    func write_unlock(self: *RwLock) -> void { pthread_rwlock_unlock(&self.a); }
+}

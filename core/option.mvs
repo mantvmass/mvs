@@ -1,0 +1,48 @@
+/*
+ * core/option.mvs - Option<T>: a value that may be absent (--nostd safe)
+ *
+ * The freestanding counterpart of std/option. Same enum, same match patterns,
+ * same Some/None constructors. The difference: unwrap() cannot print a message
+ * (no CRT), so a None unwrap spins forever (halts the core on bare metal).
+ * Prefer match, is_some, or unwrap_or in freestanding code.
+ *
+ *     import { Option, Some, None } from "core/option";
+ *
+ *     match (find(...)) {
+ *         Some(v) => { ... }
+ *         None    => { ... }
+ *     }
+ */
+
+enum Option<T> {
+    None,
+    Some(T),
+}
+
+impl Option<T> {
+    func is_some(self: *Option<T>) -> bool { return self.__tag == 1; }
+    func is_none(self: *Option<T>) -> bool { return self.__tag == 0; }
+
+    // the value; HALTS THE CORE when there is none (no way to report why
+    // in freestanding mode; prefer match or unwrap_or)
+    func unwrap(self: *Option<T>) -> T {
+        if (self.__tag == 0) { while (true) {} }
+        return self.v1_0;
+    }
+
+    // the value, or the fallback when there is none
+    func unwrap_or(self: *Option<T>, fallback: T) -> T {
+        if (self.__tag == 1) { return self.v1_0; }
+        return fallback;
+    }
+}
+
+// a present value (T inferred from the argument)
+func Some<T>(v: T) -> Option<T> {
+    return Option<T>::Some(v);
+}
+
+// an absent value (give T explicitly: None<i64>())
+func None<T>() -> Option<T> {
+    return Option<T>::None;
+}

@@ -5,23 +5,62 @@
  *     import { io } from "std";
  *     io.out("hello");                       // print a message (newline appended automatically)
  *     io.out("number = {}", 42);             // Rust-style interpolation with {}
- *     io.out("{} + {} = {}", a, b, a + b);   // multiple values
- *     io.out("hex = {:x}", 255);             // hexadecimal
  *     io.print("no newline");                // raw print, no newline
+ *     let line: str = io.read_line("prompt> ");  // read a whole line
+ *     io.eprint("error message");            // print to stderr
  *
  * Note: io.out is a compiler intrinsic (like Rust's println!, which is a macro),
  *       because it must parse {} and pick the print type at compile time.
  *       The other functions below are plain MVS calling printf via extern.
  */
 
-// foreign functions from the C runtime
 extern func printf(fmt: str) -> i32;
+extern func fprintf(stream: *u8, fmt: str) -> i32;
 extern func scanf(fmt: str) -> i32;
+extern func fgets(buf: *u8, n: i32, stream: *u8) -> *u8;
 extern func malloc(n: usize) -> *u8;
+extern func strlen(s: str) -> usize;
+
+@compile(target_os = "windows")
+extern func __acrt_iob_func(index: u32) -> *u8;
+@compile(target_os = "linux")
+extern func fdopen(fd: i32, mode: str) -> *u8;
+
+// get the stderr FILE* handle
+@compile(target_os = "windows")
+func get_stderr() -> *u8 { return __acrt_iob_func(2); }
+@compile(target_os = "linux")
+let stderr_handle: *u8 = 0;
+@compile(target_os = "linux")
+func get_stderr() -> *u8 {
+    if (stderr_handle == 0) { stderr_handle = fdopen(2, "w"); }
+    return stderr_handle;
+}
+
+// get the stdin FILE* handle
+@compile(target_os = "windows")
+func get_stdin() -> *u8 { return __acrt_iob_func(0); }
+@compile(target_os = "linux")
+let stdin_handle: *u8 = 0;
+@compile(target_os = "linux")
+func get_stdin() -> *u8 {
+    if (stdin_handle == 0) { stdin_handle = fdopen(0, "r"); }
+    return stdin_handle;
+}
 
 // print a string with no newline and no formatting
 func print(s: str) -> void {
     printf("%s", s);
+}
+
+// print to stderr (no newline)
+func eprint(s: str) -> void {
+    fprintf(get_stderr(), "%s", s);
+}
+
+// print to stderr with a newline
+func eprintln(s: str) -> void {
+    fprintf(get_stderr(), "%s\n", s);
 }
 
 // show a prompt, then read one word from the user (no whitespace); returns it as a string
@@ -29,5 +68,17 @@ func in(prompt: str) -> str {
     printf("%s", prompt);
     let buf: *u8 = malloc(256);
     scanf("%255s", buf);
+    return buf;
+}
+
+// show a prompt, read a whole line (up to ~4095 chars, newline stripped);
+// returns "" on EOF or error
+func read_line(prompt: str) -> str {
+    printf("%s", prompt);
+    let buf: *u8 = malloc(4096);
+    let r: *u8 = fgets(buf, 4096, get_stdin());
+    if (r == 0) { buf[0] = 0; return buf; }
+    let n: usize = strlen(buf);
+    if (n > 0 && buf[n - 1] == 10) { buf[n - 1] = 0; }
     return buf;
 }

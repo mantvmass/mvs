@@ -1,0 +1,12 @@
+// std/sort: generic sorting and checking
+import { io, sort } from "std";
+
+func main() -> void {
+    let a: [i64; 6] = [5, 3, 8, 1, 9, 2];
+    sort.ascending(a as *i64, 6);
+    io.out("ascending: {} {} {} {} {} {}", a[0], a[1], a[2], a[3], a[4], a[5]);
+    io.out("is_sorted = {}", sort.is_sorted(a as *i64, 6));
+
+    sort.descending(a as *i64, 6);
+    io.out("descending: {} {} {} {} {} {}", a[0], a[1], a[2], a[3], a[4], a[5]);
+}

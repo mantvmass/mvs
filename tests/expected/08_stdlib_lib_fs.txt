@@ -1,0 +1,11 @@
+exists = 1
+size = 12
+read_line = hello
+after append, read = hello
+
+world
+
+extra
+copy exists = 1
+moved exists = 1
+bytes len = 3

@@ -1,0 +1,129 @@
+/*
+ * core/math.mvs - pure integer math (no CRT, no OS; --nostd safe)
+ *
+ * Unlike std/math (which wraps libm for floating point), everything here is
+ * a plain MVS loop or expression. It works under --nostd for OS/bare-metal
+ * code that needs math without linking libm.
+ *
+ *     import { math } from "core";
+ *     let d: i64 = math.gcd(48, 18);         // 6
+ *     let p: bool = math.is_power_of_two(64); // true
+ */
+
+// absolute value
+func abs(x: i64) -> i64 {
+    if (x < 0) { return 0 - x; }
+    return x;
+}
+
+// sign of x: -1, 0, or 1
+func sign(x: i64) -> i64 {
+    if (x < 0) { return 0 - 1; }
+    if (x > 0) { return 1; }
+    return 0;
+}
+
+// greatest common divisor (Euclid), always non-negative
+func gcd(a: i64, b: i64) -> i64 {
+    let x: i64 = a;
+    let y: i64 = b;
+    if (x < 0) { x = 0 - x; }
+    if (y < 0) { y = 0 - y; }
+    while (y != 0) {
+        let t: i64 = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+}
+
+// least common multiple (0 when either input is 0)
+func lcm(a: i64, b: i64) -> i64 {
+    if (a == 0 || b == 0) { return 0; }
+    let g: i64 = gcd(a, b);
+    let va: i64 = a;
+    let vb: i64 = b;
+    if (va < 0) { va = 0 - va; }
+    if (vb < 0) { vb = 0 - vb; }
+    return (va / g) * vb;
+}
+
+// integer exponentiation by squaring (exp < 0 returns 0)
+func ipow(base: i64, exp: i64) -> i64 {
+    if (exp < 0) { return 0; }
+    let result: i64 = 1;
+    let b: i64 = base;
+    let e: i64 = exp;
+    while (e > 0) {
+        if ((e & 1) == 1) { result = result * b; }
+        b = b * b;
+        e = e >> 1;
+    }
+    return result;
+}
+
+// is x a power of two? (false for 0)
+func is_power_of_two(x: u64) -> bool {
+    return x != 0 && (x & (x - 1)) == 0;
+}
+
+// the smallest power of two >= x (1 for x <= 1)
+func next_power_of_two(x: u64) -> u64 {
+    if (x <= 1) { return 1; }
+    let v: u64 = x - 1;
+    v = v | (v >> 1);
+    v = v | (v >> 2);
+    v = v | (v >> 4);
+    v = v | (v >> 8);
+    v = v | (v >> 16);
+    v = v | (v >> 32);
+    return v + 1;
+}
+
+// floor(log2(x)); returns -1 for x == 0
+func log2(x: u64) -> i64 {
+    if (x == 0) { return 0 - 1; }
+    let n: i64 = 0;
+    let v: u64 = x;
+    while (v > 1) {
+        v = v >> 1;
+        n = n + 1;
+    }
+    return n;
+}
+
+// safe division that returns 0 when the divisor is 0
+func div_safe(a: i64, b: i64) -> i64 {
+    if (b == 0) { return 0; }
+    return a / b;
+}
+
+// modulo that always returns a non-negative result
+func mod_pos(a: i64, m: i64) -> i64 {
+    if (m == 0) { return 0; }
+    let r: i64 = a % m;
+    if (r < 0) { r = r + m; }
+    return r;
+}
+
+// unsigned saturating add: a + b clamped to max u64
+func sat_add(a: u64, b: u64) -> u64 {
+    let r: u64 = a + b;
+    if (r < a) { return 0xFFFFFFFFFFFFFFFF; }
+    return r;
+}
+
+// unsigned saturating sub: a - b clamped to 0
+func sat_sub(a: u64, b: u64) -> u64 {
+    if (b > a) { return 0; }
+    return a - b;
+}
+
+// unsigned multiply with overflow detection; returns the low 64 bits.
+// Sets *overflow to true if the full result does not fit in 64 bits.
+func mul_check(a: u64, b: u64, overflow: *bool) -> u64 {
+    if (a == 0 || b == 0) { *overflow = false; return 0; }
+    let r: u64 = a * b;
+    *overflow = r / a != b;
+    return r;
+}

@@ -28,8 +28,8 @@ qemu-user.
   helper. Threads + Mutex shipped. Send/Sync-style race checking would need an
   ownership system and is not planned.
 - Generic struct extensions: array type arguments, `impl Trait for Vec<T>`.
-- More collections: `HashSet`, ordered maps, `remove()` on `HashMap`
-  (needs tombstones).
+- More collections: `HashSet`, ordered maps. (`remove()` on `HashMap` shipped
+  with tombstone deletion.)
 - Arrays of arrays (`[[T; N]; M]`) and slice syntax (`&a[1..3]`).
 - Macros are deliberately not planned. Decorators plus intrinsics cover the
   current needs without a second language layer.
@@ -60,13 +60,15 @@ closing it. Undecided, so this stays a sketch.
 
 `core` is the pure-MVS package that stays importable under `--nostd`. Shipped:
 `mem`, `cmp`, `ptr`, `cstr`, `slice`, `bits`, `arch` (CPU instructions through
-the `asm()` intrinsic). Still open:
+the `asm()` intrinsic), `panic` (freestanding abort with replaceable handler),
+`fmt` (number-to-string formatting without CRT), `volatile` (MMIO access),
+`option` (freestanding Option<T>), `result` (freestanding Result<T, E>),
+`math` (pure integer math), `hash` (FNV-1a, splitmix64), `sort` (insertion
+sort, binary search, min/max). Still open:
 
-- `core/option`: needs a story for the name clash with `std/option`.
 - `core/cell`: interior mutability.
 - `core/sync::atomic`: needs compare-exchange intrinsics on top of `asm`.
 - `core/ffi`: C-compatible type aliases.
-- `core/panic`: needs a freestanding abort hook.
 
 ## Conditional compilation
 

@@ -1,0 +1,57 @@
+/*
+ * core/result.mvs - Result<T, E>: success or error (--nostd safe)
+ *
+ * The freestanding counterpart of std/result. Same enum, same match patterns,
+ * same Ok/Err constructors. unwrap/unwrap_err halt the core instead of
+ * printing a message (no CRT available).
+ *
+ *     import { Result, Ok, Err } from "core/result";
+ *
+ *     func parse(x: i64) -> Result<i64, i64> {
+ *         if (x < 0) { return Err<i64, i64>(0 - 1); }
+ *         return Ok<i64, i64>(x);
+ *     }
+ *
+ *     match (parse(v)) {
+ *         Ok(n)  => { ... }
+ *         Err(e) => { ... }
+ *     }
+ */
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+impl Result<T, E> {
+    func is_ok(self: *Result<T, E>) -> bool { return self.__tag == 0; }
+    func is_err(self: *Result<T, E>) -> bool { return self.__tag == 1; }
+
+    // the success value; HALTS THE CORE when this Result is an error
+    func unwrap(self: *Result<T, E>) -> T {
+        if (self.__tag != 0) { while (true) {} }
+        return self.v0_0;
+    }
+
+    // the error value; HALTS THE CORE when this Result is a success
+    func unwrap_err(self: *Result<T, E>) -> E {
+        if (self.__tag != 1) { while (true) {} }
+        return self.v1_0;
+    }
+
+    // the success value, or the fallback when this Result is an error
+    func unwrap_or(self: *Result<T, E>, fallback: T) -> T {
+        if (self.__tag == 0) { return self.v0_0; }
+        return fallback;
+    }
+}
+
+// a success (both types explicit: Ok<i64, i64>(v))
+func Ok<T, E>(v: T) -> Result<T, E> {
+    return Result<T, E>::Ok(v);
+}
+
+// an error (both types explicit: Err<i64, i64>(e))
+func Err<T, E>(e: E) -> Result<T, E> {
+    return Result<T, E>::Err(e);
+}

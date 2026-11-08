@@ -1,0 +1,12 @@
+// std/math: extended coverage (float utils, trig helpers)
+import { io, math } from "std";
+
+func main() -> void {
+    io.out("hypot(3,4) = {}", math.hypot(3.0, 4.0));
+    io.out("ln(1) = {}", math.ln(1.0));
+    io.out("to_radians(180) = {}", math.to_radians(180.0));
+    io.out("to_degrees(pi) = {}", math.to_degrees(3.141592653589793));
+    io.out("is_nan(0/0) = {}", math.is_nan(0.0 / 0.0));
+    io.out("is_inf(1/0) = {}", math.is_inf(1.0 / 0.0));
+    io.out("is_finite(42) = {}", math.is_finite(42.0));
+}

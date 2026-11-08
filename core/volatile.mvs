@@ -1,0 +1,45 @@
+/*
+ * core/volatile.mvs - volatile memory access for MMIO (--nostd safe)
+ *
+ * Hardware registers must be read/written exactly once per access, and the
+ * compiler must not optimize them away or reorder them. Since MVS currently
+ * performs no optimizations that would elide or reorder loads/stores, these
+ * are plain pointer dereferences today. They exist as documented entry points
+ * so that (a) code reads clearly as MMIO and (b) if the compiler ever gains
+ * a proper optimizer, these functions can be marked volatile without changing
+ * callers.
+ *
+ * Usage:
+ *     import { volatile } from "core";
+ *     volatile.write32(0xB8000 as *u8, 0x0F41);  // VGA: 'A' white-on-black
+ *     let status: u32 = volatile.read32(uart_base + 0x14);
+ */
+
+// read a value from a hardware register (the address must be valid for the width)
+func read8(addr: *u8) -> u8     { return *addr; }
+func read16(addr: *u8) -> u16   { return *(addr as *u16); }
+func read32(addr: *u8) -> u32   { return *(addr as *u32); }
+func read64(addr: *u8) -> u64   { return *(addr as *u64); }
+
+// write a value to a hardware register
+func write8(addr: *u8, v: u8) -> void     { *addr = v; }
+func write16(addr: *u8, v: u16) -> void   { *(addr as *u16) = v; }
+func write32(addr: *u8, v: u32) -> void   { *(addr as *u32) = v; }
+func write64(addr: *u8, v: u64) -> void   { *(addr as *u64) = v; }
+
+// set specific bits in a register (read-modify-write)
+func set_bits32(addr: *u8, mask: u32) -> void {
+    let v: u32 = read32(addr);
+    write32(addr, v | mask);
+}
+
+// clear specific bits
+func clear_bits32(addr: *u8, mask: u32) -> void {
+    let v: u32 = read32(addr);
+    write32(addr, v & ~mask);
+}
+
+// wait until a bit pattern appears in a register (spin-polls)
+func wait_bits32(addr: *u8, mask: u32, expected: u32) -> void {
+    while ((read32(addr) & mask) != expected) { }
+}

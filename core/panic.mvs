@@ -1,0 +1,62 @@
+/*
+ * core/panic.mvs - freestanding abort facility (no CRT, no OS; --nostd safe)
+ *
+ * When running bare-metal, there is no printf or stderr. A panic prints a
+ * message to VGA text memory (legacy x86) or simply halts. The halt loop
+ * is the guaranteed bottom: the CPU cannot proceed past it.
+ *
+ * Usage:
+ *     import { panic } from "core";
+ *     panic.abort();                      // halt immediately
+ *     panic.abort_msg("out of memory");   // write to VGA then halt
+ */
+import { arch } from "core";
+
+// a replaceable handler function pointer; an OS kernel can install its own
+// (serial dump, LED blink, register dump) early in boot with set_handler().
+func default_handler() -> void {}
+let handler: func() -> void = default_handler;
+
+// install a custom panic handler (called before the CPU halts)
+func set_handler(h: func() -> void) -> void {
+    handler = h;
+}
+
+const VGA_BASE: usize = 753664;
+
+// write a NUL-terminated message to the VGA text buffer starting at cell 0,
+// white on red (attribute 0x4F). Does nothing on AArch64 (no VGA).
+@compile(target_arch = "x86_64")
+func vga_write(msg: str) -> void {
+    let vga: *u8 = VGA_BASE as *u8;
+    let p: *u8 = msg;
+    let i: usize = 0;
+    while (p[i] != 0) {
+        vga[i * 2] = p[i];
+        vga[i * 2 + 1] = 79;
+        i = i + 1;
+    }
+}
+@compile(target_arch = "aarch64")
+func vga_write(msg: str) -> void { }
+
+// halt the CPU forever; calls the custom handler first, then parks
+func abort() -> void {
+    let h: func() -> void = handler;
+    h();
+    arch.park();
+}
+
+// write a panic message to VGA then halt
+func abort_msg(msg: str) -> void {
+    vga_write("PANIC: ");
+    let vga: *u8 = (VGA_BASE + 14) as *u8;
+    let p: *u8 = msg;
+    let i: usize = 0;
+    while (p[i] != 0) {
+        vga[i * 2] = p[i];
+        vga[i * 2 + 1] = 79;
+        i = i + 1;
+    }
+    arch.park();
+}

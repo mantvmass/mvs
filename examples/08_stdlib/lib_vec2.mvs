@@ -1,0 +1,33 @@
+// std/vec: extended Vec methods coverage
+import { io } from "std";
+import { Vec } from "std/vec";
+
+func main() -> void {
+    let v: Vec<i64> = Vec<i64>::with_capacity(8);
+    v.push(10); v.push(20); v.push(30); v.push(40); v.push(50);
+    v.reserve(16);
+
+    io.out("last = {}", v.last());
+    io.out("as_ptr valid = {}", v.as_ptr() != 0 as *i64);
+
+    let removed: i64 = v.remove(1);
+    io.out("remove(1) = {}", removed);
+
+    let sr: i64 = v.swap_remove(0);
+    io.out("swap_remove(0) = {}", sr);
+    io.out("after swap_remove, len = {}", v.len());
+
+    v.reverse();
+    io.out("after reverse, first = {}", v.get(0));
+
+    v.truncate(2);
+    io.out("after truncate(2), len = {}", v.len());
+
+    let v2: Vec<i64> = Vec<i64>::new();
+    v2.push(100); v2.push(200);
+    v.extend(&v2);
+    io.out("after extend, len = {}", v.len());
+
+    v.drop();
+    v2.drop();
+}

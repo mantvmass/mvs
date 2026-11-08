@@ -1,0 +1,15 @@
+// std/rand: extended coverage (coin, bytes, shuffle)
+import { io, rand } from "std";
+
+func main() -> void {
+    rand.seed(12345);
+    io.out("coin = {}", rand.coin());
+
+    let buf: [u8; 8] = [0,0,0,0,0,0,0,0];
+    rand.bytes(buf as *u8, 8);
+    io.out("bytes[0] = {}", buf[0]);
+
+    let arr: [i64; 5] = [1, 2, 3, 4, 5];
+    rand.shuffle_i64(arr as *i64, 5);
+    io.out("shuffled (sum still 15) = {}", arr[0] + arr[1] + arr[2] + arr[3] + arr[4]);
+}

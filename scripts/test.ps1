@@ -26,6 +26,10 @@ if (-not (Test-Path $mvs)) {
     exit 1
 }
 
+# force the compiler to use the local std/ and core/ so a global MVS_STD install doesn't interfere
+$env:MVS_STD = Join-Path $root "std"
+$env:MVS_CORE = Join-Path $root "core"
+
 $expectedDir = Join-Path $root "tests/expected"
 if (-not (Test-Path $expectedDir)) { New-Item -ItemType Directory $expectedDir | Out-Null }
 
@@ -75,6 +79,17 @@ $runPass = @(
     "examples/08_stdlib/lib_vec",
     "examples/08_stdlib/lib_map",
     "examples/08_stdlib/threads",
+    "examples/08_stdlib/lib_convert",
+    "examples/08_stdlib/lib_sort",
+    "examples/08_stdlib/lib_string",
+    "examples/08_stdlib/lib_fs",
+    "examples/08_stdlib/lib_vec2",
+    "examples/08_stdlib/lib_sync",
+    "examples/08_stdlib/lib_rand2",
+    "examples/08_stdlib/lib_math2",
+    "examples/08_stdlib/lib_io2",
+    "examples/08_stdlib/lib_map2",
+    "examples/08_stdlib/lib_test",
     "examples/08_stdlib/net_loop",
     "examples/10_json/main",
     "examples/11_vm/main",
@@ -94,6 +109,7 @@ $compileOnly = @(
     @{ src = "examples/09_no_std/bump_alloc.mvs";      flags = "--nostd" },
     @{ src = "examples/09_no_std/use_core.mvs";        flags = "--nostd" },
     @{ src = "examples/09_no_std/intrinsics.mvs";      flags = "--nostd" },
+    @{ src = "examples/09_no_std/use_core_all.mvs";   flags = "--nostd" },
     @{ src = "examples/08_stdlib/files.mvs";           flags = "" },
     @{ src = "examples/08_stdlib/net_client.mvs";      flags = "" },
     @{ src = "examples/08_stdlib/net_server.mvs";      flags = "" }
@@ -261,6 +277,17 @@ $elfTests = @(
     "examples/08_stdlib/lib_vec",
     "examples/08_stdlib/lib_map",
     "examples/08_stdlib/threads",
+    "examples/08_stdlib/lib_convert",
+    "examples/08_stdlib/lib_sort",
+    "examples/08_stdlib/lib_string",
+    "examples/08_stdlib/lib_fs",
+    "examples/08_stdlib/lib_vec2",
+    "examples/08_stdlib/lib_sync",
+    "examples/08_stdlib/lib_rand2",
+    "examples/08_stdlib/lib_math2",
+    "examples/08_stdlib/lib_io2",
+    "examples/08_stdlib/lib_map2",
+    "examples/08_stdlib/lib_test",
     "examples/08_stdlib/net_loop",
     "examples/10_json/main",
     "examples/11_vm/main",
