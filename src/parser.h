@@ -21,6 +21,7 @@ typedef struct {
     int    depth;       /* current recursion depth (guards against stack overflow from deeply nested input) */
     int    gt_debt;     /* 1 = a '>>' token was split; one '>' is still pending (closing nested generics) */
     int    trying;      /* 1 = speculative parse (Name<...> in an expression); errors stay silent */
+    int    pending_arr2; /* inner dimension from the most recent array type parse (0 = not nested) */
 } Parser;
 
 /* Parse a whole source file into an AST (ND_PROGRAM node). Returns NULL on a fatal error */

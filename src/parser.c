@@ -588,7 +588,9 @@ static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out
             /* keep parsing to recover sensibly */
         }
         advance(p); /* consume [ */
-        DataType elem = parse_type(p, ptr, type_name, sig_out, NULL); /* no arrays of arrays */
+        int inner_arr = 0;
+        DataType elem = parse_type(p, ptr, type_name, sig_out, &inner_arr);
+        p->pending_arr2 = inner_arr;
         expect(p, TK_SEMICOLON, "expected ';' between element type and length in [T; N]");
         int len = 0;
         if (check(p, TK_INT)) { len = (int)p->cur.int_val; advance(p); }
@@ -730,7 +732,10 @@ static Node *parse_var_decl(Parser *p) {
     n->name = strdup(p->cur.lexeme);
     advance(p);
     expect(p, TK_COLON, "expected ':' after variable name");
+    p->pending_arr2 = 0;
     n->type = parse_type(p, &n->ptr, &n->type_name, &n->sig, &n->arr);
+    n->arr2 = p->pending_arr2;
+    p->pending_arr2 = 0;
     if (match(p, TK_ASSIGN)) {
         n->operand = parse_expr(p); /* initial value */
     } else if (is_const) {
@@ -1323,7 +1328,10 @@ static Node *parse_struct(Parser *p) {
         f->name = strdup(p->cur.lexeme);
         advance(p);
         expect(p, TK_COLON, "expected ':' after field name");
+        p->pending_arr2 = 0;
         f->type = parse_type(p, &f->ptr, &f->type_name, &f->sig, &f->arr);
+        f->arr2 = p->pending_arr2;
+        p->pending_arr2 = 0;
         node_add_item(n, f);
         /* Field separator: ';' or ',' (flexible) */
         if (!match(p, TK_SEMICOLON)) match(p, TK_COMMA);

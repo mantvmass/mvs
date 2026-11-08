@@ -1,0 +1,36 @@
+import { io, thread } from "std";
+import { Scope } from "std/thread";
+import { atomic } from "core";
+
+func worker(arg: *u8) -> *u8 {
+    let counter: *i64 = arg as *i64;
+    let i: i64 = 0;
+    while (i < 1000) {
+        i = i + 1;
+    }
+    atomic.add(counter, 1);
+    return 0;
+}
+
+func main() -> void {
+    // test join_all with raw handles
+    let handles: [usize; 4];
+    let counter: i64 = 0;
+
+    let i: i64 = 0;
+    while (i < 4) {
+        handles[i] = thread.spawn(worker, &counter as *u8);
+        i = i + 1;
+    }
+    thread.join_all(&handles[0], 4);
+    io.out("join_all: {} threads done", atomic.load(&counter));
+
+    // test Scope
+    let counter2: i64 = 0;
+    let s: Scope = Scope::new();
+    s.spawn(worker, &counter2 as *u8);
+    s.spawn(worker, &counter2 as *u8);
+    s.spawn(worker, &counter2 as *u8);
+    s.join_all();
+    io.out("scope: {} threads done", atomic.load(&counter2));
+}

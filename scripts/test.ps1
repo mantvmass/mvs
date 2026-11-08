@@ -93,10 +93,14 @@ $runPass = @(
     "examples/08_stdlib/lib_test",
     "examples/08_stdlib/atomics",
     "examples/08_stdlib/channels",
+    "examples/08_stdlib/lib_set",
+    "examples/08_stdlib/scoped_join",
     "examples/08_stdlib/net_loop",
+    "examples/01_language/arrays2d",
     "examples/10_json/main",
     "examples/11_vm/main",
-    "examples/12_http/main"
+    "examples/12_http/main",
+    "examples/13_pipeline/main"
 )
 
 # fixed command-line arguments for examples that read argv
@@ -113,6 +117,7 @@ $compileOnly = @(
     @{ src = "examples/09_no_std/use_core.mvs";        flags = "--nostd" },
     @{ src = "examples/09_no_std/intrinsics.mvs";      flags = "--nostd" },
     @{ src = "examples/09_no_std/use_core_all.mvs";   flags = "--nostd" },
+    @{ src = "examples/09_no_std/use_cell.mvs";       flags = "--nostd" },
     @{ src = "examples/08_stdlib/files.mvs";           flags = "" },
     @{ src = "examples/08_stdlib/net_client.mvs";      flags = "" },
     @{ src = "examples/08_stdlib/net_server.mvs";      flags = "" }
@@ -294,10 +299,14 @@ $elfTests = @(
     "examples/08_stdlib/lib_test",
     "examples/08_stdlib/atomics",
     "examples/08_stdlib/channels",
+    "examples/08_stdlib/lib_set",
+    "examples/08_stdlib/scoped_join",
     "examples/08_stdlib/net_loop",
+    "examples/01_language/arrays2d",
     "examples/10_json/main",
     "examples/11_vm/main",
-    "examples/12_http/main"
+    "examples/12_http/main",
+    "examples/13_pipeline/main"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan
 foreach ($ex in $elfTests) {

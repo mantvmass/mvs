@@ -1,0 +1,16 @@
+insert 10: 1
+insert 20: 1
+insert 30: 1
+insert 10 again: 0
+len = 3
+contains 10 = 1
+contains 99 = 0
+remove 20 = 1
+remove 20 again = 0
+len after remove = 2
+len after clear = 0
+contains 10 after clear = 0
+str set len = 2
+has hello = 1
+has foo = 0
+done

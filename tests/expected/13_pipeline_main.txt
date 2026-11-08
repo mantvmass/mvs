@@ -1,0 +1,6 @@
+jobs sent: 20
+workers: 4
+processed (atomic): 20
+total: 4182528009
+expected: 4182528009
+PASS

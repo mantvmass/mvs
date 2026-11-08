@@ -141,6 +141,7 @@ void register_struct(Gen *g, Node *decl) {
         Field *fd = &s->fields[s->nfields++];
         fd->name = f->name; fd->type = f->type; fd->ptr = f->ptr; fd->sname = f->type_name;
         fd->arr = f->arr;   /* [T; N] field: element count */
+        fd->arr2 = f->arr2; /* [[T; N]; M] field: inner dimension */
         fd->sig = f->sig;   /* signature (only for function-pointer fields) */
         fd->offset = 0; fd->size = 0;
     }
@@ -181,6 +182,7 @@ void layout_structs(Gen *g) {
             int off = 0;
             for (int i = 0; i < s->nfields; i++) {
                 int fsize = type_size(g, s->fields[i].type, s->fields[i].ptr, s->fields[i].sname);
+                if (s->fields[i].arr2 > 0) fsize *= s->fields[i].arr2; /* [[T;N];M]: inner dim first */
                 if (s->fields[i].arr > 0) fsize *= s->fields[i].arr;   /* [T; N] field spans N elements */
                 s->fields[i].offset = off;
                 s->fields[i].size = fsize;
@@ -225,7 +227,7 @@ Node *expr_func_sig(Gen *g, Node *callee) {
 
 /* Infer the type/size/pointer depth of an expression (deep enough for struct/pointer) */
 ExprType type_of(Gen *g, Node *n) {
-    ExprType r = { TYPE_I64, 0, NULL, NULL, 0 };
+    ExprType r = { TYPE_I64, 0, NULL, NULL, 0, 0 };
     if (!n) return r;
     switch (n->kind) {
         case ND_INT: r.base = TYPE_I64; break;
@@ -236,7 +238,7 @@ ExprType type_of(Gen *g, Node *n) {
         case ND_STRUCT_LIT: r.base = TYPE_STRUCT; r.sname = n->name; break;
         case ND_IDENT: {
             Sym *s = find_var(g, n->name);
-            if (s) { r.base = s->type; r.ptr = s->ptr; r.sname = s->sname; r.sig = s->sig; r.arr = s->arr; }
+            if (s) { r.base = s->type; r.ptr = s->ptr; r.sname = s->sname; r.sig = s->sig; r.arr = s->arr; r.arr2 = s->arr2; }
             else {  /* not a variable: may be a "function name used as a value" -> function pointer */
                 Node *f = find_func(g, g->cur_ns ? g->cur_ns : "", n->name);
                 if (!f) f = find_func(g, "", n->name);
@@ -251,12 +253,12 @@ ExprType type_of(Gen *g, Node *n) {
                 break;
             }
             StructInfo *s = find_struct(g, bt.sname);
-            if (s) { Field *f = find_field(s, n->name); if (f) { r.base = f->type; r.ptr = f->ptr; r.sname = f->sname; r.sig = f->sig; r.arr = f->arr; } }
+            if (s) { Field *f = find_field(s, n->name); if (f) { r.base = f->type; r.ptr = f->ptr; r.sname = f->sname; r.sig = f->sig; r.arr = f->arr; r.arr2 = f->arr2; } }
             break;
         }
         case ND_INDEX: {
             ExprType bt = type_of(g, n->lhs);
-            if (bt.arr > 0)      { r = bt; r.arr = 0; }              /* array element */
+            if (bt.arr > 0)      { r = bt; r.arr = bt.arr2; r.arr2 = 0; }  /* array element (inner dim becomes arr for [[T;N];M]) */
             else if (bt.ptr > 0) { r = bt; r.ptr--; }                /* pointer indexing p[i] = *(p+i) */
             break;
         }
@@ -425,7 +427,7 @@ static void expand_struct(Gen *g, Node *base, const char *sname,
         Node *m = node_new(ND_MEMBER, base->line);  /* base.field node */
         m->operand = base; m->name = strdup(s->fields[i].name);
         if (s->fields[i].arr > 0) {
-            ExprType fe = { s->fields[i].type, s->fields[i].ptr, s->fields[i].sname, s->fields[i].sig, s->fields[i].arr };
+            ExprType fe = { s->fields[i].type, s->fields[i].ptr, s->fields[i].sname, s->fields[i].sig, s->fields[i].arr, 0 };
             expand_array(g, m, fe, out, len, cap, vals, nv, vals_cap, depth + 1); /* [T; N] field */
         } else if (s->fields[i].type == TYPE_STRUCT && s->fields[i].ptr == 0) {
             expand_struct(g, m, s->fields[i].sname, out, len, cap, vals, nv, vals_cap, depth + 1); /* nested */
@@ -460,7 +462,7 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
             spec[si] = '\0';
             if (*p == '\0') break;   /* unclosed '{': avoid reading past the buffer */
             Node *arg = (argi < call->nitems) ? call->items[argi] : NULL;
-            ExprType at = { TYPE_I64, 0, NULL, NULL, 0 };
+            ExprType at = { TYPE_I64, 0, NULL, NULL, 0, 0 };
             if (arg) at = type_of(g, arg);
             int is_hex = (strcmp(spec, "x") == 0 || strcmp(spec, ":x") == 0);
             if (arg && at.arr > 0 && !is_hex) {
@@ -520,9 +522,10 @@ void emit_line_directive(FILE *out, const Node *n, int gnu_as) {
 
 /* Add a local variable and assign its offset (slot rounded up to a multiple of 8 bytes); returns the offset.
  * arr > 0 reserves space for a whole [T; N] array (element size * length) */
-int add_local(Gen *g, const char *name, DataType type, int ptr, int arr, char *sname, Node *sig, int *frame) {
+int add_local(Gen *g, const char *name, DataType type, int ptr, int arr, int arr2, char *sname, Node *sig, int *frame) {
     if (g->nlocals >= MAX_SYM) { fprintf(stderr, "codegen error: too many local variables (max %d)\n", MAX_SYM); g->had_error = 1; return 0; }
     int size = type_size(g, type, ptr, sname);
+    if (arr2 > 0) size *= arr2;
     if (arr > 0) size *= arr;
     int slot = (size + 7) / 8 * 8;       /* reserve at least 8 bytes, in multiples of 8 */
     *frame += slot;
@@ -531,6 +534,7 @@ int add_local(Gen *g, const char *name, DataType type, int ptr, int arr, char *s
     s->type = type;
     s->ptr = ptr;
     s->arr = arr;
+    s->arr2 = arr2;
     s->sname = sname;
     s->size = size;
     s->is_global = 0;
@@ -647,7 +651,7 @@ void collect_locals(Gen *g, Node *n, int *frame) {
     switch (n->kind) {
         case ND_VAR_DECL:
             n->int_val = g->nlocals;   /* record this variable's slot index, used during gen + scoping */
-            add_local(g, n->name, n->type, n->ptr, n->arr, n->type_name, n->sig, frame);
+            add_local(g, n->name, n->type, n->ptr, n->arr, n->arr2, n->type_name, n->sig, frame);
             break;
         case ND_BLOCK:
             for (int i = 0; i < n->nitems; i++) collect_locals(g, n->items[i], frame);
@@ -669,7 +673,7 @@ void collect_locals(Gen *g, Node *n, int *frame) {
         case ND_SWITCH:
             /* Reserve a frame slot for the switch comparison value (offset stored in int_val)
              * so it need not stay on the temp stack; leaving the switch any way (break/continue) is safe */
-            n->int_val = add_local(g, "$switch", TYPE_I64, 0, 0, NULL, NULL, frame);
+            n->int_val = add_local(g, "$switch", TYPE_I64, 0, 0, 0, NULL, NULL, frame);
             for (int i = 0; i < n->nitems; i++) collect_locals(g, n->items[i], frame);
             break;
         case ND_CASE:
@@ -719,12 +723,12 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
          * pushed) needs a real address: reserve a temp slot to materialize into.
          * Literals that directly initialize a variable or are returned use that
          * destination instead and never consult this slot. */
-        n->int_val = add_local(g, "$lit", TYPE_STRUCT, 0, 0, n->name, NULL, frame);
+        n->int_val = add_local(g, "$lit", TYPE_STRUCT, 0, 0, 0, n->name, NULL, frame);
     }
     if (n->kind == ND_CALL) {
         ExprType rt = type_of(g, n);
         if ((rt.base == TYPE_STRUCT || is_blob16(rt.base, rt.ptr)) && rt.ptr == 0)
-            n->int_val = add_local(g, "$tmp", rt.base, 0, 0, rt.sname, NULL, frame); /* sized by the real type */
+            n->int_val = add_local(g, "$tmp", rt.base, 0, 0, 0, rt.sname, NULL, frame); /* sized by the real type */
         /* dyn parameters: a *Struct argument is wrapped into a fat-pointer blob at the call
          * site; reserve one 16-byte slot per argument that needs the conversion */
         Node *callee = n->operand;
@@ -745,7 +749,7 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
                 if (is_dyn(pp->type, pp->ptr)) {
                     ExprType at = type_of(g, n->items[i]);
                     if (!is_dyn(at.base, at.ptr))
-                        n->items[i]->int_val = add_local(g, "$dynarg", TYPE_DYN, 0, 0, NULL, NULL, frame);
+                        n->items[i]->int_val = add_local(g, "$dynarg", TYPE_DYN, 0, 0, 0, NULL, NULL, frame);
                 }
             }
         }
@@ -756,7 +760,7 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
             int fixed = fn->nitems - 2;
             int nextra = n->nitems - fixed;
             if (nextra > 0 && !n->lhs) {
-                int base = add_local(g, "$va", TYPE_DYN, 0, 2 * nextra, NULL, NULL, frame);
+                int base = add_local(g, "$va", TYPE_DYN, 0, 2 * nextra, 0, NULL, NULL, frame);
                 Node *holder = node_new(ND_FRAMEREF, n->line);
                 holder->int_val = base;
                 n->lhs = holder;
@@ -766,13 +770,13 @@ void collect_struct_temps(Gen *g, Node *n, int *frame) {
         /* 128-bit binary ops need scratch: result + both operands (3 x 16 bytes) */
         ExprType lt = type_of(g, n->lhs), rt2 = type_of(g, n->rhs);
         if (is_i128(lt.base, lt.ptr) || is_i128(rt2.base, rt2.ptr))
-            n->int_val = add_local(g, "$i128b", TYPE_I128, 0, 3, NULL, NULL, frame);
+            n->int_val = add_local(g, "$i128b", TYPE_I128, 0, 3, 0, NULL, NULL, frame);
     } else if (n->kind == ND_UNARY && (n->op == TK_MINUS || n->op == TK_TILDE)) {
         ExprType ot = type_of(g, n->operand);
         if (is_i128(ot.base, ot.ptr))
-            n->int_val = add_local(g, "$i128u", TYPE_I128, 0, 2, NULL, NULL, frame);
+            n->int_val = add_local(g, "$i128u", TYPE_I128, 0, 2, 0, NULL, NULL, frame);
     } else if (n->kind == ND_CAST && is_i128(n->type, n->ptr)) {
-        n->int_val = add_local(g, "$i128c", TYPE_I128, 0, 1, NULL, NULL, frame);
+        n->int_val = add_local(g, "$i128c", TYPE_I128, 0, 1, 0, NULL, NULL, frame);
     }
     collect_struct_temps(g, n->lhs, frame);   collect_struct_temps(g, n->rhs, frame);
     collect_struct_temps(g, n->operand, frame); collect_struct_temps(g, n->cond, frame);

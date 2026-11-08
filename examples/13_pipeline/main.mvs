@@ -1,0 +1,130 @@
+/*
+ * examples/13_pipeline/main.mvs
+ *
+ * A concurrent work pipeline: producer -> workers -> collector.
+ *
+ * Producer thread: sends N jobs (integers) through a channel, then poison pills.
+ * Worker threads:  each pulls jobs, computes factorial mod P, counts processed
+ *                  (atomically), sends results.
+ * Main thread:     collects all results and verifies the sum.
+ *
+ * Exercises: thread.Scope, channels (bounded MPMC), atomics, match.
+ */
+import { io, thread } from "std";
+import { Scope } from "std/thread";
+import { Channel } from "std/channel";
+import { atomic } from "core";
+
+struct PipeCtx {
+    jobs: *Channel;
+    results: *Channel;
+    processed: *i64;
+    n_jobs: i64;
+    n_workers: i64;
+}
+
+func factorial_mod(n: i64, m: i64) -> i64 {
+    let acc: i64 = 1;
+    let i: i64 = 2;
+    while (i <= n) {
+        acc = (acc * i) % m;
+        i = i + 1;
+    }
+    return acc;
+}
+
+func producer(arg: *u8) -> *u8 {
+    let ctx: *PipeCtx = arg as *PipeCtx;
+    let j: i64 = 1;
+    while (j <= ctx.n_jobs) {
+        ctx.jobs.send(j);
+        j = j + 1;
+    }
+    // poison pills to stop each worker
+    let p: i64 = 0;
+    while (p < ctx.n_workers) {
+        ctx.jobs.send(0);
+        p = p + 1;
+    }
+    return 0;
+}
+
+func worker(arg: *u8) -> *u8 {
+    let ctx: *PipeCtx = arg as *PipeCtx;
+    let modulus: i64 = 1000000007;
+    let running: bool = true;
+    while (running) {
+        let job: i64 = ctx.jobs.recv();
+        match (job) {
+            0 => { running = false; }
+            _ => {
+                let result: i64 = factorial_mod(job, modulus);
+                ctx.results.send(result);
+                atomic.add(ctx.processed, 1);
+            }
+        }
+    }
+    return 0;
+}
+
+func main() -> void {
+    let n_jobs: i64 = 20;
+    let n_workers: i64 = 4;
+
+    let jobs: Channel = Channel::new(8);
+    let results: Channel = Channel::new(8);
+    let processed: i64 = 0;
+
+    let ctx: PipeCtx = PipeCtx {
+        jobs: &jobs,
+        results: &results,
+        processed: &processed,
+        n_jobs: n_jobs,
+        n_workers: n_workers
+    };
+
+    let scope: Scope = Scope::new();
+
+    // spawn producer
+    scope.spawn(producer, &ctx as *u8);
+
+    // spawn workers
+    let w: i64 = 0;
+    while (w < n_workers) {
+        scope.spawn(worker, &ctx as *u8);
+        w = w + 1;
+    }
+
+    // collector: main thread receives n_jobs results
+    let total: i64 = 0;
+    let received: i64 = 0;
+    while (received < n_jobs) {
+        let r: i64 = results.recv();
+        total = total + r;
+        received = received + 1;
+    }
+
+    // wait for all threads
+    scope.join_all();
+
+    io.out("jobs sent: {}", n_jobs);
+    io.out("workers: {}", n_workers);
+    io.out("processed (atomic): {}", atomic.load(&processed));
+    io.out("total: {}", total);
+
+    // verify: sum of factorial(i) mod 1000000007 for i=1..20
+    let expected: i64 = 0;
+    let v: i64 = 1;
+    while (v <= n_jobs) {
+        expected = expected + factorial_mod(v, 1000000007);
+        v = v + 1;
+    }
+    io.out("expected: {}", expected);
+    match (total == expected) {
+        true => { io.out("PASS"); }
+        false => { io.out("FAIL"); }
+    }
+
+    jobs.drop();
+    results.drop();
+}

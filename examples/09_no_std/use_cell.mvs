@@ -1,0 +1,23 @@
+// core/cell: interior mutability wrapper
+// build: mvs.exe examples/09_no_std/use_cell.mvs --nostd
+import { Cell, swap } from "core/cell";
+
+export func kmain() -> i64 {
+    let c: Cell = Cell::new(42);
+    if (c.get() != 42) { return 1; }
+
+    c.set(99);
+    if (c.get() != 99) { return 2; }
+
+    let old: i64 = c.replace(7);
+    if (old != 99) { return 3; }
+    if (c.get() != 7) { return 4; }
+
+    let a: Cell = Cell::new(100);
+    let b: Cell = Cell::new(200);
+    swap(&a, &b);
+    if (a.get() != 200) { return 5; }
+    if (b.get() != 100) { return 6; }
+
+    return 0;
+}

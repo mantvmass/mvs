@@ -37,6 +37,7 @@ typedef struct {
     DataType type;
     int      ptr;       /* pointer depth (0 = not a pointer) */
     int      arr;       /* array length for [T; N] (0 = not an array); type/ptr describe the element */
+    int      arr2;      /* inner dimension for [[T; N]; M]: arr=M, arr2=N (0 = not nested) */
     char    *sname;     /* struct name when type == TYPE_STRUCT */
     int      size;      /* size of the variable in bytes (element size * length for arrays) */
     int      is_global; /* 1 = global variable, 0 = local variable on the stack */
@@ -60,6 +61,7 @@ typedef struct {
     DataType type;
     int      ptr;
     int      arr;       /* array length for [T; N] fields (0 = not an array) */
+    int      arr2;      /* inner dimension for [[T; N]; M] fields (0 = not nested) */
     char    *sname;     /* struct name when the field is a nested struct */
     int      offset;    /* offset of the field within the struct (bytes) */
     int      size;      /* size of the field (bytes; element size * length for arrays) */
@@ -83,6 +85,7 @@ typedef struct {
     char    *sname;
     Node    *sig;       /* signature when base == TYPE_FUNC (function pointer), else NULL */
     int      arr;       /* array length when the expression names a whole [T; N] (0 = not an array) */
+    int      arr2;      /* inner dimension for [[T; N]; M] expressions (0 = not nested) */
 } ExprType;
 
 /* All backend state gathered into one structure (the compiler processes one file at a time) */
@@ -195,7 +198,7 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
                      Node **vals, int *out_nv, int vals_cap);
 
 /* --- reserving variable space on the stack (frame layout) --- */
-int   add_local(Gen *g, const char *name, DataType type, int ptr, int arr, char *sname, Node *sig, int *frame);
+int   add_local(Gen *g, const char *name, DataType type, int ptr, int arr, int arr2, char *sname, Node *sig, int *frame);
 void  regplan_build(Gen *g, Node *fn, int npool);   /* choose the locals worth a register */
 int   regplan_index(Gen *g, const char *name);      /* slot for a name, or -1 */
 void  collect_locals(Gen *g, Node *n, int *frame);

@@ -57,3 +57,65 @@ func join(h: usize) -> void {
 func join(h: usize) -> void {
     pthread_join(h as u64, 0);
 }
+
+// join every handle in a contiguous array: thread.join_all(&handles[0], n)
+func join_all(handles: *usize, n: i64) -> void {
+    let i: i64 = 0;
+    while (i < n) {
+        join(*(handles + i));
+        i = i + 1;
+    }
+}
+
+/*
+ * Scope: a scoped thread group. Spawn threads into a scope, then join_all.
+ *
+ *     let s: Scope = Scope::new();
+ *     s.spawn(worker, &arg1 as *u8);
+ *     s.spawn(worker, &arg2 as *u8);
+ *     s.join_all();    // blocks until both finish, then frees
+ *
+ * Uses heap allocation for the handle array (grows as needed).
+ */
+
+extern func realloc(p: *u8, n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+
+struct Scope {
+    handles: *usize;
+    count: i64;
+    cap: i64;
+}
+
+impl Scope {
+    func new() -> Scope {
+        let s: Scope = Scope {
+            handles: realloc(0, 128) as *usize,
+            count: 0,
+            cap: 16
+        };
+        return s;
+    }
+
+    func spawn(self: *Scope, f: func(*u8) -> *u8, arg: *u8) -> void {
+        if (self.count >= self.cap) {
+            self.cap = self.cap * 2;
+            self.handles = realloc(self.handles as *u8, (self.cap * 8) as usize) as *usize;
+        }
+        let h: usize = spawn(f, arg);
+        *(self.handles + self.count) = h;
+        self.count = self.count + 1;
+    }
+
+    func join_all(self: *Scope) -> void {
+        let i: i64 = 0;
+        while (i < self.count) {
+            join(*(self.handles + i));
+            i = i + 1;
+        }
+        free(self.handles as *u8);
+        self.handles = 0;
+        self.count = 0;
+        self.cap = 0;
+    }
+}

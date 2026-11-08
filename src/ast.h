@@ -87,6 +87,7 @@ typedef struct Node {
     int      ptr;         /* pointer depth (0 = not a pointer, 1 = *T, 2 = **T) */
     int      arr;         /* array length for [T; N] declarations (0 = not an array);
                            * type/ptr/type_name then describe the ELEMENT type */
+    int      arr2;        /* inner dimension for [[T; N]; M]: arr=M, arr2=N (0 = not nested) */
     char    *type_name;   /* struct name when type == TYPE_STRUCT */
     struct Node *sig;     /* signature when type == TYPE_FUNC (function pointer):
                            *   an ND_FUNC-style node; items = parameters (ND_PARAM),

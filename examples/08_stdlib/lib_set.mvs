@@ -1,0 +1,40 @@
+import { io } from "std";
+import { HashSet } from "std/set";
+
+func main() -> void {
+    let s: HashSet<i64> = HashSet<i64>::new();
+
+    // insert returns true for new, false for duplicate
+    io.out("insert 10: {}", s.insert(10));
+    io.out("insert 20: {}", s.insert(20));
+    io.out("insert 30: {}", s.insert(30));
+    io.out("insert 10 again: {}", s.insert(10));
+
+    io.out("len = {}", s.len());
+    io.out("contains 10 = {}", s.contains(10));
+    io.out("contains 99 = {}", s.contains(99));
+
+    // remove
+    io.out("remove 20 = {}", s.remove(20));
+    io.out("remove 20 again = {}", s.remove(20));
+    io.out("len after remove = {}", s.len());
+
+    // clear
+    s.clear();
+    io.out("len after clear = {}", s.len());
+    io.out("contains 10 after clear = {}", s.contains(10));
+
+    s.drop();
+
+    // str set
+    let words: HashSet<str> = HashSet<str>::new();
+    words.insert("hello");
+    words.insert("world");
+    words.insert("hello");
+    io.out("str set len = {}", words.len());
+    io.out("has hello = {}", words.contains("hello"));
+    io.out("has foo = {}", words.contains("foo"));
+    words.drop();
+
+    io.out("done");
+}

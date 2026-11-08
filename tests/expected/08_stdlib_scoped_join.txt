@@ -1,0 +1,2 @@
+join_all: 4 threads done
+scope: 3 threads done

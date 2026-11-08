@@ -1,0 +1,50 @@
+/*
+ * core/cell.mvs - interior mutability for i64 values (--nostd safe)
+ *
+ *     import { cell } from "core";
+ *
+ *     let c: cell.Cell = cell.Cell::new(42);
+ *     c.set(99);
+ *     let v: i64 = c.get();          // 99
+ *     let old: i64 = c.replace(0);   // old = 99, c now holds 0
+ *
+ * Cell wraps a single i64 with get/set/replace/swap. In a language without
+ * a borrow checker every pointer is already mutable, so Cell is an API
+ * signal ("this value changes through shared references") and a home for
+ * replace and swap, which are easy to get wrong by hand.
+ *
+ * Freestanding: no OS, no CRT, no allocation.
+ */
+
+struct Cell {
+    val: i64;
+}
+
+impl Cell {
+    func new(v: i64) -> Cell {
+        let c: Cell = Cell { val: v };
+        return c;
+    }
+
+    func get(self: *Cell) -> i64 {
+        return self.val;
+    }
+
+    func set(self: *Cell, v: i64) -> void {
+        self.val = v;
+    }
+
+    // write v, return the old value
+    func replace(self: *Cell, v: i64) -> i64 {
+        let old: i64 = self.val;
+        self.val = v;
+        return old;
+    }
+}
+
+// swap the values of two cells
+func swap(a: *Cell, b: *Cell) -> void {
+    let tmp: i64 = a.val;
+    a.val = b.val;
+    b.val = tmp;
+}

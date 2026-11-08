@@ -1,0 +1,39 @@
+import { io } from "std";
+
+func main() -> void {
+    // 2D array: 3 rows of 4 columns
+    let grid: [[i64; 4]; 3];
+
+    // fill with row*10 + col
+    let r: i64 = 0;
+    while (r < 3) {
+        let c: i64 = 0;
+        while (c < 4) {
+            grid[r][c] = r * 10 + c;
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+
+    // read back
+    io.out("grid[0][0] = {}", grid[0][0]);
+    io.out("grid[0][3] = {}", grid[0][3]);
+    io.out("grid[1][2] = {}", grid[1][2]);
+    io.out("grid[2][3] = {}", grid[2][3]);
+
+    // pass a row pointer to a function
+    let sum: i64 = row_sum(&grid[1][0], 4);
+    io.out("row 1 sum = {}", sum);
+
+    io.out("done");
+}
+
+func row_sum(row: *i64, n: i64) -> i64 {
+    let s: i64 = 0;
+    let i: i64 = 0;
+    while (i < n) {
+        s = s + *(row + i);
+        i = i + 1;
+    }
+    return s;
+}

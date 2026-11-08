@@ -386,7 +386,7 @@ static void lower_store_struct(Gen *g, IRFunc *f, int dst_addr, Node *value) {
                     } else {
                         int val = lower_expr(g, f, el);
                         ExprType vt2 = type_of(g, el);
-                        ExprType dt2 = { fi->type, fi->ptr, fi->sname, fi->sig, 0 };
+                        ExprType dt2 = { fi->type, fi->ptr, fi->sname, fi->sig, 0, 0 };
                         val = coerce_num(g, f, val, vt2, dt2);
                         emit_store(g, f, elem_addr, val, fi->type, fi->ptr, fi->sname);
                     }
@@ -401,7 +401,7 @@ static void lower_store_struct(Gen *g, IRFunc *f, int dst_addr, Node *value) {
             } else {
                 int val = lower_expr(g, f, rhs);
                 ExprType vt = type_of(g, rhs);
-                ExprType dt = { fi->type, fi->ptr, fi->sname, fi->sig, 0 };
+                ExprType dt = { fi->type, fi->ptr, fi->sname, fi->sig, 0, 0 };
                 val = coerce_num(g, f, val, vt, dt);
                 emit_store(g, f, field_addr, val, fi->type, fi->ptr, fi->sname);
             }
@@ -538,7 +538,7 @@ static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
         ExprType at = type_of(g, n->items[i]);
         if (i + poff < sig->nitems) {
             Node *pp = sig->items[i + poff];
-            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 };
+            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0, 0 };
             if (is_dyn(pp->type, pp->ptr) && !is_dyn(at.base, at.ptr)) {
                 IRInst *io = emit_ioout(g, f, ir_vreg(f), n);
                 if (sret_addr != IR_NONE) io->a = sret_addr;
@@ -1063,7 +1063,7 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
                     } else {
                         int val = lower_expr(g, f, el);
                         ExprType vt2 = type_of(g, el);
-                        ExprType dt2 = { s->type, s->ptr, s->sname, s->sig, 0 };
+                        ExprType dt2 = { s->type, s->ptr, s->sname, s->sig, 0, 0 };
                         val = coerce_num(g, f, val, vt2, dt2);
                         int eaddr = emit_local_addr(f, eoff);
                         emit_store(g, f, eaddr, val, s->type, s->ptr, s->sname);
@@ -1080,7 +1080,7 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
             } else {
                 int val = lower_expr(g, f, n->operand);
                 ExprType vt = type_of(g, n->operand);
-                ExprType dt = { s->type, s->ptr, s->sname, s->sig, s->arr };
+                ExprType dt = { s->type, s->ptr, s->sname, s->sig, s->arr, 0 };
                 val = coerce_num(g, f, val, vt, dt);
                 store_var(g, f, s, val);
             }
@@ -1337,7 +1337,7 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
     int returns_struct = ((fn->type == TYPE_STRUCT || is_blob16(fn->type, fn->ptr)) &&
                           fn->ptr == 0 && !fn->is_extern);
     if (returns_struct)
-        g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, NULL, NULL, &frame);
+        g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, 0, NULL, NULL, &frame);
 
     g->cur_ret_float = is_float_type(fn->type) && fn->ptr == 0;
     g->cur_ret_f32c = fn->is_export && fn->type == TYPE_F32 && fn->ptr == 0;
@@ -1348,7 +1348,7 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
     int param_start = g->nlocals;
     for (int i = 0; i < fn->nitems; i++)
         add_local(g, fn->items[i]->name, fn->items[i]->type, fn->items[i]->ptr,
-                  0, fn->items[i]->type_name, fn->items[i]->sig, &frame);
+                  0, 0, fn->items[i]->type_name, fn->items[i]->sig, &frame);
 
     /* reserve all local variable slots */
     collect_locals(g, fn->body, &frame);
@@ -1400,7 +1400,7 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
                         } else {
                             int val = lower_expr(g, f, el);
                             ExprType vt2 = type_of(g, el);
-                            ExprType dt2 = { s->type, s->ptr, s->sname, s->sig, 0 };
+                            ExprType dt2 = { s->type, s->ptr, s->sname, s->sig, 0, 0 };
                             val = coerce_num(g, f, val, vt2, dt2);
                             emit_store(g, f, eaddr, val, s->type, s->ptr, s->sname);
                         }
@@ -1413,7 +1413,7 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
                 } else {
                     int val = lower_expr(g, f, d->operand);
                     ExprType vt = type_of(g, d->operand);
-                    ExprType dt = { s->type, s->ptr, s->sname, s->sig, s->arr };
+                    ExprType dt = { s->type, s->ptr, s->sname, s->sig, s->arr, 0 };
                     val = coerce_num(g, f, val, vt, dt);
                     store_var(g, f, s, val);
                 }

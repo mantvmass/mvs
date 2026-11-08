@@ -248,6 +248,7 @@ static void gen_addr(Gen *g, Node *n) {
             int esz;
             if (bt.arr > 0) {
                 esz = type_size(g, bt.base, bt.ptr, bt.sname);   /* element type = base/ptr/sname */
+                if (bt.arr2 > 0) esz *= bt.arr2;                 /* [[T;N];M]: stride = sizeof(T)*N */
                 gen_addr(g, n->lhs);                             /* rax = &a[0] */
             } else if (bt.ptr > 0) {
                 esz = type_size(g, bt.base, bt.ptr - 1, bt.sname);
@@ -493,7 +494,7 @@ static void gen_dyn_call(Gen *g, Node *n, int has_sret, const char *trait) {
         gen_expr(g, n->items[i]);
         if (i + 1 < msig->nitems) {                   /* msig items[0] = self */
             Node *pp = msig->items[i + 1];
-            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 }, at = type_of(g, n->items[i]);
+            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0, 0 }, at = type_of(g, n->items[i]);
             gen_coerce_num(g, at, pt);
         }
         push_tmp(g);
@@ -1249,6 +1250,7 @@ static void gen_expr(Gen *g, Node *n) {
             /* a[i] as an rvalue: compute the element address, then load the element */
             ExprType et = type_of(g, n);
             gen_addr(g, n);
+            if (et.arr > 0) break;                            /* inner array from [[T;N];M]: keep address */
             if (et.base == TYPE_STRUCT && et.ptr == 0) break; /* struct element: keep the address */
             if (is_blob16(et.base, et.ptr)) break;            /* i128/dyn element: address-as-value */
             gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
@@ -1301,7 +1303,7 @@ static void gen_stmt(Gen *g, Node *n) {
                             gen_store_struct(g, el);
                         } else {
                             gen_expr(g, el);
-                            ExprType vt2 = type_of(g, el), dt2 = { s->type, s->ptr, s->sname, s->sig, 0 };
+                            ExprType vt2 = type_of(g, el), dt2 = { s->type, s->ptr, s->sname, s->sig, 0, 0 };
                             gen_coerce_num(g, vt2, dt2);
                             fprintf(g->out, "    mov rcx, rax\n");
                             fprintf(g->out, "    lea rax, [rbp - %d]\n", eoff);
@@ -1328,7 +1330,7 @@ static void gen_stmt(Gen *g, Node *n) {
                     else                         gen_i128_store(g, rvt);
                 } else {
                     gen_expr(g, n->operand);     /* rax = value */
-                    ExprType vt = type_of(g, n->operand), dt = { s->type, s->ptr, s->sname, s->sig, s->arr };
+                    ExprType vt = type_of(g, n->operand), dt = { s->type, s->ptr, s->sname, s->sig, s->arr, 0 };
                     gen_coerce_num(g, vt, dt);   /* implicit int<->float conversion if needed */
                     gen_store_var(g, s);
                 }
@@ -1531,7 +1533,7 @@ static void gen_store_struct(Gen *g, Node *value) {
                         gen_store_struct(g, el);
                     } else {
                         gen_expr(g, el);
-                        ExprType vt2 = type_of(g, el), dt2 = { f->type, f->ptr, f->sname, f->sig, 0 };
+                        ExprType vt2 = type_of(g, el), dt2 = { f->type, f->ptr, f->sname, f->sig, 0, 0 };
                         gen_coerce_num(g, vt2, dt2);
                         fprintf(g->out, "    mov rcx, rax\n");
                         fprintf(g->out, "    mov rax, [rsp]\n");
@@ -1548,7 +1550,7 @@ static void gen_store_struct(Gen *g, Node *value) {
                 gen_store_struct(g, fi->rhs);
             } else {
                 gen_expr(g, fi->rhs);                   /* rax = value */
-                ExprType vt2 = type_of(g, fi->rhs), dt2 = { f->type, f->ptr, f->sname, f->sig, 0 };
+                ExprType vt2 = type_of(g, fi->rhs), dt2 = { f->type, f->ptr, f->sname, f->sig, 0, 0 };
                 gen_coerce_num(g, vt2, dt2);            /* int literal into a float field etc. */
                 fprintf(g->out, "    mov rcx, rax\n");
                 fprintf(g->out, "    mov rax, [rsp]\n"); /* base address of the destination */
@@ -1682,7 +1684,7 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
         gen_expr(g, n->items[i]);
         if (i + poff < sig->nitems) {     /* coerce int<->float to the parameter type (except varargs) */
             Node *pp = sig->items[i + poff];
-            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0 }, at = type_of(g, n->items[i]);
+            ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0, 0 }, at = type_of(g, n->items[i]);
             gen_coerce_num(g, at, pt);
             /* wrap a *Struct argument into a dyn blob when the parameter is a trait object */
             if (is_dyn(pp->type, pp->ptr) && !is_dyn(at.base, at.ptr) && n->items[i]->int_val) {
@@ -1823,7 +1825,7 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
      * for that pointer first; the real parameters shift one register position (rcx is taken) */
     int returns_struct = ((fn->type == TYPE_STRUCT || is_blob16(fn->type, fn->ptr)) && fn->ptr == 0 && !fn->is_extern);
     if (returns_struct)
-        g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, NULL, NULL, &frame);
+        g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, 0, NULL, NULL, &frame);
     /* a float-returning function must return via xmm0 (flag used at return time) */
     g->cur_ret_float = is_float_type(fn->type) && fn->ptr == 0;
     g->cur_ret_f32c = fn->is_export && fn->type == TYPE_F32 && fn->ptr == 0; /* export f32 -> return single to C */
@@ -1832,7 +1834,7 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
 
     int param_start = g->nlocals;
     for (int i = 0; i < fn->nitems; i++) /* parameters (never arrays: the parser rejects [T; N] params) */
-        add_local(g, fn->items[i]->name, fn->items[i]->type, fn->items[i]->ptr, 0, fn->items[i]->type_name, fn->items[i]->sig, &frame);
+        add_local(g, fn->items[i]->name, fn->items[i]->type, fn->items[i]->ptr, 0, 0, fn->items[i]->type_name, fn->items[i]->sig, &frame);
     collect_locals(g, fn->body, &frame);   /* locals inside the body */
     /* temp slots for structs returned from functions when used as rvalues.
      * Only the PARAMETERS are pre-visible; the pass opens/closes body scopes
@@ -1926,7 +1928,7 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
                             gen_store_struct(g, el);
                         } else {
                             gen_expr(g, el);
-                            ExprType vt2 = type_of(g, el), dt2 = { s->type, s->ptr, s->sname, s->sig, 0 };
+                            ExprType vt2 = type_of(g, el), dt2 = { s->type, s->ptr, s->sname, s->sig, 0, 0 };
                             gen_coerce_num(g, vt2, dt2);
                             fprintf(g->out, "    mov rcx, rax\n");
                             fprintf(g->out, "    lea rax, [rel %s]\n", gl);
@@ -2596,9 +2598,11 @@ int x86_64_sysv_generate(Node *program, FILE *out) {
             Sym *s = &g.globals[g.nglobals++];
             s->name = d->name; s->type = d->type; s->ptr = d->ptr; s->sname = d->type_name;
             s->arr = d->arr;
+            s->arr2 = d->arr2;
             s->sig = d->sig;   /* a global holding a function pointer keeps its signature */
             s->size = type_size(&g, d->type, d->ptr, d->type_name);
-            if (s->arr > 0) s->size *= s->arr;   /* [T; N] global spans N elements in .bss */
+            if (s->arr2 > 0) s->size *= s->arr2;
+            if (s->arr > 0) s->size *= s->arr;
             s->is_global = 1; s->offset = 0;
         }
     }
