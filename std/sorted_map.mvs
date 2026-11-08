@@ -1,0 +1,163 @@
+/*
+ * std/sorted_map.mvs - SortedMap<K, V>: ordered map backed by sorted arrays
+ *
+ * Usage:
+ *     import { io } from "std";
+ *     import { SortedMap } from "std/sorted_map";
+ *     import { Option } from "std/option";
+ *
+ *     let m: SortedMap<i64, str> = SortedMap<i64, str>::new();
+ *     m.insert(3, "three");
+ *     m.insert(1, "one");
+ *     m.insert(2, "two");
+ *     // keys are always in sorted order: 1, 2, 3
+ *     m.drop();
+ *
+ * Keys are kept in sorted order via binary search + shift on insert.
+ * Lookup is O(log n), insert/remove are O(n) (array shift).
+ * Key types: i64 and str (add a map_cmp overload for more).
+ */
+import { Option, Some, None } from "std/option";
+
+extern func realloc(p: *u8, n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func strcmp(a: str, b: str) -> i32;
+
+func map_cmp(a: i64, b: i64) -> i64 {
+    if (a < b) { return 0 - 1; }
+    if (a > b) { return 1; }
+    return 0;
+}
+
+func map_cmp(a: str, b: str) -> i64 {
+    return strcmp(a, b) as i64;
+}
+
+struct SortedMap<K, V> {
+    keys: *K;
+    vals: *V;
+    cap: usize;
+    len: usize;
+}
+
+impl SortedMap<K, V> {
+    func new() -> SortedMap<K, V> {
+        let m: SortedMap<K, V> = SortedMap<K, V> { keys: 0, vals: 0, cap: 0, len: 0 };
+        return m;
+    }
+
+    func len(self: *SortedMap<K, V>) -> usize { return self.len; }
+    func is_empty(self: *SortedMap<K, V>) -> bool { return self.len == 0; }
+
+    func ksize(self: *SortedMap<K, V>) -> usize {
+        return ((self.keys + 1) as usize) - (self.keys as usize);
+    }
+    func vsize(self: *SortedMap<K, V>) -> usize {
+        return ((self.vals + 1) as usize) - (self.vals as usize);
+    }
+
+    func grow(self: *SortedMap<K, V>) -> void {
+        let ncap: usize = self.cap * 2;
+        if (ncap == 0) { ncap = 8; }
+        self.keys = realloc(self.keys as *u8, ncap * self.ksize()) as *K;
+        self.vals = realloc(self.vals as *u8, ncap * self.vsize()) as *V;
+        self.cap = ncap;
+    }
+
+    // binary search: returns the index where k is found, or where it would be
+    // inserted. Sets *found = 1 if an exact match exists, 0 otherwise.
+    func bsearch(self: *SortedMap<K, V>, k: K, found: *i64) -> usize {
+        let lo: usize = 0;
+        let hi: usize = self.len;
+        while (lo < hi) {
+            let mid: usize = lo + (hi - lo) / 2;
+            let c: i64 = map_cmp(self.keys[mid], k);
+            if (c == 0) { *found = 1; return mid; }
+            if (c < 0) { lo = mid + 1; }
+            else { hi = mid; }
+        }
+        *found = 0;
+        return lo;
+    }
+
+    func insert(self: *SortedMap<K, V>, k: K, v: V) -> void {
+        let found: i64 = 0;
+        let pos: usize = self.bsearch(k, &found);
+        if (found == 1) {
+            self.vals[pos] = v;
+            return;
+        }
+        if (self.len >= self.cap) { self.grow(); }
+        // shift elements right to make room at pos
+        let i: usize = self.len;
+        while (i > pos) {
+            self.keys[i] = self.keys[i - 1];
+            self.vals[i] = self.vals[i - 1];
+            i = i - 1;
+        }
+        self.keys[pos] = k;
+        self.vals[pos] = v;
+        self.len = self.len + 1;
+    }
+
+    func get(self: *SortedMap<K, V>, k: K) -> Option<V> {
+        if (self.len == 0) { return None<V>(); }
+        let found: i64 = 0;
+        let pos: usize = self.bsearch(k, &found);
+        if (found == 1) { return Some(self.vals[pos]); }
+        return None<V>();
+    }
+
+    func contains(self: *SortedMap<K, V>, k: K) -> bool {
+        let r: Option<V> = self.get(k);
+        return r.is_some();
+    }
+
+    func remove(self: *SortedMap<K, V>, k: K) -> Option<V> {
+        if (self.len == 0) { return None<V>(); }
+        let found: i64 = 0;
+        let pos: usize = self.bsearch(k, &found);
+        if (found == 0) { return None<V>(); }
+        let v: V = self.vals[pos];
+        // shift elements left
+        let i: usize = pos;
+        while (i + 1 < self.len) {
+            self.keys[i] = self.keys[i + 1];
+            self.vals[i] = self.vals[i + 1];
+            i = i + 1;
+        }
+        self.len = self.len - 1;
+        return Some(v);
+    }
+
+    func min_key(self: *SortedMap<K, V>) -> Option<K> {
+        if (self.len == 0) { return None<K>(); }
+        return Some(self.keys[0]);
+    }
+
+    func max_key(self: *SortedMap<K, V>) -> Option<K> {
+        if (self.len == 0) { return None<K>(); }
+        return Some(self.keys[self.len - 1]);
+    }
+
+    func key_at(self: *SortedMap<K, V>, idx: usize) -> K {
+        return self.keys[idx];
+    }
+
+    func val_at(self: *SortedMap<K, V>, idx: usize) -> V {
+        return self.vals[idx];
+    }
+
+    func clear(self: *SortedMap<K, V>) -> void {
+        self.len = 0;
+    }
+
+    func drop(self: *SortedMap<K, V>) -> void {
+        if (self.cap > 0) {
+            free(self.keys as *u8);
+            free(self.vals as *u8);
+        }
+        self.keys = 0; self.vals = 0;
+        self.cap = 0; self.len = 0;
+    }
+}

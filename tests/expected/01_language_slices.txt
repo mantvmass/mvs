@@ -1,0 +1,9 @@
+p[0] = 20
+p[1] = 30
+p[2] = 40
+sum(a[1..4]) = 90
+slice len = 3
+slice[0] = 30
+slice[2] = 50
+full sum = 210
+done

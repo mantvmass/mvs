@@ -373,6 +373,13 @@ static void gen_binop_apply(Gen *g, TokenType op, int uns) {
     }
 }
 
+static void emit_overflow_trap(Gen *g, TokenType op, int uns) {
+    if (!mvs_overflow_checks || uns) return;
+    if (op != TK_PLUS && op != TK_MINUS && op != TK_STAR) return;
+    int l = new_label(g);
+    fprintf(g->out, "    jno .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+}
+
 /* ---------- 128-bit integer support ----------
  *
  * i128/u128 values use the address-as-value convention (like structs): an
@@ -792,6 +799,7 @@ static void gen_expr(Gen *g, Node *n) {
             else
                 uns = is_unsigned_val(lt.base, lt.ptr) || is_unsigned_val(rt.base, rt.ptr);
             gen_binop_apply(g, n->op, uns);
+            emit_overflow_trap(g, n->op, uns);
             /* ptr - ptr : divide the byte difference by the element size to get the element count */
             if (ptrdiff_scale > 1)
                 fprintf(g->out, "    cqo\n    mov rcx, %d\n    idiv rcx\n", ptrdiff_scale);
@@ -1010,6 +1018,7 @@ static void gen_expr(Gen *g, Node *n) {
                         }
                         fprintf(g->out, "    mov rax, %s\n", tr);
                         gen_binop_apply(g, bop, is_unsigned_val(tt.base, tt.ptr));
+                        emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr));
                         fprintf(g->out, "    mov %s, rax\n", tr);
                     }
                     break;                                        /* rax = the assigned value */
@@ -1048,6 +1057,7 @@ static void gen_expr(Gen *g, Node *n) {
                         if (sc != 1) fprintf(g->out, "    imul rcx, %d\n", sc);
                     }
                     gen_binop_apply(g, bop, is_unsigned_val(tt.base, tt.ptr)); /* rax = old op rhs */
+                    emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr));
                 }
                 fprintf(g->out, "    mov rcx, rax\n");            /* rcx = the computed result */
                 pop_tmp(g, "rax");                                /* rax = the stashed address */
@@ -1254,6 +1264,24 @@ static void gen_expr(Gen *g, Node *n) {
             if (et.base == TYPE_STRUCT && et.ptr == 0) break; /* struct element: keep the address */
             if (is_blob16(et.base, et.ptr)) break;            /* i128/dyn element: address-as-value */
             gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
+            break;
+        }
+        case ND_SLICE: {
+            ExprType bt = type_of(g, n->lhs);
+            int esz;
+            if (bt.arr > 0) {
+                esz = type_size(g, bt.base, bt.ptr, bt.sname);
+                if (bt.arr2 > 0) esz *= bt.arr2;
+                gen_addr(g, n->lhs);
+            } else {
+                esz = type_size(g, bt.base, bt.ptr - 1, bt.sname);
+                gen_expr(g, n->lhs);
+            }
+            push_tmp(g);
+            gen_expr(g, n->rhs);
+            if (esz != 1) fprintf(g->out, "    imul rax, %d\n", esz);
+            pop_tmp(g, "rcx");
+            fprintf(g->out, "    add rax, rcx\n");
             break;
         }
         case ND_ARRAY_LIT:

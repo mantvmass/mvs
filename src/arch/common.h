@@ -164,6 +164,11 @@ int   intern_string(Gen *g, const char *data, int len);
  * hosted and under --nostd with no runtime dependency at all. */
 extern int mvs_bounds_checks;
 
+/* Signed integer overflow checking for +, -, *. When set, a trap (ud2/brk)
+ * fires on signed overflow instead of silently wrapping. Off by default;
+ * enabled with `--check-overflow`. Unsigned types always wrap. */
+extern int mvs_overflow_checks;
+
 /* Debug line information (`-g`). When set, every statement is preceded by a
  * line directive naming the .mvs file and line, so the assembler builds a
  * DWARF line table and a debugger steps through MVS source, not assembly.

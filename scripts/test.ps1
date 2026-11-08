@@ -90,6 +90,7 @@ $runPass = @(
     "examples/08_stdlib/lib_math2",
     "examples/08_stdlib/lib_io2",
     "examples/08_stdlib/lib_map2",
+    "examples/08_stdlib/lib_sorted_map",
     "examples/08_stdlib/lib_test",
     "examples/08_stdlib/atomics",
     "examples/08_stdlib/channels",
@@ -97,10 +98,13 @@ $runPass = @(
     "examples/08_stdlib/scoped_join",
     "examples/08_stdlib/net_loop",
     "examples/01_language/arrays2d",
+    "examples/01_language/slices",
+    "examples/01_language/overflow",
     "examples/10_json/main",
     "examples/11_vm/main",
     "examples/12_http/main",
-    "examples/13_pipeline/main"
+    "examples/13_pipeline/main",
+    "examples/14_wordcount/main"
 )
 
 # fixed command-line arguments for examples that read argv
@@ -118,6 +122,7 @@ $compileOnly = @(
     @{ src = "examples/09_no_std/intrinsics.mvs";      flags = "--nostd" },
     @{ src = "examples/09_no_std/use_core_all.mvs";   flags = "--nostd" },
     @{ src = "examples/09_no_std/use_cell.mvs";       flags = "--nostd" },
+    @{ src = "examples/09_no_std/use_ffi.mvs";        flags = "--nostd" },
     @{ src = "examples/08_stdlib/files.mvs";           flags = "" },
     @{ src = "examples/08_stdlib/net_client.mvs";      flags = "" },
     @{ src = "examples/08_stdlib/net_server.mvs";      flags = "" }
@@ -296,6 +301,7 @@ $elfTests = @(
     "examples/08_stdlib/lib_math2",
     "examples/08_stdlib/lib_io2",
     "examples/08_stdlib/lib_map2",
+    "examples/08_stdlib/lib_sorted_map",
     "examples/08_stdlib/lib_test",
     "examples/08_stdlib/atomics",
     "examples/08_stdlib/channels",
@@ -303,10 +309,13 @@ $elfTests = @(
     "examples/08_stdlib/scoped_join",
     "examples/08_stdlib/net_loop",
     "examples/01_language/arrays2d",
+    "examples/01_language/slices",
+    "examples/01_language/overflow",
     "examples/10_json/main",
     "examples/11_vm/main",
     "examples/12_http/main",
-    "examples/13_pipeline/main"
+    "examples/13_pipeline/main",
+    "examples/14_wordcount/main"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan
 foreach ($ex in $elfTests) {

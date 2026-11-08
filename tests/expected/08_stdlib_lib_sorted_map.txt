@@ -1,0 +1,18 @@
+len = 5
+5: five
+10: ten
+20: twenty
+25: twenty-five
+30: thirty
+found 20 = twenty
+99 not found
+min = 5
+max = 30
+after overwrite 10 = TEN
+removed 20 = twenty
+len after remove = 4
+contains 5 = 1
+contains 20 = 0
+apple: 1
+banana: 2
+cherry: 3

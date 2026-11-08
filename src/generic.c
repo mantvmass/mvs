@@ -304,6 +304,12 @@ static CType infer(Node *prog, Node *n, Bind *map, int nmap) {
             else if (bt.ptr > 0) { r = bt; r.ptr--; }
             break;
         }
+        case ND_SLICE: {
+            CType bt = infer(prog, n->lhs, map, nmap);
+            if (bt.arr > 0)      { r = bt; r.arr = 0; r.arr2 = 0; r.ptr++; }
+            else if (bt.ptr > 0) { r = bt; }
+            break;
+        }
         case ND_ARRAY_LIT:
             if (n->nitems > 0) { r = infer(prog, n->items[0], map, nmap); r.arr = n->nitems; }
             break;
@@ -2969,6 +2975,32 @@ static void tc_check(TcCtx *c, Node *n) {
             diag_print(n->rhs->file, n->rhs->line, n->rhs->col, "error",
                        "index out of bounds: the length is %d but the index is %lld", bt.arr, n->rhs->int_val);
             (*c->errc)++;
+        }
+    } else if (n->kind == ND_SLICE) {
+        CType bt = infer(c->prog, n->lhs, c->map, *c->nmap);
+        CType st = infer(c->prog, n->rhs, c->map, *c->nmap);
+        CType et = infer(c->prog, n->operand, c->map, *c->nmap);
+        if (bt.arr == 0 && bt.ptr == 0) {
+            char bn[128]; tc_name(bt, bn);
+            diag_print(n->file, n->line, n->col, "error", "cannot slice a value of type '%s'", bn);
+            diag_help("slicing works on arrays ([T; N]) and pointers (*T)");
+            (*c->errc)++;
+        }
+        if (!tc_integer(st)) {
+            diag_print(n->rhs->file, n->rhs->line, n->rhs->col, "error",
+                       "slice start must be an integer"); (*c->errc)++;
+        }
+        if (!tc_integer(et)) {
+            diag_print(n->operand->file, n->operand->line, n->operand->col, "error",
+                       "slice end must be an integer"); (*c->errc)++;
+        }
+        if (bt.arr > 0 && n->rhs->kind == ND_INT && n->operand->kind == ND_INT) {
+            long long s = n->rhs->int_val, e = n->operand->int_val;
+            if (s < 0 || e < 0 || s > e || e > bt.arr) {
+                diag_print(n->file, n->line, n->col, "error",
+                           "slice [%lld..%lld] out of bounds for array of length %d", s, e, bt.arr);
+                (*c->errc)++;
+            }
         }
     } else if (n->kind == ND_UNARY && n->op == TK_STAR) {
         /* dereference `*x` only works on a pointer (avoids silent segfaults) */

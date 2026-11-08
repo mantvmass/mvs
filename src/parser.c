@@ -313,12 +313,22 @@ static Node *parse_postfix(Parser *p) {
             expect(p, TK_RPAREN, "expected ')' after arguments");
             node = call;
         } else if (match(p, TK_LBRACKET)) {
-            /* Indexing a[i]: works on arrays and on pointers (p[i] = *(p + i)) */
-            Node *ix = node_new(ND_INDEX, p->cur.line);
-            ix->lhs = node;
-            ix->rhs = parse_expr(p);
-            expect(p, TK_RBRACKET, "expected ']' after index");
-            node = ix;
+            /* Indexing a[i] or slicing a[start..end] */
+            Node *first = parse_expr(p);
+            if (match(p, TK_DOTDOT)) {
+                Node *sl = node_new(ND_SLICE, first->line);
+                sl->lhs = node;
+                sl->rhs = first;
+                sl->operand = parse_expr(p);
+                expect(p, TK_RBRACKET, "expected ']' after slice range");
+                node = sl;
+            } else {
+                Node *ix = node_new(ND_INDEX, p->cur.line);
+                ix->lhs = node;
+                ix->rhs = first;
+                expect(p, TK_RBRACKET, "expected ']' after index");
+                node = ix;
+            }
         } else if (check(p, TK_PLUSPLUS) || check(p, TK_MINUSMINUS)) {
             /* Postfix increment/decrement: i++ , i-- */
             Node *u = node_new(ND_UNARY, p->cur.line);

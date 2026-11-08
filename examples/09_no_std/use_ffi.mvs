@@ -1,0 +1,16 @@
+/*
+ * examples/09_no_std/use_ffi.mvs - test core/ffi constants (nostd, return code)
+ */
+import { ffi } from "core";
+
+func main() -> i32 {
+    if (ffi.c_int_size() != 4)     { return 1; }
+    if (ffi.c_pointer_size() != 8) { return 2; }
+    if (ffi.c_double_size() != 8)  { return 3; }
+    if (ffi.c_short_size() != 2)   { return 4; }
+    if (ffi.c_char_size() != 1)    { return 5; }
+    if (ffi.c_int_max() != 2147483647)  { return 6; }
+    if (ffi.c_int_min() != -2147483648) { return 7; }
+    if (ffi.c_uchar_max() != 255)       { return 8; }
+    return 0;
+}

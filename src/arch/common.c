@@ -262,6 +262,12 @@ ExprType type_of(Gen *g, Node *n) {
             else if (bt.ptr > 0) { r = bt; r.ptr--; }                /* pointer indexing p[i] = *(p+i) */
             break;
         }
+        case ND_SLICE: {
+            ExprType bt = type_of(g, n->lhs);
+            if (bt.arr > 0)      { r = bt; r.arr = 0; r.arr2 = 0; r.ptr++; }
+            else if (bt.ptr > 0) { r = bt; }
+            break;
+        }
         case ND_ARRAY_LIT:
             if (n->nitems > 0) { r = type_of(g, n->items[0]); r.arr = n->nitems; }
             break;
@@ -488,6 +494,9 @@ char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out
 
 /* runtime bounds checking (see common.h); main.c flips it off for --no-check */
 int mvs_bounds_checks = 1;
+
+/* signed overflow checking (see common.h); main.c turns it on for --check-overflow */
+int mvs_overflow_checks = 0;
 
 /* debug line information (see common.h); main.c turns it on for -g */
 int mvs_debug_lines = 0;

@@ -44,6 +44,8 @@ EXAMPLES = examples/demo \
            examples/01_language/shadow examples/01_language/compile_attr examples/01_language/hexbin \
            examples/01_language/enums examples/01_language/bounds \
            examples/01_language/match_phase3 examples/01_language/arrays2d \
+           examples/01_language/slices \
+           examples/01_language/overflow \
            examples/02_functions/generics examples/02_functions/overload examples/02_functions/recursion \
            examples/02_functions/funcptr examples/02_functions/defaults \
            examples/03_structs/structs examples/03_structs/methods examples/03_structs/pointers \
@@ -61,12 +63,14 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/lib_convert examples/08_stdlib/lib_sort examples/08_stdlib/lib_string \
            examples/08_stdlib/lib_fs examples/08_stdlib/lib_vec2 examples/08_stdlib/lib_sync \
            examples/08_stdlib/lib_rand2 examples/08_stdlib/lib_math2 examples/08_stdlib/lib_io2 \
-           examples/08_stdlib/lib_map2 examples/08_stdlib/lib_test \
+           examples/08_stdlib/lib_map2 examples/08_stdlib/lib_sorted_map \
+           examples/08_stdlib/lib_test \
            examples/08_stdlib/atomics examples/08_stdlib/channels \
            examples/08_stdlib/lib_set examples/08_stdlib/scoped_join \
            examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop \
            examples/10_json/main examples/11_vm/main examples/12_http/main \
-           examples/13_pipeline/main
+           examples/13_pipeline/main \
+           examples/14_wordcount/main
 
 # default target: build the compiler
 $(TARGET): $(SRC) $(HDR)
@@ -85,6 +89,7 @@ examples: $(TARGET)
 	./$(TARGET) examples/09_no_std/use_core.mvs --nostd
 	./$(TARGET) examples/09_no_std/intrinsics.mvs --nostd
 	./$(TARGET) examples/09_no_std/use_core_all.mvs --nostd
+	./$(TARGET) examples/09_no_std/use_cell.mvs --nostd
 	@echo "All examples compiled"
 
 # run the test suite: golden output tests + compile-only + compile-fail (expected errors)

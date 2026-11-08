@@ -1,0 +1,12 @@
+total words: 17
+unique words: 9
+  and: 1
+  brown: 1
+  dog: 2
+  fox: 3
+  jumps: 1
+  lazy: 1
+  over: 1
+  quick: 2
+  the: 5
+most frequent: the (5)

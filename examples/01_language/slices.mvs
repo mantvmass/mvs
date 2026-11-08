@@ -1,0 +1,38 @@
+import { io } from "std";
+import { Slice } from "core/slice";
+
+func sum_ptr(p: *i64, n: i64) -> i64 {
+    let total: i64 = 0;
+    let i: i64 = 0;
+    while (i < n) {
+        total = total + p[i];
+        i = i + 1;
+    }
+    return total;
+}
+
+func main() -> void {
+    let a: [i64; 6];
+    a[0] = 10; a[1] = 20; a[2] = 30; a[3] = 40; a[4] = 50; a[5] = 60;
+
+    // a[1..4] gives *i64 pointing to a[1], covering elements 20, 30, 40
+    let p: *i64 = a[1..4];
+    io.out("p[0] = {}", p[0]);
+    io.out("p[1] = {}", p[1]);
+    io.out("p[2] = {}", p[2]);
+
+    // pass slice pointer to a function
+    io.out("sum(a[1..4]) = {}", sum_ptr(a[1..4], 3));
+
+    // build a Slice from slice syntax
+    let s: Slice<i64> = Slice<i64>::new(a[2..5], 3);
+    io.out("slice len = {}", s.len());
+    io.out("slice[0] = {}", s.get(0));
+    io.out("slice[2] = {}", s.get(2));
+
+    // slice on the full array
+    let full: *i64 = a[0..6];
+    io.out("full sum = {}", sum_ptr(full, 6));
+
+    io.out("done");
+}

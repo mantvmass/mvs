@@ -1,0 +1,24 @@
+import { io } from "std";
+
+func main() -> i64 {
+    let a: i64 = 100;
+    let b: i64 = 200;
+    let c: i64 = a + b;
+    io.out("{}",  c);
+
+    let x: i64 = 10;
+    let y: i64 = 3;
+    let z: i64 = x * y;
+    io.out("{}", z);
+
+    let d: i64 = 50;
+    d += 25;
+    io.out("{}", d);
+
+    let u: u64 = 18446744073709551615;
+    let u2: u64 = u + 1;
+    io.out("{}", u2);
+
+    io.out("ok");
+    return 0;
+}

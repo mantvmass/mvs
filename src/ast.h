@@ -37,6 +37,7 @@ typedef enum {
     ND_ASSIGN,     /* assignment: uses op, lhs (target), rhs (value) */
     ND_CAST,       /* type cast x as T: uses operand (value), type/ptr/type_name (target type) */
     ND_INDEX,      /* indexing a[i]: lhs = base (array or pointer), rhs = index */
+    ND_SLICE,      /* slicing a[start..end]: lhs = base, rhs = start, operand = end; result is *T */
     ND_ARRAY_LIT,  /* array literal [e1, e2, ...]: items = elements (only valid as an initializer) */
     ND_FRAMEREF,   /* lvalue at a temp frame slot [rbp - int_val] (internal to codegen io.out) */
 

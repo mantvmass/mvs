@@ -158,6 +158,16 @@ func sum(p: *i32, n: i32) -> i32 { ... }
 sum(a, 5);                               // an array decays to a pointer at a call site
 ```
 
+**Nested arrays `[[T; N]; M]`** (arrays of arrays) are supported: the outer
+dimension is M, the inner dimension is N. Indexing once yields a `[T; N]`
+(kept as an address), indexing twice yields a scalar T:
+
+```txt
+let grid: [[i64; 4]; 3];
+grid[1][2] = 42;           // write one element
+let row_ptr: *i64 = &grid[1][0];  // pointer to a row
+```
+
 Rules: a `[T; N]` lives on the stack (globals in `.bss`); a constant index out of range is a
 compile error; the literal length must match N exactly; parameters cannot be arrays (pass `*T`,
 the array decays); whole-array assignment (`a = b`) is rejected, copy element by element.
@@ -177,6 +187,20 @@ so it works identically hosted and under `--nostd`; buffered output written
 before the trap may be lost. Pass `--no-check` to drop the checks (the index is
 then trusted, C-style). Pointer indexing (`p[i]`) is never checked: a pointer
 carries no length.
+
+**Slice syntax `a[start..end]`** returns a pointer `*T` to `a[start]`. The
+compiler checks constant bounds at compile time and rejects out-of-range slices.
+Works on both arrays and pointers:
+
+```txt
+let a: [i64; 5] = [10, 20, 30, 40, 50];
+let p: *i64 = a[1..4];        // p points to a[1]; covers a[1], a[2], a[3]
+```
+
+**Overflow checking.** Pass `--check-overflow` to trap on signed integer
+overflow in `+`, `-`, `*` (and `+=`, `-=`, `*=`). The trap is `ud2` on x86-64,
+`brk #1` on AArch64, exactly like bounds checks. Unsigned types always wrap.
+Off by default.
 
 A trailing comma is allowed in struct literals, array literals, and call
 argument lists, as in Rust:
@@ -595,7 +619,9 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `result` | `Result<T, E>`, a real enum: `Ok<T, E>(v)` / `Err<T, E>(e)` + `is_ok`/`is_err`/`unwrap`/`unwrap_err`/`unwrap_or` |
 | `vec` | `Vec<T>` growable array: `Vec<i64>::new()` + `push`/`get`/`set`/`pop`/`len`/`is_empty`/`clear`/`drop`; bounds-checked, any element type incl. structs |
 | `map` | `HashMap<K, V>` (open addressing, linear probing): `HashMap<str, i64>::new()` + `insert`/`get` (returns `Option<V>`)/`contains`/`len`/`is_empty`/`drop`; keys `i64` and `str` |
-| `thread` | OS threads: `spawn(f, arg)` / `join(h)` with `func(*u8) -> *u8` workers (CreateThread vs pthreads via `@compile`); see section 4.16 |
+| `set` | `HashSet<T>` (open addressing, linear probing): `HashSet<i64>::new()` + `insert`/`contains`/`remove`/`len`/`is_empty`/`clear`/`drop`; element types `i64` and `str` |
+| `sorted_map` | `SortedMap<K, V>` ordered map (sorted arrays, binary search): `SortedMap<i64, str>::new()` + `insert`/`get`/`contains`/`remove`/`min_key`/`max_key`/`key_at`/`val_at`/`len`/`drop`; keys always in sorted order |
+| `thread` | OS threads: `spawn(f, arg)` / `join(h)` / `join_all(handles, n)` with `func(*u8) -> *u8` workers; `Scope` for scoped thread lifetime (`import { Scope } from "std/thread"`); see section 4.16 |
 | `sync` | `Mutex` (`lock`/`unlock`), `RwLock` (`read_lock`/`write_lock`), `CondVar` (`wait`/`signal`/`broadcast`); all zero-init safe |
 | `channel` | `Channel`: bounded MPMC channel for i64 values (`new(cap)`/`send`/`recv`/`close`/`drop`) |
 | `http` | the HTTP/1.1 server framework, in axum's shape: `Router::new().route("/users/:id", get(show).post(create))`, `Listener::bind("0.0.0.0:8080")` + `serve(&l, &app)`, handlers that return `Text`/`Html`/`Json`/`Status`/`Redirect`, `Request` (`param`/`query`/`header`/`body`), plus a small client (`fetch`, `send_request`, `read_response`); see section 4.18 |
@@ -613,6 +639,8 @@ it stays importable under `--nostd` (freestanding):
 | `core/bits` | `rotl64`/`rotr64`, `popcount`, `clz64`/`ctz64`, `bswap64`, `bit` |
 | `core/arch` | CPU instructions: `pause`/`nop`, `fence`/`fence_load`/`fence_store`, `sync_instructions`, `timestamp()`, and the bare-metal `halt`/`wait_event`/`interrupts_off`/`interrupts_on`/`park` |
 | `core/atomic` | Lock-free atomics: `load`/`store`/`add`/`sub`/`cas`/`exchange` via the `__atomic` compiler intrinsic; sequential consistency, i64 only |
+| `core/cell` | Interior mutability: `Cell` struct wrapping an i64, `new`/`get`/`set`/`replace`; `swap(a, b)` swaps two cells |
+| `core/ffi` | C-compatible type sizes and limits: `c_int_size`, `c_long_size`, `c_int_max`, `c_long_max`, `c_size_max`, `c_ptr_size` (functions, not constants) |
 
 #### Inline assembly: the `asm` intrinsic
 
@@ -835,6 +863,17 @@ OS concurrency on every target, including under qemu-aarch64.
 `CondVar` (condition variable) completes the picture: `cv.wait(&m)` atomically
 releases the mutex and sleeps; `cv.signal()` wakes one waiter,
 `cv.broadcast()` wakes all. Windows CONDITION_VARIABLE, pthreads on Linux.
+
+**join_all and Scope.** `thread.join_all(handles_ptr, n)` blocks until n threads
+complete. `Scope` manages a dynamic set of thread handles with automatic join:
+
+```txt
+import { Scope } from "std/thread";
+let s: Scope = Scope::new();
+s.spawn(worker, &data as *u8);    // spawns grow an internal handle array
+s.spawn(worker2, &data2 as *u8);
+s.join_all();                      // blocks until all spawned threads complete, then frees handles
+```
 
 The honest difference from Rust: MVS has no ownership system, so there is NO
 compile-time Send/Sync data-race checking. Shared mutable data compiles fine

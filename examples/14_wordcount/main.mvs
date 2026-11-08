@@ -1,0 +1,96 @@
+/*
+ * Word frequency counter
+ *
+ * A dogfood program that exercises: strings, pointer arithmetic, SortedMap,
+ * Option/match, loops, and array slicing. The input is a hardcoded string
+ * so the output is deterministic for golden testing.
+ */
+import { io } from "std";
+import { SortedMap } from "std/sorted_map";
+import { Option, Some, None } from "std/option";
+import { Vec } from "std/vec";
+
+extern func realloc(p: *u8, n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func strcmp(a: str, b: str) -> i32;
+
+func is_alpha(c: u8) -> bool {
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+}
+
+func to_lower(c: u8) -> u8 {
+    if (c >= 65 && c <= 90) { return c + 32; }
+    return c;
+}
+
+// copy n bytes from src into a new null-terminated string, lowercased
+func make_word(src: *u8, n: usize) -> str {
+    let buf: *u8 = realloc(0, n + 1);
+    let i: usize = 0;
+    while (i < n) {
+        buf[i] = to_lower(src[i]);
+        i = i + 1;
+    }
+    buf[n] = 0;
+    return buf as str;
+}
+
+func main() -> i64 {
+    let text: str = "the quick brown fox jumps over the lazy dog the fox the dog and the quick fox";
+    let p: *u8 = text as *u8;
+
+    // extract words and count them with a SortedMap
+    let counts: SortedMap<str, i64> = SortedMap<str, i64>::new();
+    let words: Vec<str> = Vec<str>::new();
+
+    let i: usize = 0;
+    while (p[i] != 0) {
+        // skip non-alpha
+        while (p[i] != 0 && !is_alpha(p[i])) { i = i + 1; }
+        if (p[i] == 0) { break; }
+        // start of a word
+        let start: usize = i;
+        while (p[i] != 0 && is_alpha(p[i])) { i = i + 1; }
+        let word: str = make_word(p + start, i - start);
+        words.push(word);
+
+        match (counts.get(word)) {
+            Some(c) => { counts.insert(word, c + 1); }
+            None    => { counts.insert(word, 1); }
+        }
+    }
+
+    io.out("total words: {}", words.len());
+    io.out("unique words: {}", counts.len());
+
+    // print in sorted order (SortedMap guarantees this)
+    let j: usize = 0;
+    while (j < counts.len()) {
+        io.out("  {}: {}", counts.key_at(j), counts.val_at(j));
+        j = j + 1;
+    }
+
+    // find the most frequent word
+    let max_count: i64 = 0;
+    let max_word: str = "";
+    let k: usize = 0;
+    while (k < counts.len()) {
+        let c: i64 = counts.val_at(k);
+        if (c > max_count) {
+            max_count = c;
+            max_word = counts.key_at(k);
+        }
+        k = k + 1;
+    }
+    io.out("most frequent: {} ({})", max_word, max_count);
+
+    // cleanup
+    let w: usize = 0;
+    while (w < words.len()) {
+        free(words.get(w) as *u8);
+        w = w + 1;
+    }
+    words.drop();
+    counts.drop();
+    return 0;
+}

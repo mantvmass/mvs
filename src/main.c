@@ -655,6 +655,7 @@ int main(int argc, char **argv) {
             "  -c            emit an object file (.obj) only (for linking with C)\n"
             "  -O            peephole-optimize the generated assembly\n"
             "  --no-check    drop the runtime bounds checks on [T; N] indexing\n"
+            "  --check-overflow  trap on signed integer overflow (+, -, *)\n"
             "  -g            emit debug line info (step through .mvs in gdb/lldb; keeps the .asm)\n"
             "  --nostd       freestanding mode: no std/C runtime/OS (emits .obj) - for OS dev\n"
             "  --target <t>  target: win64 (default), elf64 (x86-64 Linux), arm64 (AArch64 Linux)\n"
@@ -679,6 +680,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--emit-obj") == 0) emit_obj = 1;
         else if (strcmp(argv[i], "-O") == 0) optimize = 1;
         else if (strcmp(argv[i], "--no-check") == 0) mvs_bounds_checks = 0;
+        else if (strcmp(argv[i], "--check-overflow") == 0) mvs_overflow_checks = 1;
         else if (strcmp(argv[i], "-g") == 0) { mvs_debug_lines = 1; keep = 1; }
         else if (strcmp(argv[i], "--ir") == 0) mvs_use_ir = 1;
         else if (strcmp(argv[i], "--test-main") == 0) test_main = 1;

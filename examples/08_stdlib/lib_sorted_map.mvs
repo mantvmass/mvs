@@ -1,0 +1,76 @@
+import { io } from "std";
+import { SortedMap } from "std/sorted_map";
+import { Option, Some, None } from "std/option";
+
+func main() -> i64 {
+    let m: SortedMap<i64, str> = SortedMap<i64, str>::new();
+
+    m.insert(30, "thirty");
+    m.insert(10, "ten");
+    m.insert(20, "twenty");
+    m.insert(5, "five");
+    m.insert(25, "twenty-five");
+
+    io.out("len = {}", m.len());
+
+    // keys are in sorted order
+    let i: usize = 0;
+    while (i < m.len()) {
+        io.out("{}: {}", m.key_at(i), m.val_at(i));
+        i = i + 1;
+    }
+
+    // lookup
+    match (m.get(20)) {
+        Some(v) => { io.out("found 20 = {}", v); }
+        None    => { io.out("not found"); }
+    }
+
+    match (m.get(99)) {
+        Some(v) => { io.out("found 99 = {}", v); }
+        None    => { io.out("99 not found"); }
+    }
+
+    // min/max
+    match (m.min_key()) {
+        Some(k) => { io.out("min = {}", k); }
+        None    => {}
+    }
+    match (m.max_key()) {
+        Some(k) => { io.out("max = {}", k); }
+        None    => {}
+    }
+
+    // overwrite
+    m.insert(10, "TEN");
+    match (m.get(10)) {
+        Some(v) => { io.out("after overwrite 10 = {}", v); }
+        None    => {}
+    }
+
+    // remove
+    match (m.remove(20)) {
+        Some(v) => { io.out("removed 20 = {}", v); }
+        None    => {}
+    }
+    io.out("len after remove = {}", m.len());
+
+    // contains
+    io.out("contains 5 = {}", m.contains(5));
+    io.out("contains 20 = {}", m.contains(20));
+
+    // string keys
+    let s: SortedMap<str, i64> = SortedMap<str, i64>::new();
+    s.insert("cherry", 3);
+    s.insert("apple", 1);
+    s.insert("banana", 2);
+    let j: usize = 0;
+    while (j < s.len()) {
+        io.out("{}: {}", s.key_at(j), s.val_at(j));
+        j = j + 1;
+    }
+
+    m.drop();
+    s.drop();
+    return 0;
+}

@@ -26,13 +26,16 @@ qemu-user.
   sub-patterns, value match on integers, match-as-expression. Phases 1-3 done.
 - Concurrency phase 2: shipped. `__atomic` compiler intrinsic (load, store, add,
   sub, cas, xchg on all three backends), `core/atomic` wrapper, `CondVar` in
-  `std/sync`, bounded MPMC `Channel` in `std/channel`. Scoped join helper is
-  still open. Send/Sync-style race checking would need an ownership system and
-  is not planned.
+  `std/sync`, bounded MPMC `Channel` in `std/channel`, `join_all` and `Scope`
+  in `std/thread`. Send/Sync-style race checking would need an ownership system
+  and is not planned.
 - Generic struct extensions: array type arguments, `impl Trait for Vec<T>`.
-- More collections: `HashSet`, ordered maps. (`remove()` on `HashMap` shipped
-  with tombstone deletion.)
-- Arrays of arrays (`[[T; N]; M]`) and slice syntax (`&a[1..3]`).
+- More collections: `HashSet` shipped (`std/set`). `SortedMap` shipped
+  (`std/sorted_map`): sorted-array ordered map with binary search, O(log n)
+  lookup, supports i64 and str keys.
+  (`remove()` on `HashMap` shipped with tombstone deletion.)
+- Arrays of arrays (`[[T; N]; M]`): shipped. Slice syntax (`a[1..3]`)
+  shipped, returns `*T` with compile-time bounds checks on constant indices.
 - Macros are deliberately not planned. Decorators plus intrinsics cover the
   current needs without a second language layer.
 
@@ -64,8 +67,8 @@ the `asm()` intrinsic), `panic` (freestanding abort with replaceable handler),
 `math` (pure integer math), `hash` (FNV-1a, splitmix64), `sort` (insertion
 sort, binary search, min/max). Still open:
 
-- `core/cell`: interior mutability.
-- `core/ffi`: C-compatible type aliases.
+- `core/cell`: shipped (interior mutability for i64).
+- `core/ffi`: shipped (C-compatible type size/limit functions).
 
 `core/atomic` shipped (load, store, add, sub, cas, exchange via the
 `__atomic` compiler intrinsic).
@@ -81,10 +84,12 @@ combinators, user-defined keys (feature flags).
 Roughly in order of value:
 
 - More real programs, and larger ones. Still the strongest bug finder we have:
-  `examples/10_json` and `examples/11_vm` each surfaced compiler gaps no test
-  suite caught.
+  `examples/10_json`, `examples/11_vm`, and `examples/13_pipeline` (concurrent
+  work pipeline using atomics, channels, scoped threads, and match) each
+  surfaced compiler gaps no test suite caught.
 - More differential pairs, ideally generated rather than hand-written.
-- Integer overflow checks behind a flag (trap on signed overflow).
+- Integer overflow checks: shipped (`--check-overflow` traps on signed
+  +, -, * overflow with `ud2`/`brk #1` on all three backends).
 - DWARF variable info. `-g` gives line info today; a debugger cannot print
   locals yet.
 - Performance: locals are register allocated and simple operands skip the temp

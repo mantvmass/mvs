@@ -303,9 +303,26 @@ static void gen_addr(Gen *g, Node *n) {
 /* Apply a binary op: lhs in x0, rhs in x1; result in x0 */
 static void gen_binop_apply(Gen *g, TokenType op, int uns) {
     switch (op) {
-        case TK_PLUS:  fprintf(g->out, "    add x0, x0, x1\n"); break;
-        case TK_MINUS: fprintf(g->out, "    sub x0, x0, x1\n"); break;
-        case TK_STAR:  fprintf(g->out, "    mul x0, x0, x1\n"); break;
+        case TK_PLUS:
+            fprintf(g->out, (mvs_overflow_checks && !uns) ? "    adds x0, x0, x1\n" : "    add x0, x0, x1\n");
+            break;
+        case TK_MINUS:
+            fprintf(g->out, (mvs_overflow_checks && !uns) ? "    subs x0, x0, x1\n" : "    sub x0, x0, x1\n");
+            break;
+        case TK_STAR:
+            if (mvs_overflow_checks && !uns) {
+                int l = new_label(g);
+                fprintf(g->out,
+                    "    smulh x9, x0, x1\n"
+                    "    mul x0, x0, x1\n"
+                    "    cmp x9, x0, asr #63\n"
+                    "    b.eq .Lok%d\n"
+                    "    brk #1\n"
+                    ".Lok%d:\n", l, l);
+            } else {
+                fprintf(g->out, "    mul x0, x0, x1\n");
+            }
+            break;
         case TK_AMP:   fprintf(g->out, "    and x0, x0, x1\n"); break;
         case TK_PIPE:  fprintf(g->out, "    orr x0, x0, x1\n"); break;
         case TK_CARET: fprintf(g->out, "    eor x0, x0, x1\n"); break;
@@ -342,6 +359,14 @@ static void gen_binop_apply(Gen *g, TokenType op, int uns) {
         default:
             fprintf(stderr, "codegen error: unknown binary operator\n");
             g->had_error = 1;
+    }
+}
+
+static void emit_overflow_trap(Gen *g, TokenType op, int uns) {
+    if (!mvs_overflow_checks || uns) return;
+    if (op == TK_PLUS || op == TK_MINUS) {
+        int l = new_label(g);
+        fprintf(g->out, "    b.vc .Lok%d\n    brk #1\n.Lok%d:\n", l, l);
     }
 }
 
@@ -700,9 +725,15 @@ static void gen_expr(Gen *g, Node *n) {
                 int sc = type_size(g, rt.base, rt.ptr - 1, rt.sname);
                 if (sc != 1) fprintf(g->out, "    mov x9, #%d\n    mul x0, x0, x9\n", sc);
             }
-            gen_binop_apply(g, n->op, is_unsigned_val(lt.base, lt.ptr) || is_unsigned_val(rt.base, rt.ptr) ?
-                            (n->op==TK_SHR || n->op==TK_SLASH || n->op==TK_PERCENT ?
-                             is_unsigned_val(lt.base, lt.ptr) : 1) : 0);
+            {
+                int uns;
+                if (n->op==TK_SHL || n->op==TK_SHR || n->op==TK_SLASH || n->op==TK_PERCENT)
+                    uns = is_unsigned_val(lt.base, lt.ptr);
+                else
+                    uns = is_unsigned_val(lt.base, lt.ptr) || is_unsigned_val(rt.base, rt.ptr);
+                gen_binop_apply(g, n->op, uns);
+                emit_overflow_trap(g, n->op, uns);
+            }
             break;
         }
         case ND_UNARY: {
@@ -887,6 +918,7 @@ static void gen_expr(Gen *g, Node *n) {
                         }
                         fprintf(g->out, "    mov x0, %s\n", tr);
                         gen_binop_apply(g, bop2, is_unsigned_val(tt.base, tt.ptr));
+                        emit_overflow_trap(g, bop2, is_unsigned_val(tt.base, tt.ptr));
                         fprintf(g->out, "    mov %s, x0\n", tr);
                     }
                     break;                                       /* x0 = the assigned value */
@@ -921,6 +953,7 @@ static void gen_expr(Gen *g, Node *n) {
                         if (sc != 1) fprintf(g->out, "    mov x9, #%d\n    mul x1, x1, x9\n", sc);
                     }
                     gen_binop_apply(g, bop, is_unsigned_val(tt.base, tt.ptr));
+                    emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr));
                 }
                 fprintf(g->out, "    mov x1, x0\n");
                 pop_tmp(g, "x0");                           /* the stashed address */
@@ -1129,6 +1162,24 @@ static void gen_expr(Gen *g, Node *n) {
             if (et.base == TYPE_STRUCT && et.ptr == 0) break;
             if (is_blob16(et.base, et.ptr)) break;
             gen_load_typed(g, et.ptr > 0 ? TYPE_USIZE : et.base, type_size(g, et.base, et.ptr, et.sname));
+            break;
+        }
+        case ND_SLICE: {
+            ExprType bt = type_of(g, n->lhs);
+            int esz;
+            if (bt.arr > 0) {
+                esz = type_size(g, bt.base, bt.ptr, bt.sname);
+                if (bt.arr2 > 0) esz *= bt.arr2;
+                gen_addr(g, n->lhs);
+            } else {
+                esz = type_size(g, bt.base, bt.ptr - 1, bt.sname);
+                gen_expr(g, n->lhs);
+            }
+            push_tmp(g);
+            gen_expr(g, n->rhs);
+            if (esz != 1) fprintf(g->out, "    mov x9, #%d\n    mul x0, x0, x9\n", esz);
+            pop_tmp(g, "x1");
+            fprintf(g->out, "    add x0, x0, x1\n");
             break;
         }
         case ND_ARRAY_LIT:

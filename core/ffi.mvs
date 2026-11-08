@@ -1,0 +1,38 @@
+/*
+ * core/ffi.mvs - C-compatible type sizes and limit helpers (--nostd safe)
+ *
+ *     import { ffi } from "core";
+ *     let sz: usize = ffi.c_int_size();
+ *
+ * MVS has no type aliases, so this module provides the sizes and
+ * limits of standard C types. Code that talks to C through
+ * extern/export can use these to match layouts.
+ *
+ * All values assume the target ABI (LP64/LLP64, 64-bit pointers).
+ */
+
+// sizes in bytes
+func c_char_size()      -> usize { return 1; }
+func c_short_size()     -> usize { return 2; }
+func c_int_size()       -> usize { return 4; }
+func c_long_size()      -> usize { return 8; }
+func c_longlong_size()  -> usize { return 8; }
+func c_float_size()     -> usize { return 4; }
+func c_double_size()    -> usize { return 8; }
+func c_pointer_size()   -> usize { return 8; }
+func c_size_t_size()    -> usize { return 8; }
+
+// alignment (matches size on all current targets)
+func c_int_align()      -> usize { return 4; }
+func c_long_align()     -> usize { return 8; }
+func c_pointer_align()  -> usize { return 8; }
+
+// limits
+func c_char_min()  -> i64 { return -128; }
+func c_char_max()  -> i64 { return 127; }
+func c_uchar_max() -> i64 { return 255; }
+func c_short_min() -> i64 { return -32768; }
+func c_short_max() -> i64 { return 32767; }
+func c_int_min()   -> i64 { return -2147483648; }
+func c_int_max()   -> i64 { return 2147483647; }
+func c_uint_max()  -> i64 { return 4294967295; }

@@ -300,6 +300,23 @@ static int lower_addr(Gen *g, IRFunc *f, Node *n) {
             ix->imm = esz;
             return dst;
         }
+        case ND_SLICE: {
+            ExprType bt = type_of(g, n->lhs);
+            int esz, base;
+            if (bt.arr > 0) {
+                esz = type_size(g, bt.base, bt.ptr, bt.sname);
+                if (bt.arr2 > 0) esz *= bt.arr2;
+                base = lower_addr(g, f, n->lhs);
+            } else {
+                esz = type_size(g, bt.base, bt.ptr - 1, bt.sname);
+                base = lower_expr(g, f, n->lhs);
+            }
+            int idx = lower_expr(g, f, n->rhs);
+            int sd = ir_vreg(f);
+            IRInst *si = ir_emit(f, IR_INDEX, sd, base, idx);
+            si->imm = esz;
+            return sd;
+        }
         case ND_STRUCT_LIT:
             if (n->int_val) {
                 int addr = emit_local_addr(f, (int)n->int_val);
@@ -993,6 +1010,9 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
             if (is_blob16(et.base, et.ptr)) return addr;
             return emit_load(g, f, addr, et.base, et.ptr, et.sname);
         }
+
+        case ND_SLICE:
+            return lower_addr(g, f, n);
 
         case ND_ARRAY_LIT:
             fprintf(stderr, "lower error: array literal can only initialize a variable\n");
