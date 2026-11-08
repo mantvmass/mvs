@@ -28,7 +28,7 @@ jobs:
         run: echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Build compiler (clang, warnings are errors)
-        run: clang -Wall -Wextra -Werror -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs.exe
+        run: clang -Wall -Wextra -Werror -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/ir.c src/lower.c src/opt.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs.exe
 
       - name: Run test suite
         run: powershell -ExecutionPolicy Bypass -File scripts/test.ps1
@@ -58,7 +58,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nasm
 
       - name: Build compiler (gcc, warnings are errors)
-        run: gcc -Wall -Wextra -Werror -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs
+        run: gcc -Wall -Wextra -Werror -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/ir.c src/lower.c src/opt.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs
 
       - name: Run ELF64 test suite (compile, link, run, diff goldens; incl. freestanding)
         run: sh scripts/test_elf_ci.sh
@@ -118,7 +118,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nasm
 
       - name: Build with ASan + UBSan
-        run: gcc -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs_asan
+        run: gcc -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/ir.c src/lower.c src/opt.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs_asan
 
       - name: Run the test suite under the sanitizers
         run: ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 ./mvs_asan test
@@ -142,7 +142,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
 
       - name: Build compiler (native Linux)
-        run: gcc -Wall -Wextra -Werror -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs
+        run: gcc -Wall -Wextra -Werror -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/ir.c src/lower.c src/opt.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs
 
       - name: Run ARM64 test suite (compile, cross-link, run under qemu, diff goldens)
         run: sh scripts/test_arm64_ci.sh
