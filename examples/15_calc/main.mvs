@@ -1,0 +1,344 @@
+/*
+ * Expression calculator
+ *
+ * A dogfood program that exercises: convert (parse_float), math (sqrt, pow,
+ * sin, cos, abs, pi), sort (ascending, is_sorted), Vec, enum + match,
+ * float arithmetic, recursive descent parsing, and pointer arithmetic.
+ *
+ * The input is a list of hardcoded expression strings so the output is
+ * deterministic for golden testing.
+ */
+import { io, math, convert, sort } from "std";
+import { Vec } from "std/vec";
+
+extern func malloc(n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func strcmp(a: str, b: str) -> i32;
+
+// --- token types ---
+
+enum Tk {
+    Num,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Caret,
+    LParen,
+    RParen,
+    Comma,
+    Name,
+    End,
+}
+
+struct Token {
+    kind: Tk;
+    num:  f64;
+    name: str;
+}
+
+func mk_tok(k: Tk) -> Token { return Token { kind: k, num: 0.0, name: "" }; }
+
+// --- tokenizer ---
+
+struct Lexer {
+    src: *u8;
+    pos: usize;
+}
+
+func is_digit(c: u8) -> bool { return c >= 48 && c <= 57; }
+func is_alpha(c: u8) -> bool { return (c >= 65 && c <= 90) || (c >= 97 && c <= 122); }
+
+impl Lexer {
+    func init(s: str) -> Lexer {
+        return Lexer { src: s as *u8, pos: 0 };
+    }
+
+    func skip_spaces(self: *Lexer) -> void {
+        while (self.src[self.pos] == 32) { self.pos = self.pos + 1; }
+    }
+
+    func next(self: *Lexer) -> Token {
+        self.skip_spaces();
+        let c: u8 = self.src[self.pos];
+        if (c == 0) { return mk_tok(Tk::End); }
+
+        if (is_digit(c) || (c == 46 && is_digit(self.src[self.pos + 1]))) {
+            let start: usize = self.pos;
+            while (is_digit(self.src[self.pos])) { self.pos = self.pos + 1; }
+            if (self.src[self.pos] == 46) {
+                self.pos = self.pos + 1;
+                while (is_digit(self.src[self.pos])) { self.pos = self.pos + 1; }
+            }
+            let len: usize = self.pos - start;
+            let buf: *u8 = malloc(len + 1);
+            let i: usize = 0;
+            while (i < len) { buf[i] = self.src[start + i]; i = i + 1; }
+            buf[len] = 0;
+            let val: f64 = convert.parse_float(buf as str);
+            free(buf);
+            return Token { kind: Tk::Num, num: val, name: "" };
+        }
+
+        if (is_alpha(c)) {
+            let start: usize = self.pos;
+            while (is_alpha(self.src[self.pos]) || is_digit(self.src[self.pos])) {
+                self.pos = self.pos + 1;
+            }
+            let len: usize = self.pos - start;
+            let buf: *u8 = malloc(len + 1);
+            let i: usize = 0;
+            while (i < len) { buf[i] = self.src[start + i]; i = i + 1; }
+            buf[len] = 0;
+            return Token { kind: Tk::Name, num: 0.0, name: buf as str };
+        }
+
+        self.pos = self.pos + 1;
+        if (c == 43) { return mk_tok(Tk::Plus); }
+        if (c == 45) { return mk_tok(Tk::Minus); }
+        if (c == 42) { return mk_tok(Tk::Star); }
+        if (c == 47) { return mk_tok(Tk::Slash); }
+        if (c == 94) { return mk_tok(Tk::Caret); }
+        if (c == 40) { return mk_tok(Tk::LParen); }
+        if (c == 41) { return mk_tok(Tk::RParen); }
+        if (c == 44) { return mk_tok(Tk::Comma); }
+        return mk_tok(Tk::End);
+    }
+}
+
+// --- string equality via strcmp ---
+
+func streq(a: str, b: str) -> bool { return strcmp(a, b) == 0; }
+
+// --- parser (recursive descent with precedence) ---
+
+struct Parser {
+    tokens: Vec<Token>;
+    pos:    usize;
+}
+
+impl Parser {
+    func init(expr: str) -> Parser {
+        let lex: Lexer = Lexer::init(expr);
+        let toks: Vec<Token> = Vec<Token>::new();
+        let done: bool = false;
+        while (!done) {
+            let t: Token = lex.next();
+            match (t.kind) {
+                Tk::End => { toks.push(t); done = true; }
+                _       => { toks.push(t); }
+            }
+        }
+        return Parser { tokens: toks, pos: 0 };
+    }
+
+    func peek(self: *Parser) -> Token {
+        return self.tokens.get(self.pos);
+    }
+
+    func advance(self: *Parser) -> Token {
+        let t: Token = self.tokens.get(self.pos);
+        self.pos = self.pos + 1;
+        return t;
+    }
+
+    func eat_rparen(self: *Parser) -> void {
+        self.pos = self.pos + 1;
+    }
+
+    func parse(self: *Parser) -> f64 {
+        return self.expr();
+    }
+
+    // expr = term (('+' | '-') term)*
+    func expr(self: *Parser) -> f64 {
+        let left: f64 = self.term();
+        let done: bool = false;
+        while (!done) {
+            let t: Token = self.peek();
+            match (t.kind) {
+                Tk::Plus  => { self.advance(); left = left + self.term(); }
+                Tk::Minus => { self.advance(); left = left - self.term(); }
+                _         => { done = true; }
+            }
+        }
+        return left;
+    }
+
+    // term = power (('*' | '/') power)*
+    func term(self: *Parser) -> f64 {
+        let left: f64 = self.power();
+        let done: bool = false;
+        while (!done) {
+            let t: Token = self.peek();
+            match (t.kind) {
+                Tk::Star  => { self.advance(); left = left * self.power(); }
+                Tk::Slash => { self.advance(); left = left / self.power(); }
+                _         => { done = true; }
+            }
+        }
+        return left;
+    }
+
+    // power = unary ('^' power)?   (right-associative)
+    func power(self: *Parser) -> f64 {
+        let b: f64 = self.unary();
+        let t: Token = self.peek();
+        match (t.kind) {
+            Tk::Caret => { self.advance(); return math.pow(b, self.power()); }
+            _         => { return b; }
+        }
+    }
+
+    // unary = '-' unary | '+' unary | atom
+    func unary(self: *Parser) -> f64 {
+        let t: Token = self.peek();
+        match (t.kind) {
+            Tk::Minus => { self.advance(); return 0.0 - self.unary(); }
+            Tk::Plus  => { self.advance(); return self.unary(); }
+            _         => { return self.atom(); }
+        }
+    }
+
+    // atom = number | name '(' args ')' | name | '(' expr ')'
+    func atom(self: *Parser) -> f64 {
+        let t: Token = self.advance();
+        match (t.kind) {
+            Tk::Num => { return t.num; }
+            Tk::Name => {
+                let nx: Token = self.peek();
+                match (nx.kind) {
+                    Tk::LParen => { return self.call_func(t.name); }
+                    _ => { return self.resolve_const(t.name); }
+                }
+            }
+            Tk::LParen => {
+                let val: f64 = self.expr();
+                self.eat_rparen();
+                return val;
+            }
+            _ => { return 0.0; }
+        }
+    }
+
+    func resolve_const(self: *Parser, name: str) -> f64 {
+        if (streq(name, "pi")) { return math.pi(); }
+        if (streq(name, "e"))  { return math.e(); }
+        return 0.0;
+    }
+
+    func call_func(self: *Parser, name: str) -> f64 {
+        self.advance(); // consume '('
+        let a1: f64 = self.expr();
+
+        let nx: Token = self.peek();
+        match (nx.kind) {
+            Tk::Comma => {
+                self.advance();
+                let a2: f64 = self.expr();
+                self.eat_rparen();
+                if (streq(name, "pow"))   { return math.pow(a1, a2); }
+                if (streq(name, "atan2")) { return math.atan2(a1, a2); }
+                if (streq(name, "min"))   { return math.min(a1, a2); }
+                if (streq(name, "max"))   { return math.max(a1, a2); }
+                return 0.0;
+            }
+            _ => {
+                self.eat_rparen();
+                if (streq(name, "sqrt"))  { return math.sqrt(a1); }
+                if (streq(name, "abs"))   { return math.abs(a1); }
+                if (streq(name, "sin"))   { return math.sin(a1); }
+                if (streq(name, "cos"))   { return math.cos(a1); }
+                if (streq(name, "tan"))   { return math.tan(a1); }
+                if (streq(name, "ln"))    { return math.ln(a1); }
+                if (streq(name, "log2"))  { return math.log2(a1); }
+                if (streq(name, "floor")) { return math.floor(a1); }
+                if (streq(name, "ceil"))  { return math.ceil(a1); }
+                if (streq(name, "round")) { return math.round(a1); }
+                return 0.0;
+            }
+        }
+    }
+}
+
+// --- evaluate one expression string ---
+
+func calc(expr: str) -> f64 {
+    let p: Parser = Parser::init(expr);
+    let result: f64 = p.parse();
+    p.tokens.drop();
+    return result;
+}
+
+// --- entry point ---
+
+func main() -> i64 {
+    io.out("=== expression calculator ===");
+
+    // basic arithmetic
+    io.out("1 + 2 * 3        = {}", calc("1 + 2 * 3"));
+    io.out("(1 + 2) * 3      = {}", calc("(1 + 2) * 3"));
+    io.out("10 / 3            = {}", calc("10 / 3"));
+    io.out("2 ^ 10            = {}", calc("2 ^ 10"));
+    io.out("-5 + 3            = {}", calc("-5 + 3"));
+    io.out("--4               = {}", calc("--4"));
+
+    // math functions
+    io.out("sqrt(144)         = {}", calc("sqrt(144)"));
+    io.out("abs(-42.5)        = {}", calc("abs(-42.5)"));
+    io.out("pow(2, 20)        = {}", calc("pow(2, 20)"));
+    io.out("floor(3.7)        = {}", calc("floor(3.7)"));
+    io.out("ceil(3.2)         = {}", calc("ceil(3.2)"));
+    io.out("round(3.5)        = {}", calc("round(3.5)"));
+    io.out("min(10, 3)        = {}", calc("min(10, 3)"));
+    io.out("max(10, 3)        = {}", calc("max(10, 3)"));
+
+    // constants and trig
+    io.out("pi                = {}", calc("pi"));
+    io.out("e                 = {}", calc("e"));
+    io.out("sin(0)            = {}", calc("sin(0)"));
+    io.out("cos(0)            = {}", calc("cos(0)"));
+    io.out("ln(1)             = {}", calc("ln(1)"));
+    io.out("log2(1024)        = {}", calc("log2(1024)"));
+
+    // nested and compound
+    io.out("sqrt(3^2 + 4^2)  = {}", calc("sqrt(3^2 + 4^2)"));
+    io.out("2 * pi            = {}", calc("2 * pi"));
+
+    // --- sort demo: evaluate several expressions, sort the results ---
+    io.out("");
+    io.out("=== sort results ===");
+    let results: Vec<f64> = Vec<f64>::new();
+    results.push(calc("2 ^ 10"));
+    results.push(calc("sqrt(144)"));
+    results.push(calc("1 + 2 * 3"));
+    results.push(calc("abs(-42.5)"));
+    results.push(calc("pi"));
+
+    io.out("before sort:");
+    let i: usize = 0;
+    while (i < results.len()) {
+        io.out("  [{}] {}", i, results.get(i));
+        i = i + 1;
+    }
+
+    sort.ascending(results.as_ptr(), results.len());
+    io.out("after sort.ascending:");
+    i = 0;
+    while (i < results.len()) {
+        io.out("  [{}] {}", i, results.get(i));
+        i = i + 1;
+    }
+    io.out("is_sorted: {}", sort.is_sorted(results.as_ptr(), results.len()));
+
+    sort.descending(results.as_ptr(), results.len());
+    io.out("after sort.descending:");
+    i = 0;
+    while (i < results.len()) {
+        io.out("  [{}] {}", i, results.get(i));
+        i = i + 1;
+    }
+
+    results.drop();
+    return 0;
+}

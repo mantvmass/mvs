@@ -70,7 +70,8 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop \
            examples/10_json/main examples/11_vm/main examples/12_http/main \
            examples/13_pipeline/main \
-           examples/14_wordcount/main
+           examples/14_wordcount/main \
+           examples/15_calc/main
 
 # default target: build the compiler
 $(TARGET): $(SRC) $(HDR)

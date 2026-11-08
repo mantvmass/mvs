@@ -84,9 +84,11 @@ combinators, user-defined keys (feature flags).
 Roughly in order of value:
 
 - More real programs, and larger ones. Still the strongest bug finder we have:
-  `examples/10_json`, `examples/11_vm`, and `examples/13_pipeline` (concurrent
-  work pipeline using atomics, channels, scoped threads, and match) each
-  surfaced compiler gaps no test suite caught.
+  `examples/10_json`, `examples/11_vm`, `examples/13_pipeline` (concurrent
+  work pipeline using atomics, channels, scoped threads, and match), and
+  `examples/15_calc` (expression calculator exercising convert, math, sort,
+  enum + match, recursive descent, float arithmetic) each surfaced compiler
+  gaps no test suite caught.
 - More differential pairs, ideally generated rather than hand-written.
 - Integer overflow checks: shipped (`--check-overflow` traps on signed
   +, -, * overflow with `ud2`/`brk #1` on all three backends).

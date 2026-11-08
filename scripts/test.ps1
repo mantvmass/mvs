@@ -104,7 +104,8 @@ $runPass = @(
     "examples/11_vm/main",
     "examples/12_http/main",
     "examples/13_pipeline/main",
-    "examples/14_wordcount/main"
+    "examples/14_wordcount/main",
+    "examples/15_calc/main"
 )
 
 # fixed command-line arguments for examples that read argv
@@ -315,7 +316,8 @@ $elfTests = @(
     "examples/11_vm/main",
     "examples/12_http/main",
     "examples/13_pipeline/main",
-    "examples/14_wordcount/main"
+    "examples/14_wordcount/main",
+    "examples/15_calc/main"
 )
 Write-Host "=== elf64 (SysV backend$(if ($wslOk) { ', run in WSL' } else { ', compile only: WSL not found' })) ===" -ForegroundColor Cyan
 foreach ($ex in $elfTests) {
