@@ -168,12 +168,21 @@ static void gen_store_var(Gen *g, Sym *s) {
     fprintf(g->out, "    mov x0, x1\n");
 }
 
+static int is_unsigned_val(DataType base, int ptr);
+
+static void gen_itof(Gen *g, const char *dreg, const char *xreg, DataType base) {
+    if (is_unsigned_val(base, 0) && type_size(g, base, 0, NULL) >= 8)
+        fprintf(g->out, "    ucvtf %s, %s\n", dreg, xreg);
+    else
+        fprintf(g->out, "    scvtf %s, %s\n", dreg, xreg);
+}
+
 /* Implicit int<->float conversion of x0 when crossing the numeric line */
 static void gen_coerce_num(Gen *g, ExprType from, ExprType to) {
     if (from.ptr > 0 || to.ptr > 0) return;
     int ff = is_float_type(from.base), tf = is_float_type(to.base);
     if (ff == tf) return;
-    if (!ff && tf) fprintf(g->out, "    scvtf d0, x0\n    fmov x0, d0\n");
+    if (!ff && tf) { gen_itof(g, "d0", "x0", from.base); fprintf(g->out, "    fmov x0, d0\n"); }
     else           fprintf(g->out, "    fmov d0, x0\n    fcvtzs x0, d0\n");
 }
 
@@ -677,7 +686,8 @@ static void gen_expr(Gen *g, Node *n) {
                 if (is_float_type(rt.base)) fprintf(g->out, "    fmov d2, x0\n    fcvtzs x10, d2\n");
                 else                        fprintf(g->out, "    mov x10, x0\n");
                 pop_tmp(g, "x1");
-                fprintf(g->out, is_float_type(lt.base) ? "    fmov d1, x1\n" : "    scvtf d1, x1\n");
+                if (is_float_type(lt.base)) fprintf(g->out, "    fmov d1, x1\n");
+                else gen_itof(g, "d1", "x1", lt.base);
                 fprintf(g->out,
                     "    ldr x0, =4607182418800017408\n"    /* 1.0 */
                     "    fmov d0, x0\n"
@@ -693,9 +703,11 @@ static void gen_expr(Gen *g, Node *n) {
             if (fop) {
                 gen_expr(g, n->lhs); push_tmp(g);
                 gen_expr(g, n->rhs);
-                fprintf(g->out, is_float_type(rt.base) ? "    fmov d1, x0\n" : "    scvtf d1, x0\n");
+                if (is_float_type(rt.base)) fprintf(g->out, "    fmov d1, x0\n");
+                else gen_itof(g, "d1", "x0", rt.base);
                 pop_tmp(g, "x1");
-                fprintf(g->out, is_float_type(lt.base) ? "    fmov d0, x1\n" : "    scvtf d0, x1\n");
+                if (is_float_type(lt.base)) fprintf(g->out, "    fmov d0, x1\n");
+                else gen_itof(g, "d0", "x1", lt.base);
                 if (is_cmp) {
                     const char *cc = n->op==TK_EQ ? "eq" : n->op==TK_NEQ ? "ne" :
                                      n->op==TK_LT ? "mi" : n->op==TK_GT ? "gt" :
@@ -951,7 +963,8 @@ static void gen_expr(Gen *g, Node *n) {
                 if (is_float_type(tt.base) && tt.ptr == 0) {
                     ExprType rt2 = type_of(g, n->rhs);
                     fprintf(g->out, "    fmov d0, x0\n");
-                    fprintf(g->out, is_float_type(rt2.base) ? "    fmov d1, x1\n" : "    scvtf d1, x1\n");
+                    if (is_float_type(rt2.base)) fprintf(g->out, "    fmov d1, x1\n");
+                    else gen_itof(g, "d1", "x1", rt2.base);
                     const char *fop = bop==TK_PLUS ? "fadd" : bop==TK_MINUS ? "fsub" : bop==TK_STAR ? "fmul" : "fdiv";
                     fprintf(g->out, "    %s d0, d0, d1\n    fmov x0, d0\n", fop);
                 } else {
@@ -1563,7 +1576,7 @@ static void gen_stmt(Gen *g, Node *n) {
                 gen_expr(g, n->operand);
                 ExprType vt = type_of(g, n->operand);
                 int vf = is_float_type(vt.base) && vt.ptr == 0;
-                if (g->cur_ret_float && !vf) fprintf(g->out, "    scvtf d0, x0\n    fmov x0, d0\n");
+                if (g->cur_ret_float && !vf) { gen_itof(g, "d0", "x0", vt.base); fprintf(g->out, "    fmov x0, d0\n"); }
                 else if (!g->cur_ret_float && vf) fprintf(g->out, "    fmov d0, x0\n    fcvtzs x0, d0\n");
                 if (g->cur_ret_float) {
                     fprintf(g->out, "    fmov d0, x0\n");

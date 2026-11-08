@@ -197,6 +197,23 @@ static void gen_store_var(Gen *g, Sym *s) {
     else              { fprintf(g->out, "    mov [rbp - %d], %s\n", s->offset, reg); }
 }
 
+static int is_unsigned_val(DataType base, int ptr);
+
+static void gen_itof_xmm(Gen *g, const char *xmm, DataType base) {
+    if (is_unsigned_val(base, 0) && type_size(g, base, 0, NULL) >= 8) {
+        int l = new_label(g);
+        fprintf(g->out,
+            "    test rax, rax\n    js .Luf%d\n"
+            "    cvtsi2sd %s, rax\n    jmp .Lufe%d\n"
+            ".Luf%d:\n"
+            "    mov rcx, rax\n    shr rcx, 1\n    and rax, 1\n    or rcx, rax\n"
+            "    cvtsi2sd %s, rcx\n    addsd %s, %s\n"
+            ".Lufe%d:\n", l, xmm, l, l, xmm, xmm, xmm, l);
+    } else {
+        fprintf(g->out, "    cvtsi2sd %s, rax\n", xmm);
+    }
+}
+
 /* Implicitly convert the value in rax when crossing the int<->float line (e.g. let x: f64 = 5;
  * passing an int to an f64 parameter; returning an int from a float-returning function), matching
  * the promotion done in mixed expressions (never emit garbage) */
@@ -204,8 +221,12 @@ static void gen_coerce_num(Gen *g, ExprType from, ExprType to) {
     if (from.ptr > 0 || to.ptr > 0) return;
     int ff = is_float_type(from.base), tf = is_float_type(to.base);
     if (ff == tf) return;
-    if (!ff && tf) fprintf(g->out, "    cvtsi2sd xmm0, rax\n    movq rax, xmm0\n");  /* int -> double */
-    else           fprintf(g->out, "    movq xmm0, rax\n    cvttsd2si rax, xmm0\n"); /* double -> int */
+    if (!ff && tf) {
+        gen_itof_xmm(g, "xmm0", from.base);
+        fprintf(g->out, "    movq rax, xmm0\n");
+    } else {
+        fprintf(g->out, "    movq xmm0, rax\n    cvttsd2si rax, xmm0\n");
+    }
 }
 
 /* Put the address of an lvalue into rax (used for &x, assignments, member access) */
@@ -722,7 +743,8 @@ static void gen_expr(Gen *g, Node *n) {
                     else
                         fprintf(g->out, "    mov rcx, rax\n");
                     pop_tmp(g, "rax");
-                    fprintf(g->out, is_float_type(lt.base) ? "    movq xmm1, rax\n" : "    cvtsi2sd xmm1, rax\n"); /* base -> xmm1 */
+                    if (is_float_type(lt.base)) fprintf(g->out, "    movq xmm1, rax\n");
+                    else gen_itof_xmm(g, "xmm1", lt.base); /* base -> xmm1 */
                     int l = new_label(g);
                     fprintf(g->out,
                         "    mov rax, 0x3FF0000000000000\n    movq xmm0, rax\n"  /* result starts at 1.0 */
@@ -738,9 +760,11 @@ static void gen_expr(Gen *g, Node *n) {
                     push_tmp(g);
                     gen_expr(g, n->rhs);
                     /* rhs -> xmm1 (converted from int if needed) */
-                    fprintf(g->out, is_float_type(rt.base) ? "    movq xmm1, rax\n" : "    cvtsi2sd xmm1, rax\n");
+                    if (is_float_type(rt.base)) fprintf(g->out, "    movq xmm1, rax\n");
+                    else gen_itof_xmm(g, "xmm1", rt.base);
                     pop_tmp(g, "rax");
-                    fprintf(g->out, is_float_type(lt.base) ? "    movq xmm0, rax\n" : "    cvtsi2sd xmm0, rax\n");
+                    if (is_float_type(lt.base)) fprintf(g->out, "    movq xmm0, rax\n");
+                    else gen_itof_xmm(g, "xmm0", lt.base);
                     if (is_arith) {
                         const char *op = n->op==TK_PLUS ? "addsd" : n->op==TK_MINUS ? "subsd" :
                                          n->op==TK_STAR ? "mulsd" : "divsd";
@@ -1056,7 +1080,8 @@ static void gen_expr(Gen *g, Node *n) {
                     /* compute in floating point (old value in xmm0, rhs in xmm1) */
                     ExprType rt2 = type_of(g, n->rhs);
                     fprintf(g->out, "    movq xmm0, rax\n");
-                    fprintf(g->out, is_float_type(rt2.base) ? "    movq xmm1, rcx\n" : "    cvtsi2sd xmm1, rcx\n");
+                    if (is_float_type(rt2.base)) fprintf(g->out, "    movq xmm1, rcx\n");
+                    else { fprintf(g->out, "    mov rax, rcx\n"); gen_itof_xmm(g, "xmm1", rt2.base); }
                     const char *fop = bop==TK_PLUS ? "addsd" : bop==TK_MINUS ? "subsd" : bop==TK_STAR ? "mulsd" : "divsd";
                     fprintf(g->out, "    %s xmm0, xmm1\n    movq rax, xmm0\n", fop);
                 } else {
@@ -1400,7 +1425,7 @@ static void gen_stmt(Gen *g, Node *n) {
                 gen_expr(g, n->operand);         /* the return value is in rax */
                 ExprType vt = type_of(g, n->operand);
                 int vf = is_float_type(vt.base) && vt.ptr == 0;
-                if (g->cur_ret_float && !vf) fprintf(g->out, "    cvtsi2sd xmm0, rax\n    movq rax, xmm0\n"); /* int -> float */
+                if (g->cur_ret_float && !vf) { gen_itof_xmm(g, "xmm0", vt.base); fprintf(g->out, "    movq rax, xmm0\n"); } /* int -> float */
                 else if (!g->cur_ret_float && vf) fprintf(g->out, "    movq xmm0, rax\n    cvttsd2si rax, xmm0\n"); /* float -> int */
                 if (g->cur_ret_float) {
                     fprintf(g->out, "    movq xmm0, rax\n"); /* return the float via xmm0 */

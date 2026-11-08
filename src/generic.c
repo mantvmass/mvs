@@ -445,9 +445,10 @@ static void seed_globals(Node *prog, Bind *map, int *nmap) {
 /* Write the type code used for instance names (e.g. i32, pi32, Foo) */
 static void type_code(CType t, char *buf) {
     char *p = buf;
-    for (int i = 0; i < t.ptr; i++) *p++ = 'p';
+    int room = 128;
+    for (int i = 0; i < t.ptr && room > 1; i++) { *p++ = 'p'; room--; }
     const char *base = t.base == TYPE_STRUCT && t.sname ? t.sname : datatype_name(t.base);
-    strcpy(p, base);
+    snprintf(p, room > 0 ? (size_t)room : 1, "%s", base);
 }
 
 /* The canonical text of a bound type for use INSIDE a composite generic name,
@@ -1034,6 +1035,7 @@ static Node *de_match(Node *prog, Node *n, Bind *map, int *nmap, Node *assign_ta
             de_err++;
         }
         if (seen[vi] == 0) seen[vi] = any_refine ? 2 : 1;
+        if (!any_refine && seen[vi] == 2) seen[vi] = 1;
         int arity = ei->decl->items[vi]->nitems;
         int pat_count = arm->nitems;
         if (pat_count > 0 && pat_count != arity) {
@@ -2047,6 +2049,7 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
             /* Build the instance name from the type codes */
             char mangled[600]; size_t ml = 0;   /* instance name (template name + type codes), bounded */
             ml = snprintf(mangled, sizeof(mangled), "%s", tmpl->name);
+            if (ml >= sizeof(mangled)) ml = sizeof(mangled) - 1;
             for (int gi = 0; gi < tmpl->ngen; gi++) {
                 char code[128]; type_code(gmap[gi].t, code);
                 ml += snprintf(mangled + ml, sizeof(mangled) - ml, "__%s", code);
@@ -2083,17 +2086,18 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
  * Pointers get a 'p' prefix per depth, then the pointee's category (keeps *i32 and *Point apart) */
 static void cat_code(CType t, char *buf) {
     char *p = buf;
-    for (int i = 0; i < t.ptr; i++) *p++ = 'p';
+    int room = 128;
+    for (int i = 0; i < t.ptr && room > 1; i++) { *p++ = 'p'; room--; }
     switch (t.base) {
         case TYPE_I8: case TYPE_I16: case TYPE_I32: case TYPE_I64: case TYPE_I128: case TYPE_ISIZE:
         case TYPE_U8: case TYPE_U16: case TYPE_U32: case TYPE_U64: case TYPE_U128: case TYPE_USIZE:
-            strcpy(p, "i"); break;
-        case TYPE_F32: case TYPE_F64: strcpy(p, "f"); break;
-        case TYPE_STR:  strcpy(p, "s"); break;
-        case TYPE_CHAR: strcpy(p, "c"); break;
-        case TYPE_BOOL: strcpy(p, "b"); break;
-        case TYPE_STRUCT: strcpy(p, t.sname ? t.sname : "S"); break;
-        default: strcpy(p, "x");
+            *p++ = 'i'; *p = 0; break;
+        case TYPE_F32: case TYPE_F64: *p++ = 'f'; *p = 0; break;
+        case TYPE_STR:  *p++ = 's'; *p = 0; break;
+        case TYPE_CHAR: *p++ = 'c'; *p = 0; break;
+        case TYPE_BOOL: *p++ = 'b'; *p = 0; break;
+        case TYPE_STRUCT: snprintf(p, room > 0 ? (size_t)room : 1, "%s", t.sname ? t.sname : "S"); break;
+        default: *p++ = 'x'; *p = 0;
     }
 }
 
@@ -2101,13 +2105,14 @@ static void cat_code(CType t, char *buf) {
  * e.g. *i32 -> "pi32", *u8 -> "pu8", **i32 -> "ppi32" (avoids clashes/false duplicates of pointer overloads) */
 static void width_code(CType t, char *buf) {
     char *p = buf;
-    for (int i = 0; i < t.ptr; i++) *p++ = 'p';
+    int room = 128;
+    for (int i = 0; i < t.ptr && room > 1; i++) { *p++ = 'p'; room--; }
     switch (t.base) {
-        case TYPE_STR:    strcpy(p, "s"); break;
-        case TYPE_CHAR:   strcpy(p, "c"); break;
-        case TYPE_BOOL:   strcpy(p, "b"); break;
-        case TYPE_STRUCT: strcpy(p, t.sname ? t.sname : "S"); break;
-        default:          strcpy(p, datatype_name(t.base)); /* i8..i64, u8..u64, isize/usize, f32, f64 */
+        case TYPE_STR:    *p++ = 's'; *p = 0; break;
+        case TYPE_CHAR:   *p++ = 'c'; *p = 0; break;
+        case TYPE_BOOL:   *p++ = 'b'; *p = 0; break;
+        case TYPE_STRUCT: snprintf(p, room > 0 ? (size_t)room : 1, "%s", t.sname ? t.sname : "S"); break;
+        default:          snprintf(p, room > 0 ? (size_t)room : 1, "%s", datatype_name(t.base)); break;
     }
 }
 
@@ -2519,10 +2524,11 @@ static int tc_isvoid(CType t)   { return t.ptr == 0 && t.base == TYPE_VOID; }
 /* Write a readable type name into buf (e.g. "u8", "*i32", "str", "Point", "dyn Area") */
 static void tc_name(CType t, char *buf) {
     char *p = buf;
-    for (int i = 0; i < t.ptr; i++) *p++ = '*';
-    if (t.base == TYPE_DYN && t.sname) { sprintf(p, "dyn %s", t.sname); return; }
+    int room = 128;
+    for (int i = 0; i < t.ptr && room > 1; i++) { *p++ = '*'; room--; }
+    if (t.base == TYPE_DYN && t.sname) { snprintf(p, room > 0 ? (size_t)room : 1, "dyn %s", t.sname); return; }
     const char *b = (t.base == TYPE_STRUCT && t.sname) ? t.sname : datatype_name(t.base);
-    strcpy(p, b);
+    snprintf(p, room > 0 ? (size_t)room : 1, "%s", b);
 }
 
 static int tc_is128(CType t) { return t.ptr == 0 && (t.base == TYPE_I128 || t.base == TYPE_U128); }

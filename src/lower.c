@@ -135,13 +135,15 @@ static void store_var(Gen *g, IRFunc *f, Sym *s, int val) {
 
 /* Emit a coercion between int and float if needed */
 static int coerce_num(Gen *g, IRFunc *f, int val, ExprType from, ExprType to) {
-    (void)g;
     int from_f = is_float_type(from.base) && from.ptr == 0;
     int to_f = is_float_type(to.base) && to.ptr == 0;
     if (from_f == to_f) return val;
     if (!from_f && to_f) {
         int r = ir_vreg(f);
-        ir_emit(f, IR_ITOF, r, val, IR_NONE);
+        if (is_unsigned_val(from.base, 0) && type_size(g, from.base, 0, NULL) >= 8)
+            ir_emit(f, IR_UTOF, r, val, IR_NONE);
+        else
+            ir_emit(f, IR_ITOF, r, val, IR_NONE);
         return r;
     }
     /* float to int */
@@ -677,12 +679,18 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                 /* convert int operand to float if needed */
                 if (!is_float_type(lt.base) || lt.ptr > 0) {
                     int c = ir_vreg(f);
-                    ir_emit(f, IR_ITOF, c, lhs, IR_NONE);
+                    if (is_unsigned_val(lt.base, 0) && type_size(g, lt.base, 0, NULL) >= 8)
+                        ir_emit(f, IR_UTOF, c, lhs, IR_NONE);
+                    else
+                        ir_emit(f, IR_ITOF, c, lhs, IR_NONE);
                     lhs = c;
                 }
                 if (!is_float_type(rt.base) || rt.ptr > 0) {
                     int c = ir_vreg(f);
-                    ir_emit(f, IR_ITOF, c, rhs, IR_NONE);
+                    if (is_unsigned_val(rt.base, 0) && type_size(g, rt.base, 0, NULL) >= 8)
+                        ir_emit(f, IR_UTOF, c, rhs, IR_NONE);
+                    else
+                        ir_emit(f, IR_ITOF, c, rhs, IR_NONE);
                     rhs = c;
                 }
                 if (is_cmp_op(n->op)) {
@@ -948,7 +956,10 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                 ExprType rt2 = type_of(g, n->rhs);
                 if (!is_float_type(rt2.base) || rt2.ptr > 0) {
                     int c = ir_vreg(f);
-                    ir_emit(f, IR_ITOF, c, rhs, IR_NONE);
+                    if (is_unsigned_val(rt2.base, 0) && type_size(g, rt2.base, 0, NULL) >= 8)
+                        ir_emit(f, IR_UTOF, c, rhs, IR_NONE);
+                    else
+                        ir_emit(f, IR_ITOF, c, rhs, IR_NONE);
                     rhs = c;
                 }
                 IROp fbo = fbinop_for(bop);
@@ -1135,7 +1146,10 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
                 /* coerce int<->float for return value */
                 if (g->cur_ret_float && !vf) {
                     int c = ir_vreg(f);
-                    ir_emit(f, IR_ITOF, c, val, IR_NONE);
+                    if (is_unsigned_val(vt.base, 0) && type_size(g, vt.base, 0, NULL) >= 8)
+                        ir_emit(f, IR_UTOF, c, val, IR_NONE);
+                    else
+                        ir_emit(f, IR_ITOF, c, val, IR_NONE);
                     val = c;
                 } else if (!g->cur_ret_float && vf) {
                     int c = ir_vreg(f);
