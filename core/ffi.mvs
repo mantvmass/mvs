@@ -15,6 +15,9 @@
 func c_char_size()      -> usize { return 1; }
 func c_short_size()     -> usize { return 2; }
 func c_int_size()       -> usize { return 4; }
+@compile(target_os = "windows")
+func c_long_size()      -> usize { return 4; }
+@compile(target_os = "linux")
 func c_long_size()      -> usize { return 8; }
 func c_longlong_size()  -> usize { return 8; }
 func c_float_size()     -> usize { return 4; }
@@ -24,6 +27,9 @@ func c_size_t_size()    -> usize { return 8; }
 
 // alignment (matches size on all current targets)
 func c_int_align()      -> usize { return 4; }
+@compile(target_os = "windows")
+func c_long_align()     -> usize { return 4; }
+@compile(target_os = "linux")
 func c_long_align()     -> usize { return 8; }
 func c_pointer_align()  -> usize { return 8; }
 
