@@ -1,0 +1,15 @@
+=== Brainfuck interpreter ===
+test 1: hello world
+Hello World!
+
+test 2: digits
+0123456789
+test 3: add
+8
+test 4: ABC
+ABC
+test 5: MVS
+MVS
+test 6: countdown
+9876543210
+=== done ===

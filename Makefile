@@ -71,7 +71,8 @@ EXAMPLES = examples/demo \
            examples/10_json/main examples/11_vm/main examples/12_http/main \
            examples/13_pipeline/main \
            examples/14_wordcount/main \
-           examples/15_calc/main
+           examples/15_calc/main \
+           examples/16_bf/main
 
 # default target: build the compiler
 $(TARGET): $(SRC) $(HDR)

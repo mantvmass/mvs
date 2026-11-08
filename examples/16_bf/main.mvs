@@ -1,0 +1,101 @@
+// Brainfuck interpreter: exercises arrays, pointer casts, while loops, putchar.
+// Runs several BF programs inline and prints their output.
+import { io, fmt, mem, convert } from "std";
+
+extern func putchar(c: i32) -> i32;
+
+// execute a BF program: tape of 30000 cells, classic semantics
+func bf_run(code: str) -> void {
+    let src: *u8 = code as *u8;
+    let len: i64 = convert.strlen(code) as i64;
+
+    let tape: *u8 = mem.alloc(30000) as *u8;
+    let i: i64 = 0;
+    while (i < 30000) { tape[i] = 0 as u8; i = i + 1; }
+
+    let ip: i64 = 0;
+    let dp: i64 = 0;
+
+    while (ip < len) {
+        let c: u8 = src[ip];
+        if (c == 62) {
+            dp = dp + 1;
+        }
+        if (c == 60) {
+            dp = dp - 1;
+        }
+        if (c == 43) {
+            tape[dp] = (tape[dp] + 1 as u8) as u8;
+        }
+        if (c == 45) {
+            tape[dp] = (tape[dp] - 1 as u8) as u8;
+        }
+        if (c == 46) {
+            putchar(tape[dp] as i32);
+        }
+        if (c == 91) {
+            if (tape[dp] == 0 as u8) {
+                let depth: i64 = 1;
+                while (depth > 0) {
+                    ip = ip + 1;
+                    if (src[ip] == 91) { depth = depth + 1; }
+                    if (src[ip] == 93) { depth = depth - 1; }
+                }
+            }
+        }
+        if (c == 93) {
+            if (tape[dp] != 0 as u8) {
+                let depth: i64 = 1;
+                while (depth > 0) {
+                    ip = ip - 1;
+                    if (src[ip] == 93) { depth = depth + 1; }
+                    if (src[ip] == 91) { depth = depth - 1; }
+                }
+            }
+        }
+        ip = ip + 1;
+    }
+
+    mem.dealloc(tape as *u8);
+}
+
+func main() -> i8 {
+    io.out("=== Brainfuck interpreter ===");
+
+    // 1. Hello World! (classic)
+    io.out("test 1: hello world");
+    bf_run("++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-]>>.>---.+++++++..+++.>>.<-.<.+++.------.--------.>>+.>++.");
+    putchar(10);
+
+    // 2. digits 0-9: cell starts at 48 ('0'), print, increment, repeat 10 times
+    io.out("test 2: digits");
+    bf_run("++++++++++++++++++++++++++++++++++++++++++++++++.+.+.+.+.+.+.+.+.+.");
+    putchar(10);
+
+    // 3. add 3 + 5 = 8, then add 48 for ASCII '0', print '8'
+    io.out("test 3: add");
+    bf_run("+++>+++++[<+>-]<++++++++++++++++++++++++++++++++++++++++++++++++.");
+    putchar(10);
+
+    // 4. print "ABC" with a loop: cell = 65, print, +, print, +, print
+    io.out("test 4: ABC");
+    bf_run("++++++++[>++++++++<-]>+.+.+.");
+    putchar(10);
+
+    // 5. print "MVS" with computed values
+    // M=77 V=86 S=83
+    // cell0 = 7, cell1 used for multiplication
+    // 77 = 7*11: +++++++[>+++++++++++<-]>.
+    // then +++++++++ to get 86, . then --- to get 83, .
+    io.out("test 5: MVS");
+    bf_run("+++++++[>+++++++++++<-]>.+++++++++.---.");
+    putchar(10);
+
+    // 6. countdown: 7*8+1=57='9', then decrement and print 10 digits
+    io.out("test 6: countdown");
+    bf_run("+++++++[>++++++++<-]>+.-.-.-.-.-.-.-.-.-.");
+    putchar(10);
+
+    io.out("=== done ===");
+    return 0;
+}

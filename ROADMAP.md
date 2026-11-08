@@ -94,8 +94,9 @@ Roughly in order of value:
   `examples/10_json`, `examples/11_vm`, `examples/13_pipeline` (concurrent
   work pipeline using atomics, channels, scoped threads, and match), and
   `examples/15_calc` (expression calculator exercising convert, math, sort,
-  enum + match, recursive descent, float arithmetic) each surfaced compiler
-  gaps no test suite caught.
+  enum + match, recursive descent, float arithmetic), and `examples/16_bf`
+  (Brainfuck interpreter exercising arrays, pointer casts, while loops,
+  putchar) each surfaced compiler gaps no test suite caught.
 - More differential pairs, ideally generated rather than hand-written.
 - Integer overflow checks: shipped (`--check-overflow` traps on signed
   +, -, * overflow with `ud2`/`brk #1` on all three backends).
