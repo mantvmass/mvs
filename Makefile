@@ -24,14 +24,17 @@ SRC = src/main.c \
       src/generic.c \
       src/diag.c \
       src/codegen.c \
+      src/ir.c \
+      src/lower.c \
+      src/opt.c \
       src/arch/common.c \
       src/arch/x86_64/win.c \
       src/arch/x86_64/sysv.c \
       src/arch/arm64/linux.c
 
 HDR = src/token.h src/lexer.h src/ast.h src/parser.h src/module.h src/generic.h src/diag.h \
-      src/codegen.h src/arch/common.h src/arch/x86_64/win.h src/arch/x86_64/sysv.h \
-      src/arch/arm64/linux.h
+      src/codegen.h src/ir.h src/lower.h src/opt.h src/arch/common.h src/arch/x86_64/win.h \
+      src/arch/x86_64/sysv.h src/arch/arm64/linux.h
 
 # examples that compile to .exe (organized into groups 01_language .. 09_no_std)
 EXAMPLES = examples/demo \
@@ -54,7 +57,12 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/lib_rand examples/08_stdlib/lib_sys examples/08_stdlib/out_width \
            examples/08_stdlib/option_result examples/08_stdlib/lib_vec examples/08_stdlib/lib_map \
            examples/08_stdlib/threads \
-           examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop \n           examples/10_json/main examples/11_vm/main examples/12_http/main
+           examples/08_stdlib/lib_convert examples/08_stdlib/lib_sort examples/08_stdlib/lib_string \
+           examples/08_stdlib/lib_fs examples/08_stdlib/lib_vec2 examples/08_stdlib/lib_sync \
+           examples/08_stdlib/lib_rand2 examples/08_stdlib/lib_math2 examples/08_stdlib/lib_io2 \
+           examples/08_stdlib/lib_map2 examples/08_stdlib/lib_test \
+           examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop \
+           examples/10_json/main examples/11_vm/main examples/12_http/main
 
 # default target: build the compiler
 $(TARGET): $(SRC) $(HDR)
@@ -72,6 +80,7 @@ examples: $(TARGET)
 	./$(TARGET) examples/09_no_std/bump_alloc.mvs --nostd
 	./$(TARGET) examples/09_no_std/use_core.mvs --nostd
 	./$(TARGET) examples/09_no_std/intrinsics.mvs --nostd
+	./$(TARGET) examples/09_no_std/use_core_all.mvs --nostd
 	@echo "All examples compiled"
 
 # run the test suite: golden output tests + compile-only + compile-fail (expected errors)

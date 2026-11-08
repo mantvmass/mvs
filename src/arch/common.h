@@ -167,6 +167,11 @@ extern int mvs_bounds_checks;
  * NASM targets use `%line`, the GNU-as target uses `.loc`. */
 extern int mvs_debug_lines;
 
+/* Use the IR lowering path instead of the per-backend gen_expr/gen_stmt.
+ * Set to 1 to route every function through lower_func + emit_ir_func.
+ * The two paths coexist; this flag selects which one runs. */
+extern int mvs_use_ir;
+
 /* Emit the line directive for a node (no-op when -g is off or the node has no
  * position). Backend-specific syntax lives in each backend's emit_line. */
 void emit_line_directive(FILE *out, const Node *n, int gnu_as);

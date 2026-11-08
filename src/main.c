@@ -680,6 +680,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "-O") == 0) optimize = 1;
         else if (strcmp(argv[i], "--no-check") == 0) mvs_bounds_checks = 0;
         else if (strcmp(argv[i], "-g") == 0) { mvs_debug_lines = 1; keep = 1; }
+        else if (strcmp(argv[i], "--ir") == 0) mvs_use_ir = 1;
         else if (strcmp(argv[i], "--test-main") == 0) test_main = 1;
         else if (strcmp(argv[i], "--nostd") == 0) { nostd = 1; emit_obj = 1; } /* freestanding -> produce .obj */
         else if (strcmp(argv[i], "--keep") == 0) keep = 1;

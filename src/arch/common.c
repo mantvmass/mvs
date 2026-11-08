@@ -490,6 +490,9 @@ int mvs_bounds_checks = 1;
 /* debug line information (see common.h); main.c turns it on for -g */
 int mvs_debug_lines = 0;
 
+/* IR lowering path (see common.h); main.c turns it on for --ir */
+int mvs_use_ir = 0;
+
 /* One line directive per statement. The assembler turns these into a DWARF
  * line table, which is what lets gdb/lldb show .mvs source. Repeats of the
  * same file+line are skipped so the table stays small. */

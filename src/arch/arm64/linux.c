@@ -19,6 +19,8 @@
 #include <string.h>
 #include "linux.h"
 #include "../common.h"
+#include "../../ir.h"
+#include "../../lower.h"
 
 /* ---------- code emission helpers ---------- */
 
@@ -1787,6 +1789,543 @@ static void emit_i128_helpers(Gen *g) {
 }
 
 /* Does any node mention a dyn Trait type? */
+/* ------------------------------------------------------------------ */
+/*  IR emitter: translate IRFunc instructions to GNU as (AAPCS64)     */
+/* ------------------------------------------------------------------ */
+
+#define VREG_OFF(fs, v) ((fs) + 8 + (v) * 8)
+#define LOAD_A() do { if (inst->a != rv) { addr_local(g, "x9", VREG_OFF(fs, inst->a)); fprintf(g->out, "    ldr x0, [x9]\n"); } } while(0)
+
+static void emit_ir_func(Gen *g, IRFunc *f) {
+    Node *fn = f->fn;
+    int fs = f->frame_size;
+    int vreg_area = f->next_vreg * 8;
+    int total_frame = ((fs + vreg_area) + 15) / 16 * 16;
+
+    fprintf(g->out, "\n%s:\n", f->name);
+    fprintf(g->out, "    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n");
+    if (total_frame > 0) {
+        if (total_frame <= 4095) fprintf(g->out, "    sub sp, sp, #%d\n", total_frame);
+        else fprintf(g->out, "    mov x9, #%d\n    sub sp, sp, x9\n", total_frame);
+    }
+    gen_regsave(g);
+
+    int returns_struct = ((fn->type == TYPE_STRUCT || is_blob16(fn->type, fn->ptr)) &&
+                          fn->ptr == 0 && !fn->is_extern);
+    int png = 0, pnf = 0, pnstk = 0;
+    if (returns_struct) {
+        addr_local(g, "x9", g->sret_off);
+        fprintf(g->out, "    str x8, [x9]\n");
+    }
+    for (int i = 0; i < fn->nitems; i++) {
+        Node *p = fn->items[i];
+        Sym *psym = &g->locals[f->param_start + i];
+        int is_float_param = is_float_type(p->type) && p->ptr == 0;
+        if ((p->type == TYPE_STRUCT || p->type == TYPE_I128 || p->type == TYPE_U128 || p->type == TYPE_DYN) && p->ptr == 0) {
+            int ssize = type_size(g, p->type, 0, p->type_name);
+            if (png < 8) fprintf(g->out, "    mov x9, x%d\n", png++);
+            else         fprintf(g->out, "    ldr x9, [x29, #%d]\n", 16 + 8 * pnstk++);
+            addr_local(g, "x10", psym->offset);
+            gen_memcpy(g, ssize);
+            continue;
+        }
+        if (is_float_param) {
+            if (pnf < 8) {
+                if (fn->is_export && p->type == TYPE_F32)
+                    fprintf(g->out, "    fcvt d%d, s%d\n", pnf, pnf);
+                fprintf(g->out, "    fmov x0, d%d\n", pnf++);
+            } else if (fn->is_export && p->type == TYPE_F32) {
+                fprintf(g->out, "    ldr s0, [x29, #%d]\n    fcvt d0, s0\n    fmov x0, d0\n", 16 + 8 * pnstk++);
+            } else {
+                fprintf(g->out, "    ldr x0, [x29, #%d]\n", 16 + 8 * pnstk++);
+            }
+            addr_local(g, "x9", psym->offset);
+            fprintf(g->out, "    str x0, [x9]\n");
+        } else {
+            if (png < 8) fprintf(g->out, "    mov x9, x%d\n", png++);
+            else         fprintf(g->out, "    ldr x9, [x29, #%d]\n", 16 + 8 * pnstk++);
+            addr_local(g, "x10", psym->offset);
+            fprintf(g->out, "    str x9, [x10]\n");
+        }
+    }
+
+    int rv = -1;
+    for (int ip = 0; ip < f->ninsts; ip++) {
+        IRInst *inst = &f->insts[ip];
+
+        switch (inst->op) {
+        case IR_NOP:
+            if (inst->imm == 1) fprintf(g->out, "    brk #1\n");
+            break;
+
+        case IR_IMM:
+            if (inst->imm == 0)
+                fprintf(g->out, "    mov x0, xzr\n");
+            else
+                fprintf(g->out, "    ldr x0, =%lld\n", inst->imm);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_STR:
+            fprintf(g->out, "    adrp x0, mvs_str_%lld\n    add x0, x0, :lo12:mvs_str_%lld\n",
+                    inst->imm, inst->imm);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_FUNC_ADDR:
+            fprintf(g->out, "    adrp x0, %s\n    add x0, x0, :lo12:%s\n", inst->name, inst->name);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_LOCAL_ADDR:
+            addr_local(g, "x0", (int)inst->imm);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_GLOBAL_ADDR: {
+            char lbl[LABEL_MAX]; global_label(inst->name, lbl);
+            addr_label(g, "x0", lbl);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+
+        case IR_LOAD:
+            LOAD_A();
+            if (inst->type == TYPE_F32 && inst->ptr == 0)
+                fprintf(g->out, "    ldr s0, [x0]\n    fcvt d0, s0\n    fmov x0, d0\n");
+            else
+                gen_load_at(g, inst->size, inst->is_signed);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_STORE:
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            LOAD_A();
+            if (inst->type == TYPE_F32 && inst->ptr == 0)
+                fprintf(g->out, "    fmov d0, x1\n    fcvt s0, d0\n    str s0, [x0]\n");
+            else
+                gen_store_at(g, inst->size);
+            break;
+
+        case IR_COPY:
+            addr_local(g, "x14", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x9, [x14]\n");
+            addr_local(g, "x14", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    ldr x10, [x14]\n");
+            gen_memcpy(g, (int)inst->imm);
+            break;
+
+        case IR_OFFSET:
+            LOAD_A();
+            if (inst->imm) {
+                if (inst->imm > 0 && inst->imm <= 4095)
+                    fprintf(g->out, "    add x0, x0, #%lld\n", inst->imm);
+                else
+                    fprintf(g->out, "    ldr x9, =%lld\n    add x0, x0, x9\n", inst->imm);
+            }
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_INDEX:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            if (inst->imm != 1)
+                fprintf(g->out, "    mov x9, #%lld\n    mul x1, x1, x9\n", inst->imm);
+            fprintf(g->out, "    add x0, x0, x1\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_ADD: case IR_SUB: case IR_MUL:
+        case IR_BAND: case IR_BOR: case IR_BXOR: {
+            const char *op = inst->op==IR_ADD ? "add" : inst->op==IR_SUB ? "sub" :
+                             inst->op==IR_MUL ? "mul" : inst->op==IR_BAND ? "and" :
+                             inst->op==IR_BOR ? "orr" : "eor";
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    %s x0, x0, x1\n", op);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+        case IR_SDIV:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    sdiv x0, x0, x1\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_UDIV:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    udiv x0, x0, x1\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_SMOD:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    sdiv x2, x0, x1\n    msub x0, x2, x1, x0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_UMOD:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    udiv x2, x0, x1\n    msub x0, x2, x1, x0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_SHL:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    lsl x0, x0, x1\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_SAR:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    asr x0, x0, x1\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_SHR:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    lsr x0, x0, x1\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_NEG:
+            LOAD_A();
+            fprintf(g->out, "    neg x0, x0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_BNOT:
+            LOAD_A();
+            fprintf(g->out, "    mvn x0, x0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_CMP: {
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            fprintf(g->out, "    cmp x0, x1\n");
+            const char *cc;
+            switch (inst->cmp) {
+                case CMP_EQ:  cc="eq"; break; case CMP_NE:  cc="ne"; break;
+                case CMP_SLT: cc="lt"; break; case CMP_SGT: cc="gt"; break;
+                case CMP_SLE: cc="le"; break; case CMP_SGE: cc="ge"; break;
+                case CMP_ULT: cc="lo"; break; case CMP_UGT: cc="hi"; break;
+                case CMP_ULE: cc="ls"; break; case CMP_UGE: cc="hs"; break;
+                default:      cc="eq"; break;
+            }
+            fprintf(g->out, "    cset x0, %s\n", cc);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+
+        case IR_FADD: case IR_FSUB: case IR_FMUL: case IR_FDIV: {
+            const char *op = inst->op==IR_FADD ? "fadd" : inst->op==IR_FSUB ? "fsub" :
+                             inst->op==IR_FMUL ? "fmul" : "fdiv";
+            LOAD_A();
+            fprintf(g->out, "    fmov d0, x0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n    fmov d1, x1\n");
+            fprintf(g->out, "    %s d0, d0, d1\n    fmov x0, d0\n", op);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+        case IR_FNEG:
+            LOAD_A();
+            fprintf(g->out, "    fmov d0, x0\n");
+            fprintf(g->out, "    fneg d0, d0\n    fmov x0, d0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_FCMP: {
+            LOAD_A();
+            fprintf(g->out, "    fmov d0, x0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n    fmov d1, x1\n");
+            fprintf(g->out, "    fcmp d0, d1\n");
+            const char *cc;
+            switch (inst->cmp) {
+                case CMP_FEQ: cc="eq"; break; case CMP_FNE: cc="ne"; break;
+                case CMP_FLT: cc="mi"; break; case CMP_FGT: cc="gt"; break;
+                case CMP_FLE: cc="ls"; break; case CMP_FGE: cc="ge"; break;
+                default:      cc="eq"; break;
+            }
+            fprintf(g->out, "    cset x0, %s\n", cc);
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+
+        case IR_ITOF:
+            LOAD_A();
+            fprintf(g->out, "    scvtf d0, x0\n    fmov x0, d0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_UTOF:
+            LOAD_A();
+            fprintf(g->out, "    ucvtf d0, x0\n    fmov x0, d0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_FTOI:
+            LOAD_A();
+            fprintf(g->out, "    fmov d0, x0\n    fcvtzs x0, d0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_SEXT:
+            LOAD_A();
+            switch (inst->size) {
+                case 1: fprintf(g->out, "    sxtb x0, w0\n"); break;
+                case 2: fprintf(g->out, "    sxth x0, w0\n"); break;
+                case 4: fprintf(g->out, "    sxtw x0, w0\n"); break;
+                default: break;
+            }
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_ZEXT:
+            LOAD_A();
+            switch (inst->size) {
+                case 1: fprintf(g->out, "    and x0, x0, #0xff\n"); break;
+                case 2: fprintf(g->out, "    and x0, x0, #0xffff\n"); break;
+                case 4: fprintf(g->out, "    mov w0, w0\n"); break;
+                default: break;
+            }
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_F32_F64:
+            LOAD_A();
+            fprintf(g->out, "    fmov s0, w0\n    fcvt d0, s0\n    fmov x0, d0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_F64_F32:
+            LOAD_A();
+            fprintf(g->out, "    fmov d0, x0\n    fcvt s0, d0\n    fmov w0, s0\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_BOOL:
+            LOAD_A();
+            fprintf(g->out, "    cmp x0, xzr\n    cset x0, ne\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        case IR_MOV:
+            if (inst->a != IR_NONE) {
+                LOAD_A();
+                addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+                fprintf(g->out, "    str x0, [x9]\n");
+            }
+            break;
+
+        case IR_LABEL:
+            fprintf(g->out, ".Lir_%d:\n", inst->label);
+            break;
+        case IR_BR:
+            LOAD_A();
+            fprintf(g->out, "    cbnz x0, .Lir_%d\n", inst->label);
+            fprintf(g->out, "    b .Lir_%d\n", inst->label2);
+            break;
+        case IR_JMP:
+            fprintf(g->out, "    b .Lir_%d\n", inst->label);
+            break;
+        case IR_RET:
+            if (inst->a != IR_NONE) {
+                LOAD_A();
+                if (g->cur_ret_float) fprintf(g->out, "    fmov d0, x0\n");
+                if (g->cur_ret_f32c)  fprintf(g->out, "    fcvt s0, d0\n");
+            }
+            gen_epilogue(g);
+            break;
+
+        case IR_CALL:
+        case IR_ICALL: {
+            int nargs = inst->nargs;
+            int astart = inst->arg_start;
+            int rsc = inst->sig &&
+                ((inst->sig->type == TYPE_STRUCT || is_blob16(inst->sig->type, inst->sig->ptr)) &&
+                 inst->sig->ptr == 0);
+            int ng = 0, nfp = 0, nstk = 0;
+            int cls_gpr[80], cls_fp[80], cls_stk[80];
+            for (int ai = 0; ai < nargs && ai < 80; ai++) {
+                cls_gpr[ai] = cls_fp[ai] = cls_stk[ai] = -1;
+                if (rsc && ai == 0) continue;
+                IRArg *arg = &f->args[astart + ai];
+                int is_fp = is_float_type(arg->type) && arg->ptr == 0;
+                if (is_fp) { if (nfp < 8) cls_fp[ai] = nfp++; else cls_stk[ai] = nstk++; }
+                else       { if (ng < 8) cls_gpr[ai] = ng++;   else cls_stk[ai] = nstk++; }
+            }
+            int callspace = (nstk * 8 + 15) / 16 * 16;
+            if (callspace) {
+                if (callspace <= 4095) fprintf(g->out, "    sub sp, sp, #%d\n", callspace);
+                else fprintf(g->out, "    mov x9, #%d\n    sub sp, sp, x9\n", callspace);
+            }
+            for (int ai = 0; ai < nargs && ai < 80; ai++) {
+                IRArg *arg = &f->args[astart + ai];
+                int av = arg->vreg;
+                if (av == IR_NONE) continue;
+                addr_local(g, "x14", VREG_OFF(fs, av));
+                fprintf(g->out, "    ldr x15, [x14]\n");
+                if (rsc && ai == 0) {
+                    fprintf(g->out, "    mov x8, x15\n");
+                } else if (cls_fp[ai] >= 0) {
+                    fprintf(g->out, "    fmov d%d, x15\n", cls_fp[ai]);
+                } else if (cls_gpr[ai] >= 0) {
+                    fprintf(g->out, "    mov x%d, x15\n", cls_gpr[ai]);
+                } else {
+                    fprintf(g->out, "    str x15, [sp, #%d]\n", cls_stk[ai] * 8);
+                }
+            }
+            if (inst->op == IR_CALL)
+                fprintf(g->out, "    bl %s\n", inst->name);
+            else {
+                addr_local(g, "x14", VREG_OFF(fs, inst->a));
+                fprintf(g->out, "    ldr x9, [x14]\n    blr x9\n");
+            }
+            if (callspace) {
+                if (callspace <= 4095) fprintf(g->out, "    add sp, sp, #%d\n", callspace);
+                else fprintf(g->out, "    mov x9, #%d\n    add sp, sp, x9\n", callspace);
+            }
+            if (inst->dst != IR_NONE) {
+                int c_abi = inst->sig && (inst->sig->is_extern || inst->sig->is_export);
+                if (inst->sig && is_float_type(inst->sig->type) && inst->sig->ptr == 0) {
+                    if (c_abi && inst->sig->type == TYPE_F32)
+                        fprintf(g->out, "    fcvt d0, s0\n");
+                    fprintf(g->out, "    fmov x0, d0\n");
+                }
+                addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+                fprintf(g->out, "    str x0, [x9]\n");
+            }
+            break;
+        }
+
+        case IR_IOOUT: {
+            int saved_vis = g->nvisible;
+            if (inst->vis && inst->nvis > 0) {
+                g->nvisible = inst->nvis;
+                memcpy(g->visible, inst->vis, inst->nvis * sizeof(int));
+            } else {
+                g->nvisible = 0;
+                for (int li = 0; li < f->nlocals_snap; li++)
+                    g->visible[g->nvisible++] = li;
+            }
+            for (int li = 0; li < g->nvisible; li++) {
+                Sym *s = &g->locals[g->visible[li]];
+                const char *r = var_reg(s);
+                if (r) {
+                    addr_local(g, "x9", s->offset);
+                    fprintf(g->out, "    ldr %s, [x9]\n", r);
+                }
+            }
+            if (inst->node) {
+                if (inst->node->kind == ND_VAR_DECL || inst->node->kind == ND_RETURN)
+                    gen_stmt(g, inst->node);
+                else
+                    gen_expr(g, inst->node);
+                if (inst->dst != IR_NONE) {
+                    addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+                    fprintf(g->out, "    str x0, [x9]\n");
+                }
+                if (inst->a != IR_NONE) {
+                    ExprType rt = type_of(g, inst->node);
+                    if ((rt.base == TYPE_STRUCT || is_blob16(rt.base, rt.ptr)) && rt.ptr == 0) {
+                        int sz = type_size(g, rt.base, rt.ptr, rt.sname);
+                        if (sz > 0) {
+                            fprintf(g->out, "    mov x9, x0\n");
+                            addr_local(g, "x14", VREG_OFF(fs, inst->a));
+                            fprintf(g->out, "    ldr x10, [x14]\n");
+                            gen_memcpy(g, sz);
+                        }
+                    }
+                }
+            }
+            for (int li = 0; li < g->nvisible; li++) {
+                Sym *s = &g->locals[g->visible[li]];
+                const char *r = var_reg(s);
+                if (r) {
+                    addr_local(g, "x9", s->offset);
+                    fprintf(g->out, "    str %s, [x9]\n", r);
+                }
+            }
+            g->nvisible = saved_vis;
+            break;
+        }
+
+        case IR_LINE:
+            break;
+
+        case IR_TRUNC:
+            LOAD_A();
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+
+        case IR_FPOW:
+            fprintf(stderr, "emit_ir error: IR_FPOW should be lowered via IR_IOOUT\n");
+            g->had_error = 1;
+            break;
+
+        default:
+            break;
+        }
+
+        switch (inst->op) {
+        case IR_LABEL: case IR_BR: case IR_JMP: case IR_RET:
+        case IR_IOOUT:
+            rv = -1; break;
+        case IR_CALL: case IR_ICALL:
+            rv = (inst->dst != IR_NONE) ? inst->dst : -1; break;
+        case IR_STORE:
+            rv = inst->a; break;
+        case IR_NOP: case IR_COPY: case IR_LINE:
+            break;
+        default:
+            if (inst->dst != IR_NONE) rv = inst->dst;
+            break;
+        }
+    }
+
+    fprintf(g->out, "    mov x0, xzr\n");
+    gen_epilogue(g);
+}
+
+#undef LOAD_A
+#undef VREG_OFF
+
 static int scan_uses_dyn(Node *n) {
     if (!n) return 0;
     if (n->type == TYPE_DYN) return 1;
@@ -1876,7 +2415,13 @@ int arm64_linux_generate(Node *program, FILE *out) {
         if (d->kind != ND_FUNC || d->is_extern) continue;
         if (d->ngen > 0) continue;
         if (!reached[func_index(&g, d)]) continue;
-        gen_func(&g, d, program);
+        if (mvs_use_ir) {
+            IRFunc *irf = lower_func(&g, d, program, NREGVARS);
+            if (irf && !g.had_error) emit_ir_func(&g, irf);
+            if (irf) ir_func_free(irf);
+        } else {
+            gen_func(&g, d, program);
+        }
     }
     if (g.need_i128) emit_i128_helpers(&g);
 

@@ -16,6 +16,8 @@
 #include <string.h>
 #include "sysv.h"
 #include "../common.h"
+#include "../../ir.h"
+#include "../../lower.h"
 
 /* ---------- code emission helpers ---------- */
 
@@ -727,11 +729,24 @@ static void gen_expr(Gen *g, Node *n) {
                                          n->op==TK_STAR ? "mulsd" : "divsd";
                         fprintf(g->out, "    %s xmm0, xmm1\n    movq rax, xmm0\n", op);
                     } else {
-                        /* compare floats via ucomisd (sets flags unsigned-style) */
-                        const char *cc = n->op==TK_EQ ? "sete" : n->op==TK_NEQ ? "setne" :
-                                         n->op==TK_LT ? "setb" : n->op==TK_GT ? "seta" :
-                                         n->op==TK_LE ? "setbe" : "setae";
-                        fprintf(g->out, "    ucomisd xmm0, xmm1\n    %s al\n    movzx rax, al\n", cc);
+                        /* compare floats via ucomisd; NaN sets PF=1 (unordered).
+                         * == must be ordered-equal (sete AND setnp),
+                         * != must be unordered-or-not-equal (setne OR setp),
+                         * < and <= are false for NaN (setb/setbe AND setnp),
+                         * > and >= already produce false for NaN via seta/setae. */
+                        fprintf(g->out, "    ucomisd xmm0, xmm1\n");
+                        if (n->op == TK_EQ)
+                            fprintf(g->out, "    sete al\n    setnp cl\n    and al, cl\n    movzx rax, al\n");
+                        else if (n->op == TK_NEQ)
+                            fprintf(g->out, "    setne al\n    setp cl\n    or al, cl\n    movzx rax, al\n");
+                        else if (n->op == TK_LT)
+                            fprintf(g->out, "    setb al\n    setnp cl\n    and al, cl\n    movzx rax, al\n");
+                        else if (n->op == TK_LE)
+                            fprintf(g->out, "    setbe al\n    setnp cl\n    and al, cl\n    movzx rax, al\n");
+                        else {
+                            const char *cc = n->op == TK_GT ? "seta" : "setae";
+                            fprintf(g->out, "    %s al\n    movzx rax, al\n", cc);
+                        }
                     }
                     break;
                 }
@@ -2000,6 +2015,489 @@ static void emit_i128_helpers(Gen *g) {
 /* Main entry point of the backend */
 /* Does any node in the tree mention a dyn Trait type? Decides whether vtables are
  * needed and whether trait-impl methods must be kept by tree-shaking. */
+/* ------------------------------------------------------------------ */
+/*  IR emitter: translate IRFunc instructions to NASM (SysV ABI)      */
+/* ------------------------------------------------------------------ */
+
+#define VREG_OFF(fs, v) ((fs) + 8 + (v) * 8)
+#define LOAD_A() do { if (inst->a != rv) fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a)); } while(0)
+
+static void emit_ir_func(Gen *g, IRFunc *f) {
+    Node *fn = f->fn;
+    int fs = f->frame_size;
+    int vreg_area = f->next_vreg * 8;
+    int total_frame = ((fs + vreg_area) + 15) / 16 * 16;
+
+    fprintf(g->out, "\n%s:\n", f->name);
+    fprintf(g->out, "    push rbp\n    mov rbp, rsp\n");
+    if (total_frame > 0) fprintf(g->out, "    sub rsp, %d\n", total_frame);
+    gen_regsave(g);
+
+    int returns_struct = ((fn->type == TYPE_STRUCT || is_blob16(fn->type, fn->ptr)) &&
+                          fn->ptr == 0 && !fn->is_extern);
+    static const char *argregs[6] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+    int png = 0, pnx = 0, pnstk = 0;
+    if (returns_struct) { fprintf(g->out, "    mov [rbp - %d], rdi\n", g->sret_off); png++; }
+    for (int i = 0; i < fn->nitems; i++) {
+        Node *p = fn->items[i];
+        Sym *psym = &g->locals[f->param_start + i];
+        int is_float_param = is_float_type(p->type) && p->ptr == 0;
+        if ((p->type == TYPE_STRUCT || p->type == TYPE_I128 || p->type == TYPE_U128 || p->type == TYPE_DYN) && p->ptr == 0) {
+            int ssize = type_size(g, p->type, 0, p->type_name);
+            if (png < 6) fprintf(g->out, "    mov r10, %s\n", argregs[png++]);
+            else         fprintf(g->out, "    mov r10, [rbp + %d]\n", 16 + 8 * pnstk++);
+            fprintf(g->out, "    lea r11, [rbp - %d]\n", psym->offset);
+            gen_memcpy(g, ssize);
+            continue;
+        }
+        if (is_float_param) {
+            if (pnx < 8) {
+                if (fn->is_export && p->type == TYPE_F32)
+                    fprintf(g->out, "    cvtss2sd xmm%d, xmm%d\n", pnx, pnx);
+                fprintf(g->out, "    movq rax, xmm%d\n", pnx++);
+            } else if (fn->is_export && p->type == TYPE_F32) {
+                fprintf(g->out, "    movd xmm0, dword [rbp + %d]\n    cvtss2sd xmm0, xmm0\n    movq rax, xmm0\n",
+                        16 + 8 * pnstk++);
+            } else {
+                fprintf(g->out, "    mov rax, [rbp + %d]\n", 16 + 8 * pnstk++);
+            }
+            fprintf(g->out, "    mov [rbp - %d], rax\n", psym->offset);
+        } else {
+            if (png < 6) fprintf(g->out, "    mov [rbp - %d], %s\n", psym->offset, argregs[png++]);
+            else {
+                fprintf(g->out, "    mov rax, [rbp + %d]\n", 16 + 8 * pnstk++);
+                fprintf(g->out, "    mov [rbp - %d], rax\n", psym->offset);
+            }
+        }
+    }
+
+    int rv = -1;
+    for (int ip = 0; ip < f->ninsts; ip++) {
+        IRInst *inst = &f->insts[ip];
+
+        switch (inst->op) {
+        case IR_NOP:
+            if (inst->imm == 1) fprintf(g->out, "    ud2\n");
+            break;
+
+        case IR_IMM:
+            if (inst->imm == 0)
+                fprintf(g->out, "    xor eax, eax\n");
+            else if (inst->imm > 0 && inst->imm <= 0x7FFFFFFF)
+                fprintf(g->out, "    mov eax, %lld\n", inst->imm);
+            else
+                fprintf(g->out, "    mov rax, %lld\n", inst->imm);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_STR:
+            fprintf(g->out, "    lea rax, [rel mvs_str_%lld]\n", inst->imm);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_FUNC_ADDR:
+            fprintf(g->out, "    lea rax, [rel %s]\n", inst->name);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_LOCAL_ADDR:
+            fprintf(g->out, "    lea rax, [rbp - %lld]\n", inst->imm);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_GLOBAL_ADDR: {
+            char lbl[LABEL_MAX]; global_label(inst->name, lbl);
+            fprintf(g->out, "    lea rax, [rel %s]\n", lbl);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+
+        case IR_LOAD:
+            LOAD_A();
+            if (inst->type == TYPE_F32 && inst->ptr == 0)
+                fprintf(g->out, "    movd xmm0, dword [rax]\n    cvtss2sd xmm0, xmm0\n    movq rax, xmm0\n");
+            else
+                gen_load_at(g, inst->size, inst->is_signed);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_STORE:
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            LOAD_A();
+            if (inst->type == TYPE_F32 && inst->ptr == 0)
+                fprintf(g->out, "    movq xmm0, rcx\n    cvtsd2ss xmm0, xmm0\n    movd dword [rax], xmm0\n");
+            else
+                gen_store_at(g, inst->size);
+            break;
+
+        case IR_COPY:
+            fprintf(g->out, "    mov r10, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    mov r11, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+            gen_memcpy(g, (int)inst->imm);
+            break;
+
+        case IR_OFFSET:
+            LOAD_A();
+            if (inst->imm) fprintf(g->out, "    add rax, %lld\n", inst->imm);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_INDEX:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            if (inst->imm != 1) fprintf(g->out, "    imul rcx, %lld\n", inst->imm);
+            fprintf(g->out, "    add rax, rcx\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_ADD: case IR_SUB: case IR_MUL:
+        case IR_BAND: case IR_BOR: case IR_BXOR: {
+            const char *op = inst->op==IR_ADD ? "add" : inst->op==IR_SUB ? "sub" :
+                             inst->op==IR_MUL ? "imul" : inst->op==IR_BAND ? "and" :
+                             inst->op==IR_BOR ? "or" : "xor";
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    %s rax, rcx\n", op);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+        case IR_SDIV:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    cqo\n    idiv rcx\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_UDIV:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    xor edx, edx\n    div rcx\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_SMOD:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    cqo\n    idiv rcx\n    mov rax, rdx\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_UMOD:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    xor edx, edx\n    div rcx\n    mov rax, rdx\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_SHL:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    shl rax, cl\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_SAR:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    sar rax, cl\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_SHR:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    shr rax, cl\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_NEG:
+            LOAD_A();
+            fprintf(g->out, "    neg rax\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_BNOT:
+            LOAD_A();
+            fprintf(g->out, "    not rax\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_CMP: {
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    cmp rax, rcx\n");
+            const char *cc;
+            switch (inst->cmp) {
+                case CMP_EQ:  cc="sete";  break; case CMP_NE:  cc="setne"; break;
+                case CMP_SLT: cc="setl";  break; case CMP_SGT: cc="setg";  break;
+                case CMP_SLE: cc="setle"; break; case CMP_SGE: cc="setge"; break;
+                case CMP_ULT: cc="setb";  break; case CMP_UGT: cc="seta";  break;
+                case CMP_ULE: cc="setbe"; break; case CMP_UGE: cc="setae"; break;
+                default:      cc="sete";  break;
+            }
+            fprintf(g->out, "    %s al\n    movzx rax, al\n", cc);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+
+        case IR_FADD: case IR_FSUB: case IR_FMUL: case IR_FDIV: {
+            const char *op = inst->op==IR_FADD ? "addsd" : inst->op==IR_FSUB ? "subsd" :
+                             inst->op==IR_FMUL ? "mulsd" : "divsd";
+            LOAD_A();
+            fprintf(g->out, "    movq xmm0, rax\n");
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    movq xmm1, rax\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    %s xmm0, xmm1\n    movq rax, xmm0\n", op);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+        case IR_FNEG:
+            LOAD_A();
+            fprintf(g->out, "    mov rcx, 0x8000000000000000\n    xor rax, rcx\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_FCMP: {
+            LOAD_A();
+            fprintf(g->out, "    movq xmm0, rax\n");
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    movq xmm1, rax\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ucomisd xmm0, xmm1\n");
+            switch (inst->cmp) {
+                case CMP_FEQ:
+                    fprintf(g->out, "    sete al\n    setnp cl\n    and al, cl\n    movzx rax, al\n"); break;
+                case CMP_FNE:
+                    fprintf(g->out, "    setne al\n    setp cl\n    or al, cl\n    movzx rax, al\n"); break;
+                case CMP_FLT:
+                    fprintf(g->out, "    setb al\n    setnp cl\n    and al, cl\n    movzx rax, al\n"); break;
+                case CMP_FLE:
+                    fprintf(g->out, "    setbe al\n    setnp cl\n    and al, cl\n    movzx rax, al\n"); break;
+                default: {
+                    const char *cc = inst->cmp == CMP_FGT ? "seta" : "setae";
+                    fprintf(g->out, "    %s al\n    movzx rax, al\n", cc); break;
+                }
+            }
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+
+        case IR_ITOF:
+            LOAD_A();
+            fprintf(g->out, "    cvtsi2sd xmm0, rax\n    movq rax, xmm0\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_UTOF: {
+            int lok = new_label(g);
+            LOAD_A();
+            fprintf(g->out, "    test rax, rax\n    js .Lutof_big%d\n", lok);
+            fprintf(g->out, "    cvtsi2sd xmm0, rax\n    jmp .Lutof_done%d\n", lok);
+            fprintf(g->out, ".Lutof_big%d:\n", lok);
+            fprintf(g->out, "    mov rcx, rax\n    shr rcx, 1\n    and eax, 1\n    or rax, rcx\n");
+            fprintf(g->out, "    cvtsi2sd xmm0, rax\n    addsd xmm0, xmm0\n");
+            fprintf(g->out, ".Lutof_done%d:\n", lok);
+            fprintf(g->out, "    movq rax, xmm0\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+        case IR_FTOI:
+            LOAD_A();
+            fprintf(g->out, "    movq xmm0, rax\n    cvttsd2si rax, xmm0\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_SEXT:
+            LOAD_A();
+            switch (inst->size) {
+                case 1: fprintf(g->out, "    movsx rax, al\n"); break;
+                case 2: fprintf(g->out, "    movsx rax, ax\n"); break;
+                case 4: fprintf(g->out, "    movsxd rax, eax\n"); break;
+                default: break;
+            }
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_ZEXT:
+            LOAD_A();
+            switch (inst->size) {
+                case 1: fprintf(g->out, "    movzx rax, al\n"); break;
+                case 2: fprintf(g->out, "    movzx rax, ax\n"); break;
+                case 4: fprintf(g->out, "    mov eax, eax\n"); break;
+                default: break;
+            }
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_F32_F64:
+            LOAD_A();
+            fprintf(g->out, "    movd xmm0, eax\n    cvtss2sd xmm0, xmm0\n    movq rax, xmm0\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_F64_F32:
+            LOAD_A();
+            fprintf(g->out, "    movq xmm0, rax\n    cvtsd2ss xmm0, xmm0\n    movd eax, xmm0\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_BOOL:
+            LOAD_A();
+            fprintf(g->out, "    test rax, rax\n    setne al\n    movzx rax, al\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        case IR_MOV:
+            if (inst->a != IR_NONE) {
+                LOAD_A();
+                fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            }
+            break;
+
+        case IR_LABEL:
+            fprintf(g->out, ".Lir_%d:\n", inst->label);
+            break;
+        case IR_BR:
+            LOAD_A();
+            fprintf(g->out, "    test rax, rax\n");
+            fprintf(g->out, "    jnz .Lir_%d\n", inst->label);
+            fprintf(g->out, "    jmp .Lir_%d\n", inst->label2);
+            break;
+        case IR_JMP:
+            fprintf(g->out, "    jmp .Lir_%d\n", inst->label);
+            break;
+        case IR_RET:
+            if (inst->a != IR_NONE) {
+                LOAD_A();
+                if (g->cur_ret_float) fprintf(g->out, "    movq xmm0, rax\n");
+                if (g->cur_ret_f32c)  fprintf(g->out, "    cvtsd2ss xmm0, xmm0\n");
+            }
+            gen_epilogue(g);
+            break;
+
+        case IR_CALL:
+        case IR_ICALL: {
+            static const char *gpr[6] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+            int nargs = inst->nargs;
+            int astart = inst->arg_start;
+            int ng = 0, nx = 0, nstk = 0;
+            int cls_gpr[80], cls_xmm[80], cls_stk[80];
+            for (int ai = 0; ai < nargs && ai < 80; ai++) {
+                IRArg *arg = &f->args[astart + ai];
+                int is_fp = is_float_type(arg->type) && arg->ptr == 0;
+                cls_gpr[ai] = cls_xmm[ai] = cls_stk[ai] = -1;
+                if (is_fp) { if (nx < 8) cls_xmm[ai] = nx++; else cls_stk[ai] = nstk++; }
+                else       { if (ng < 6) cls_gpr[ai] = ng++; else cls_stk[ai] = nstk++; }
+            }
+            int callspace = (nstk * 8 + 15) / 16 * 16;
+            if (callspace) fprintf(g->out, "    sub rsp, %d\n", callspace);
+            for (int ai = 0; ai < nargs && ai < 80; ai++) {
+                IRArg *arg = &f->args[astart + ai];
+                int av = arg->vreg;
+                if (av == IR_NONE) continue;
+                int is_fp = is_float_type(arg->type) && arg->ptr == 0;
+                if (cls_xmm[ai] >= 0) {
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    movq xmm%d, rax\n",
+                            VREG_OFF(fs, av), cls_xmm[ai]);
+                } else if (cls_gpr[ai] >= 0) {
+                    if (is_fp)
+                        fprintf(g->out, "    mov rax, [rbp - %d]\n    movq xmm0, rax\n    mov %s, rax\n",
+                                VREG_OFF(fs, av), gpr[cls_gpr[ai]]);
+                    else
+                        fprintf(g->out, "    mov %s, [rbp - %d]\n", gpr[cls_gpr[ai]], VREG_OFF(fs, av));
+                } else {
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, av));
+                    fprintf(g->out, "    mov [rsp + %d], rax\n", cls_stk[ai] * 8);
+                }
+            }
+            if (inst->sig && inst->sig->is_extern)
+                fprintf(g->out, "    mov al, %d\n", nx);
+            if (inst->op == IR_CALL)
+                fprintf(g->out, "    call %s\n", inst->name);
+            else {
+                fprintf(g->out, "    mov rax, [rbp - %d]\n    call rax\n", VREG_OFF(fs, inst->a));
+            }
+            if (callspace) fprintf(g->out, "    add rsp, %d\n", callspace);
+            if (inst->dst != IR_NONE) {
+                int c_abi = inst->sig && (inst->sig->is_extern || inst->sig->is_export);
+                if (inst->sig && is_float_type(inst->sig->type) && inst->sig->ptr == 0) {
+                    if (c_abi && inst->sig->type == TYPE_F32)
+                        fprintf(g->out, "    cvtss2sd xmm0, xmm0\n");
+                    fprintf(g->out, "    movq rax, xmm0\n");
+                }
+                fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            }
+            break;
+        }
+
+        case IR_IOOUT: {
+            int saved_vis = g->nvisible;
+            if (inst->vis && inst->nvis > 0) {
+                g->nvisible = inst->nvis;
+                memcpy(g->visible, inst->vis, inst->nvis * sizeof(int));
+            } else {
+                g->nvisible = 0;
+                for (int li = 0; li < f->nlocals_snap; li++)
+                    g->visible[g->nvisible++] = li;
+            }
+            for (int li = 0; li < g->nvisible; li++) {
+                Sym *s = &g->locals[g->visible[li]];
+                const char *r = var_reg(s);
+                if (r) fprintf(g->out, "    mov %s, [rbp - %d]\n", r, s->offset);
+            }
+            if (inst->node) {
+                if (inst->node->kind == ND_VAR_DECL || inst->node->kind == ND_RETURN)
+                    gen_stmt(g, inst->node);
+                else
+                    gen_expr(g, inst->node);
+                if (inst->dst != IR_NONE)
+                    fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+                if (inst->a != IR_NONE) {
+                    ExprType rt = type_of(g, inst->node);
+                    if ((rt.base == TYPE_STRUCT || is_blob16(rt.base, rt.ptr)) && rt.ptr == 0) {
+                        int sz = type_size(g, rt.base, rt.ptr, rt.sname);
+                        if (sz > 0) {
+                            fprintf(g->out, "    mov r10, rax\n");
+                            fprintf(g->out, "    mov r11, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+                            gen_memcpy(g, sz);
+                        }
+                    }
+                }
+            }
+            for (int li = 0; li < g->nvisible; li++) {
+                Sym *s = &g->locals[g->visible[li]];
+                const char *r = var_reg(s);
+                if (r) fprintf(g->out, "    mov [rbp - %d], %s\n", s->offset, r);
+            }
+            g->nvisible = saved_vis;
+            break;
+        }
+
+        case IR_LINE:
+            if (inst->line > 0)
+                fprintf(g->out, "%%line %d+0 %s\n",
+                        inst->line, inst->file ? inst->file : "unknown.mvs");
+            break;
+
+        case IR_TRUNC:
+            LOAD_A();
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
+        case IR_FPOW:
+            fprintf(stderr, "emit_ir error: IR_FPOW should be lowered via IR_IOOUT\n");
+            g->had_error = 1;
+            break;
+
+        default:
+            break;
+        }
+
+        switch (inst->op) {
+        case IR_LABEL: case IR_BR: case IR_JMP: case IR_RET:
+        case IR_IOOUT:
+            rv = -1; break;
+        case IR_CALL: case IR_ICALL:
+            rv = (inst->dst != IR_NONE) ? inst->dst : -1; break;
+        case IR_STORE:
+            rv = inst->a; break;
+        case IR_NOP: case IR_COPY: case IR_LINE:
+            break;
+        default:
+            if (inst->dst != IR_NONE) rv = inst->dst;
+            break;
+        }
+    }
+
+    fprintf(g->out, "    xor eax, eax\n");
+    gen_epilogue(g);
+}
+
+#undef LOAD_A
+#undef VREG_OFF
+
 static int scan_uses_dyn(Node *n) {
     if (!n) return 0;
     if (n->type == TYPE_DYN) return 1;
@@ -2109,7 +2607,13 @@ int x86_64_sysv_generate(Node *program, FILE *out) {
         if (d->kind != ND_FUNC || d->is_extern) continue;
         if (d->ngen > 0) continue;                  /* skip generic templates (only instances remain) */
         if (!reached[func_index(&g, d)]) continue; /* tree-shaking: skip functions never called */
-        gen_func(&g, d, program);
+        if (mvs_use_ir) {
+            IRFunc *irf = lower_func(&g, d, program, NREGVARS);
+            emit_ir_func(&g, irf);
+            ir_func_free(irf);
+        } else {
+            gen_func(&g, d, program);
+        }
     }
     if (g.need_i128) emit_i128_helpers(&g);   /* 128-bit divmod + decimal print routines */
 
