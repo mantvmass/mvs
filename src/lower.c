@@ -1406,7 +1406,7 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
                         int eaddr = ir_vreg(f);
                         IRInst *ga = ir_emit(f, IR_GLOBAL_ADDR, eaddr, IR_NONE, IR_NONE);
                         ga->name = s->name;
-                        if (j * esz) {
+                        if (j != 0) {
                             int off = ir_vreg(f);
                             IRInst *oi = ir_emit(f, IR_OFFSET, off, eaddr, IR_NONE);
                             oi->imm = j * esz;

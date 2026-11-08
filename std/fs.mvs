@@ -69,9 +69,15 @@ func read(path: str) -> str {
     let size: usize = ftell(f) as usize;
     fseek(f, 0, 0);
     let buf: *u8 = malloc(size + 1);
-    fread(buf, 1, size, f);
-    buf[size] = 0;
+    let got: usize = fread(buf, 1, size, f);
     fclose(f);
+    let wr: usize = 0;
+    let rd: usize = 0;
+    while (rd < got) {
+        if (buf[rd] != 13) { buf[wr] = buf[rd]; wr = wr + 1; }
+        rd = rd + 1;
+    }
+    buf[wr] = 0;
     return buf;
 }
 

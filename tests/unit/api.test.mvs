@@ -40,7 +40,7 @@ func api_ptr_byte_access() -> void {
     test.eq(ptr.read8(p) as i64, 200);
     ptr.write8(ptr.offset(p, 3), 7);
     test.eq(ptr.read8(ptr.offset(p, 3)) as i64, 7);
-    test.eq(ptr.diff(ptr.offset(p, 3), p), 3);
+    test.eq(ptr.diff(ptr.offset(p, 3), p) as i64, 3);
     // offset accepts a negative step
     test.eq(ptr.read8(ptr.offset(ptr.offset(p, 3), 0 - 3)) as i64, 200);
     free(p);

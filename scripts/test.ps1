@@ -135,7 +135,7 @@ $failures = @()
 
 function Normalize([string]$s) {
     if ($null -eq $s) { return "" }
-    return ($s -replace "`r`n", "`n").TrimEnd("`n", " ", "`t")
+    return ($s -replace "`r", "").TrimEnd("`n", " ", "`t")
 }
 
 # flatten "examples/01_language/types" -> "01_language_types"
