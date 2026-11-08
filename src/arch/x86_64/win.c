@@ -206,8 +206,8 @@ static void gen_itof_xmm(Gen *g, const char *xmm, DataType base) {
             "    test rax, rax\n    js .Luf%d\n"
             "    cvtsi2sd %s, rax\n    jmp .Lufe%d\n"
             ".Luf%d:\n"
-            "    mov rcx, rax\n    shr rcx, 1\n    and rax, 1\n    or rcx, rax\n"
-            "    cvtsi2sd %s, rcx\n    addsd %s, %s\n"
+            "    mov r11, rax\n    shr r11, 1\n    and rax, 1\n    or r11, rax\n"
+            "    cvtsi2sd %s, r11\n    addsd %s, %s\n"
             ".Lufe%d:\n", l, xmm, l, l, xmm, xmm, xmm, l);
     } else {
         fprintf(g->out, "    cvtsi2sd %s, rax\n", xmm);
