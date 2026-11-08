@@ -75,9 +75,16 @@ sort, binary search, min/max). Still open:
 
 ## Conditional compilation
 
-`@compile(target_os/target_arch)` works today (guide section 4.13). Possible
-extensions, none committed: gating blocks inside a function, `not`/`any`
-combinators, user-defined keys (feature flags).
+`@compile(target_os/target_arch)` works today (guide section 4.13). Shipped
+extensions:
+
+- Block-level `@compile` inside function bodies: gating a `{ ... }` block
+  of statements instead of an entire top-level item.
+- `not(...)` combinator: `@compile(not(target_os = "windows"))` matches
+  every target except windows.
+
+Still open: `any(...)` combinator (OR semantics), user-defined keys
+(feature flags).
 
 ## Hardening
 

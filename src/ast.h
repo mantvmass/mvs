@@ -49,6 +49,7 @@ typedef enum {
     ND_WHILE,      /* while: uses cond, body */
     ND_FOR,        /* for: uses init, cond, step, body */
     ND_BLOCK,      /* block { ... }: uses items (statement list) */
+    ND_CFG_BLOCK,  /* @compile block inside a function: cfg_os/cfg_arch/cfg_not gate items */
     ND_BREAK,      /* break */
     ND_CONTINUE,   /* continue */
     ND_DOWHILE,    /* do-while: uses body, cond */
@@ -139,6 +140,7 @@ typedef struct Node {
      * the current target (AND semantics when both are set). */
     char         *cfg_os;     /* required target OS, e.g. "windows" or "linux" */
     char         *cfg_arch;   /* required target arch, e.g. "x86_64" or "aarch64" */
+    int           cfg_not;    /* 1 = negate: not(target_os = ...) matches when the value DIFFERS */
     int           is_test;    /* ND_FUNC: marked with @test; --test-main calls it from the
                                * generated main (functions named test_* count as well) */
 } Node;

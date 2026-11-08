@@ -39,11 +39,69 @@ typedef struct {
 } Loader;
 
 /* Does this item survive @compile filtering for the current target?
- * No attribute = always kept; both keys set = both must match (AND semantics). */
+ * No attribute = always kept; both keys set = both must match (AND semantics).
+ * cfg_not = 1 inverts the result (not(...) combinator). */
 static int cfg_matches(Loader *L, Node *it) {
-    if (it->cfg_os && strcmp(it->cfg_os, L->target_os) != 0) return 0;
-    if (it->cfg_arch && strcmp(it->cfg_arch, L->target_arch) != 0) return 0;
-    return 1;
+    if (!it->cfg_os && !it->cfg_arch) return 1;
+    int m = 1;
+    if (it->cfg_os && strcmp(it->cfg_os, L->target_os) != 0) m = 0;
+    if (it->cfg_arch && strcmp(it->cfg_arch, L->target_arch) != 0) m = 0;
+    return it->cfg_not ? !m : m;
+}
+
+/* Strip ND_CFG_BLOCK nodes from a block's items: matching blocks are inlined
+ * (their statements replace the node), non-matching blocks are removed.
+ * Recurses into if/while/for/block bodies so nested cfg blocks are handled. */
+static void cfg_strip_body(Loader *L, Node *block) {
+    if (!block || !block->items) return;
+    Node **out = NULL;
+    int nout = 0, cap = 0;
+    for (int i = 0; i < block->nitems; i++) {
+        Node *s = block->items[i];
+        if (s->kind == ND_CFG_BLOCK) {
+            if (cfg_matches(L, s)) {
+                for (int j = 0; j < s->nitems; j++) {
+                    if (nout >= cap) { cap = cap ? cap * 2 : 16; out = realloc(out, cap * sizeof(Node*)); }
+                    out[nout++] = s->items[j];
+                }
+            }
+        } else {
+            if (nout >= cap) { cap = cap ? cap * 2 : 16; out = realloc(out, cap * sizeof(Node*)); }
+            out[nout++] = s;
+        }
+    }
+    free(block->items);
+    block->items = out;
+    block->nitems = nout;
+    for (int i = 0; i < block->nitems; i++) {
+        Node *s = block->items[i];
+        if (s->body) cfg_strip_body(L, s->body);
+        if (s->then_branch) cfg_strip_body(L, s->then_branch);
+        if (s->else_branch) {
+            if (s->else_branch->kind == ND_BLOCK) cfg_strip_body(L, s->else_branch);
+            else if (s->else_branch->kind == ND_IF) {
+                if (s->else_branch->then_branch) cfg_strip_body(L, s->else_branch->then_branch);
+                if (s->else_branch->else_branch) cfg_strip_body(L, s->else_branch->else_branch);
+            }
+        }
+        if (s->kind == ND_BLOCK) cfg_strip_body(L, s);
+        if (s->kind == ND_SWITCH) {
+            for (int c = 0; c < s->nitems; c++)
+                if (s->items[c]->kind == ND_CASE) cfg_strip_body(L, s->items[c]);
+        }
+        if (s->kind == ND_MATCH) {
+            for (int a = 0; a < s->nitems; a++)
+                if (s->items[a]->body) cfg_strip_body(L, s->items[a]->body);
+        }
+    }
+}
+
+static void cfg_strip_program(Loader *L, Node *program) {
+    for (int i = 0; i < program->nitems; i++) {
+        Node *it = program->items[i];
+        if (it->kind == ND_FUNC && it->body)
+            cfg_strip_body(L, it->body);
+    }
 }
 
 /* Read a whole file into memory; returns a string (caller frees) or NULL */
@@ -411,6 +469,8 @@ Node *module_load(const char *entry_path, const char *stddir, const char *coredi
 
     /* The entry file loads with an empty namespace (function names used directly, contains main) */
     load_module(&L, entry_path, "");
+
+    cfg_strip_program(&L, L.result);
 
     *had_error = L.had_error;
     return L.result;

@@ -122,6 +122,7 @@ static Node *parse_expr(Parser *p);
 static Node *parse_stmt(Parser *p);
 static Node *parse_block(Parser *p);
 static DataType parse_type(Parser *p, int *ptr, char **type_name, Node **sig_out, int *arr_out);
+static void parse_attribute(Parser *p, char **os, char **arch, int *is_test, int *is_not);
 static int parse_generic_cname(Parser *p, const char *base, char *out, size_t on,
                                char *out_args[4], int *out_nargs);
 static Node *parse_match(Parser *p);
@@ -904,6 +905,24 @@ static Node *parse_stmt(Parser *p) {
     }
     if (check(p, TK_LBRACE)) return parse_block(p);
 
+    if (check(p, TK_AT)) {
+        char *os = NULL, *arch = NULL;
+        int is_test = 0, is_not = 0;
+        parse_attribute(p, &os, &arch, &is_test, &is_not);
+        if (is_test) { error(p, "@test is only valid on top-level functions"); free(os); free(arch); return node_new(ND_BLOCK, p->cur.line); }
+        Node *n = node_new(ND_CFG_BLOCK, p->cur.line);
+        n->cfg_os = os;
+        n->cfg_arch = arch;
+        n->cfg_not = is_not;
+        expect(p, TK_LBRACE, "expected '{' after @compile(...)");
+        while (!check(p, TK_RBRACE) && !check(p, TK_EOF) && !p->fatal) {
+            node_add_item(n, parse_stmt(p));
+            if (p->panic) synchronize(p);
+        }
+        expect(p, TK_RBRACE, "expected '}' to close @compile block");
+        return n;
+    }
+
     /* Anything else is treated as an expression statement (assignment / call / ++/--) */
     Node *e = node_new(ND_EXPR_STMT, p->cur.line);
     e->operand = parse_expr(p);
@@ -1350,25 +1369,9 @@ static Node *parse_struct(Parser *p) {
     return n;
 }
 
-/* attribute := '@' 'compile' '(' key '=' STRING (',' key '=' STRING)* ')'
- *            | '@' 'test'
- * key := 'target_os' | 'target_arch'
- * @compile gates the NEXT top-level item (kept only when the values match the
- * current target; unknown values warn since they never match). @test marks the
- * next function as a test for `mvs test` / --test-main. */
-static void parse_attribute(Parser *p, char **os, char **arch, int *is_test) {
-    advance(p); /* consume '@' */
-    if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "test") == 0) {
-        advance(p); /* @test takes no arguments */
-        *is_test = 1;
-        return;
-    }
-    if (!check(p, TK_IDENT) || strcmp(p->cur.lexeme, "compile") != 0) {
-        error(p, "unknown attribute; only @compile(...) and @test are supported");
-        return;
-    }
-    advance(p); /* consume 'compile' */
-    expect(p, TK_LPAREN, "expected '(' after @compile");
+/* parse_compile_keys: shared parser for the key = value pairs inside @compile().
+ * Handles target_os and target_arch, sets *os / *arch. */
+static void parse_compile_keys(Parser *p, char **os, char **arch) {
     do {
         if (!check(p, TK_IDENT)) {
             error(p, "expected 'target_os' or 'target_arch' inside @compile(...)");
@@ -1405,7 +1408,37 @@ static void parse_attribute(Parser *p, char **os, char **arch, int *is_test) {
         }
         advance(p); /* consume the string value */
     } while (match(p, TK_COMMA));
+}
+
+/* attribute := '@' 'compile' '(' ['not' '('] key '=' STRING (',' ...)* ')' [')'] ')'
+ *            | '@' 'test'
+ * key := 'target_os' | 'target_arch'
+ * @compile gates the NEXT top-level item (kept only when the values match the
+ * current target; unknown values warn since they never match). not(...) inverts
+ * the condition. @test marks the next function as a test for `mvs test`. */
+static void parse_attribute(Parser *p, char **os, char **arch, int *is_test, int *is_not) {
+    advance(p); /* consume '@' */
+    if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "test") == 0) {
+        advance(p); /* @test takes no arguments */
+        *is_test = 1;
+        return;
+    }
+    if (!check(p, TK_IDENT) || strcmp(p->cur.lexeme, "compile") != 0) {
+        error(p, "unknown attribute; only @compile(...) and @test are supported");
+        return;
+    }
+    advance(p); /* consume 'compile' */
+    expect(p, TK_LPAREN, "expected '(' after @compile");
+    int negate = 0;
+    if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "not") == 0) {
+        advance(p); /* consume 'not' */
+        expect(p, TK_LPAREN, "expected '(' after not");
+        negate = 1;
+    }
+    parse_compile_keys(p, os, arch);
+    if (negate) expect(p, TK_RPAREN, "expected ')' to close not(...)");
     expect(p, TK_RPAREN, "expected ')' to close @compile(...)");
+    *is_not = negate;
 }
 
 /* program := (attribute* (import | struct_decl | func_def | extern_func | global var_decl ';'))* */
@@ -1428,9 +1461,9 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
     while (!check(&p, TK_EOF) && !p.fatal) {
         /* attributes gate the NEXT declaration; several attribute lines may stack */
         char *cfg_os = NULL, *cfg_arch = NULL;
-        int cfg_test = 0;
+        int cfg_test = 0, cfg_not = 0;
         while (check(&p, TK_AT) && !p.fatal && !p.panic)
-            parse_attribute(&p, &cfg_os, &cfg_arch, &cfg_test);
+            parse_attribute(&p, &cfg_os, &cfg_arch, &cfg_test, &cfg_not);
         int cfg_start = prog->nitems;   /* stamp every item added by this iteration */
         if (p.panic) {
             /* the attribute itself failed to parse; skip stamping and recover below */
@@ -1472,6 +1505,7 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
                 Node *it = prog->items[i];
                 if (cfg_os && !it->cfg_os) it->cfg_os = strdup(cfg_os);
                 if (cfg_arch && !it->cfg_arch) it->cfg_arch = strdup(cfg_arch);
+                if (cfg_not) it->cfg_not = 1;
                 if (cfg_test && it->kind == ND_FUNC) it->is_test = 1;
             }
             free(cfg_os);

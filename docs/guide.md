@@ -729,6 +729,32 @@ func pause() -> void { /* ... */ }
 - An unknown key is a compile error; an unknown value only warns (it can never match).
 - `std/net.mvs` is the reference user: Winsock vs POSIX sockets in one file.
 
+**`not(...)` combinator:** negate the condition. Matches every target the inner
+condition does NOT match:
+
+```txt
+@compile(not(target_os = "windows"))
+func unix_only() -> void { /* ... */ }
+```
+
+**Block-level `@compile`:** gate a block of statements inside a function body
+instead of duplicating the entire function:
+
+```txt
+func close_fd(s: usize) -> i32 {
+    @compile(target_os = "windows") {
+        return closesocket(s);
+    }
+    @compile(not(target_os = "windows")) {
+        return close(s);
+    }
+}
+```
+
+Non-matching blocks are removed before type checking, so calls to
+platform-specific functions inside a gated block do not cause errors on
+other targets.
+
 ### 4.14 Testing (`mvs test` + `*.test.mvs`)
 
 Tests live in files named `somefile.test.mvs`. A test file defines test functions

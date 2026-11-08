@@ -30,10 +30,38 @@ const WIDTH: i32 = 80;
 @compile(target_os = "linux")
 const WIDTH: i32 = 80;
 
+// not(...) combinator: match everything EXCEPT the named target
+@compile(not(target_os = "linux"))
+func not_linux() -> str { return "not linux"; }
+@compile(not(target_os = "windows"))
+func not_linux() -> str { return "not linux"; }
+
 func main() -> i8 {
     io.out("{}", os_pick());
     io.out("{}", arch_pick());
     io.out("pair = {}", pair_pick());
     io.out("width = {}", WIDTH);
+    io.out("{}", not_linux());
+
+    // block-level @compile inside a function body
+    let tag: str = "none";
+    @compile(target_os = "windows") {
+        tag = "win block";
+    }
+    @compile(target_os = "linux") {
+        tag = "win block";
+    }
+    io.out("{}", tag);
+
+    // not(...) in a block
+    let neg: str = "fallback";
+    @compile(not(target_arch = "aarch64")) {
+        neg = "not aarch64";
+    }
+    @compile(target_arch = "aarch64") {
+        neg = "not aarch64";
+    }
+    io.out("{}", neg);
+
     return 0;
 }
