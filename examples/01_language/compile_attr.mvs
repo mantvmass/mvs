@@ -63,5 +63,22 @@ func main() -> i8 {
     }
     io.out("{}", neg);
 
+    // nested @compile blocks: outer gates OS, inner gates arch
+    let nested: str = "miss";
+    @compile(target_os = "windows") {
+        @compile(target_arch = "x86_64") {
+            nested = "nested ok";
+        }
+    }
+    @compile(target_os = "linux") {
+        @compile(target_arch = "x86_64") {
+            nested = "nested ok";
+        }
+        @compile(target_arch = "aarch64") {
+            nested = "nested ok";
+        }
+    }
+    io.out("{}", nested);
+
     return 0;
 }

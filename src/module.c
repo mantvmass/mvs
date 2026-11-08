@@ -51,37 +51,47 @@ static int cfg_matches(Loader *L, Node *it) {
 
 /* Strip ND_CFG_BLOCK nodes from a block's items: matching blocks are inlined
  * (their statements replace the node), non-matching blocks are removed.
- * Recurses into if/while/for/block bodies so nested cfg blocks are handled. */
+ * Loops until no ND_CFG_BLOCK remains at this level (handles nested cfg blocks
+ * that appear after inlining an outer one). Then recurses into sub-blocks. */
 static void cfg_strip_body(Loader *L, Node *block) {
     if (!block || !block->items) return;
-    Node **out = NULL;
-    int nout = 0, cap = 0;
-    for (int i = 0; i < block->nitems; i++) {
-        Node *s = block->items[i];
-        if (s->kind == ND_CFG_BLOCK) {
-            if (cfg_matches(L, s)) {
-                for (int j = 0; j < s->nitems; j++) {
-                    if (nout >= cap) { cap = cap ? cap * 2 : 16; out = realloc(out, cap * sizeof(Node*)); }
-                    out[nout++] = s->items[j];
+    int found;
+    do {
+        found = 0;
+        Node **out = NULL;
+        int nout = 0, cap = 0;
+        for (int i = 0; i < block->nitems; i++) {
+            Node *s = block->items[i];
+            if (s->kind == ND_CFG_BLOCK) {
+                found = 1;
+                if (cfg_matches(L, s)) {
+                    for (int j = 0; j < s->nitems; j++) {
+                        if (nout >= cap) { cap = cap ? cap * 2 : 16; out = realloc(out, cap * sizeof(Node*)); }
+                        out[nout++] = s->items[j];
+                    }
                 }
+            } else {
+                if (nout >= cap) { cap = cap ? cap * 2 : 16; out = realloc(out, cap * sizeof(Node*)); }
+                out[nout++] = s;
             }
-        } else {
-            if (nout >= cap) { cap = cap ? cap * 2 : 16; out = realloc(out, cap * sizeof(Node*)); }
-            out[nout++] = s;
         }
-    }
-    free(block->items);
-    block->items = out;
-    block->nitems = nout;
+        free(block->items);
+        block->items = out;
+        block->nitems = nout;
+    } while (found);
     for (int i = 0; i < block->nitems; i++) {
         Node *s = block->items[i];
         if (s->body) cfg_strip_body(L, s->body);
         if (s->then_branch) cfg_strip_body(L, s->then_branch);
-        if (s->else_branch) {
-            if (s->else_branch->kind == ND_BLOCK) cfg_strip_body(L, s->else_branch);
-            else if (s->else_branch->kind == ND_IF) {
-                if (s->else_branch->then_branch) cfg_strip_body(L, s->else_branch->then_branch);
-                if (s->else_branch->else_branch) cfg_strip_body(L, s->else_branch->else_branch);
+        /* elseif chains: else_branch is ND_IF -> ND_IF -> ... -> ND_BLOCK;
+         * walk the entire chain so deeply nested branches get stripped too */
+        {
+            Node *eb = s->else_branch;
+            while (eb) {
+                if (eb->kind == ND_BLOCK) { cfg_strip_body(L, eb); break; }
+                if (eb->kind != ND_IF) break;
+                if (eb->then_branch) cfg_strip_body(L, eb->then_branch);
+                eb = eb->else_branch;
             }
         }
         if (s->kind == ND_BLOCK) cfg_strip_body(L, s);

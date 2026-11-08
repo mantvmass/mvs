@@ -5,3 +5,4 @@ width = 80
 not linux
 win block
 not aarch64
+nested ok
