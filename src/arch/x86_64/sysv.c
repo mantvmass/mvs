@@ -1896,6 +1896,7 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
     fprintf(g->out, "    push rbp\n    mov rbp, rsp\n");
     if (frame_size > 0) fprintf(g->out, "    sub rsp, %d\n", frame_size);
     gen_regsave(g);          /* park the callee-saved registers this function borrows */
+    dbg_begin_func(g, fn->name, lbl);
 
     /* save the parameters (and the hidden pointer) into their own stack slots.
      * SysV: ints/pointers arrive in rdi,rsi,rdx,rcx,r8,r9 and floats in xmm0..7, each class
@@ -1995,12 +1996,19 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
         }
     }
 
+    dbg_snapshot_locals(g);
+
     /* the function body */
     gen_stmt(g, fn->body);
 
     /* epilogue in case there is no trailing return (e.g. a void function) */
     fprintf(g->out, "    xor eax, eax\n");
     gen_epilogue(g);        /* falling off the end restores what the function borrowed */
+    {
+        int fel = new_label(g);
+        fprintf(g->out, ".Lfe_%d:\n", fel);
+        dbg_end_func(g, fel);
+    }
 }
 
 /* Emit the 128-bit helper routines (once per output file, only when used):

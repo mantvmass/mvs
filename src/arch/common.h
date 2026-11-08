@@ -127,6 +127,26 @@ typedef struct {
     int need_i128;          /* 1 = emit the 128-bit divmod/print helper routines at the end */
     int need_vtables;       /* 1 = the program uses dyn Trait; emit vtables + keep impl methods */
     int had_error;
+
+    /* DWARF variable info (-g): collected during codegen, emitted at the end.
+     * dbg_vars is a flat pool, each function owns a contiguous slice of it. */
+#define MAX_DBG_VARS  4096
+#define MAX_DBG_FUNCS 512
+    struct {
+        char     name[64];
+        DataType base;
+        int      ptr;
+        int      offset;    /* from rbp/x29 (positive, used as [rbp - offset]) */
+        int      reg;       /* -1 = stack, else register index */
+        int      size;
+    } dbg_vars[MAX_DBG_VARS]; int ndbg_vars;
+    struct {
+        char label[LABEL_MAX];
+        char name[128];
+        int  end_label;     /* label id for the function-end marker */
+        int  var_start;     /* first index into dbg_vars[] */
+        int  var_count;
+    } dbg_funcs[MAX_DBG_FUNCS]; int ndbg_funcs;
 } Gen;
 
 /* Is this a full 128-bit integer VALUE (not a pointer to one)?
@@ -183,6 +203,15 @@ extern int mvs_use_ir;
 /* Emit the line directive for a node (no-op when -g is off or the node has no
  * position). Backend-specific syntax lives in each backend's emit_line. */
 void emit_line_directive(FILE *out, const Node *n, int gnu_as);
+
+/* DWARF variable info: collect locals during codegen, then emit at the end.
+ * dbg_begin_func/dbg_end_func bracket each function; dbg_snapshot_locals
+ * copies the current locals[] into the debug pool. */
+void dbg_begin_func(Gen *g, const char *name, const char *label);
+void dbg_snapshot_locals(Gen *g);
+void dbg_end_func(Gen *g, int end_label);
+void emit_dwarf_nasm(Gen *g, const char *src_file);
+void emit_dwarf_gas(Gen *g, const char *src_file);
 
 /* --- type system and struct layout --- */
 StructInfo *find_struct(Gen *g, const char *name);

@@ -1737,6 +1737,7 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
         else fprintf(g->out, "    mov x9, #%d\n    sub sp, sp, x9\n", frame_size);
     }
     gen_regsave(g);      /* park the callee-saved registers this function borrows */
+    dbg_begin_func(g, fn->name, lbl);
 
     /* spill parameters: ints from x0.., floats from d0.., overflow at [x29, #16 + k*8];
      * the hidden struct-return pointer arrives in x8 */
@@ -1836,10 +1837,17 @@ static void gen_func(Gen *g, Node *fn, Node *program) {
         }
     }
 
+    dbg_snapshot_locals(g);
+
     gen_stmt(g, fn->body);
 
     fprintf(g->out, "    mov x0, xzr\n");
     gen_epilogue(g);      /* falling off the end restores what the function borrowed */
+    {
+        int fel = new_label(g);
+        fprintf(g->out, ".Lfe_%d:\n", fel);
+        dbg_end_func(g, fel);
+    }
 }
 
 /* ---------- 128-bit helper routines (A64) ---------- */
@@ -2609,6 +2617,8 @@ int arm64_linux_generate(Node *program, FILE *out) {
     if (g.need_i128) {
         fprintf(out, "    .balign 8\nmvs_i128_buf:\n    .skip 192\nmvs_i128_bufidx:\n    .skip 4\n");
     }
+
+    emit_dwarf_gas(&g, program->file ? program->file : "unknown.mvs");
 
     fprintf(out, "\n    .section .note.GNU-stack,\"\",@progbits\n");
 

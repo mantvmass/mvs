@@ -92,8 +92,10 @@ Roughly in order of value:
 - More differential pairs, ideally generated rather than hand-written.
 - Integer overflow checks: shipped (`--check-overflow` traps on signed
   +, -, * overflow with `ud2`/`brk #1` on all three backends).
-- DWARF variable info. `-g` gives line info today; a debugger cannot print
-  locals yet.
+- DWARF variable info. `-g` on arm64 now emits DWARF4 variable locations
+  (stack offsets and register-allocated locals), so a debugger can print
+  locals. The NASM backends (win64/elf64) still provide line info only;
+  NASM's built-in DWARF generation conflicts with hand-written sections.
 - Performance: locals are register allocated and simple operands skip the temp
   stack (about 3x gcc -O2 on the benchmark, from 8.4x). Going further means an
   IR; see the codegen section above.

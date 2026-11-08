@@ -527,6 +527,352 @@ void emit_line_directive(FILE *out, const Node *n, int gnu_as) {
     last_line = n->line;
 }
 
+/* ---------- DWARF variable info collection ---------- */
+
+void dbg_begin_func(Gen *g, const char *name, const char *label) {
+    if (!mvs_debug_lines) return;
+    if (g->ndbg_funcs >= MAX_DBG_FUNCS) return;
+    int idx = g->ndbg_funcs++;
+    snprintf(g->dbg_funcs[idx].name, sizeof(g->dbg_funcs[idx].name), "%s", name);
+    snprintf(g->dbg_funcs[idx].label, sizeof(g->dbg_funcs[idx].label), "%s", label);
+    g->dbg_funcs[idx].var_start = g->ndbg_vars;
+    g->dbg_funcs[idx].var_count = 0;
+    g->dbg_funcs[idx].end_label = 0;
+}
+
+void dbg_snapshot_locals(Gen *g) {
+    if (!mvs_debug_lines || g->ndbg_funcs == 0) return;
+    int fi = g->ndbg_funcs - 1;
+    g->dbg_funcs[fi].var_start = g->ndbg_vars;
+    int count = 0;
+    for (int i = 0; i < g->nlocals && g->ndbg_vars < MAX_DBG_VARS; i++) {
+        Sym *s = &g->locals[i];
+        if (s->name[0] == '$') continue;
+        snprintf(g->dbg_vars[g->ndbg_vars].name,
+                 sizeof(g->dbg_vars[g->ndbg_vars].name), "%s", s->name);
+        g->dbg_vars[g->ndbg_vars].base   = s->type;
+        g->dbg_vars[g->ndbg_vars].ptr    = s->ptr;
+        g->dbg_vars[g->ndbg_vars].offset = s->offset;
+        g->dbg_vars[g->ndbg_vars].reg    = s->reg;
+        g->dbg_vars[g->ndbg_vars].size   = s->size;
+        g->ndbg_vars++;
+        count++;
+    }
+    g->dbg_funcs[fi].var_count = count;
+}
+
+void dbg_end_func(Gen *g, int end_label) {
+    if (!mvs_debug_lines || g->ndbg_funcs == 0) return;
+    g->dbg_funcs[g->ndbg_funcs - 1].end_label = end_label;
+}
+
+/* Write a SLEB128 value as NASM db bytes (e.g. "0x78" for -8). Returns byte count. */
+static int sleb128_encode(int value, unsigned char *buf) {
+    int n = 0;
+    int more = 1;
+    while (more) {
+        unsigned char byte = (unsigned char)(value & 0x7f);
+        value >>= 7;
+        if ((value == 0 && (byte & 0x40) == 0) ||
+            (value == -1 && (byte & 0x40) != 0))
+            more = 0;
+        else
+            byte |= 0x80;
+        buf[n++] = byte;
+    }
+    return n;
+}
+
+/* Map a DataType to the DWARF base-type table index (0-based; -1 = no match).
+ * The indices match the order types are emitted in emit_dwarf_*. */
+static int dwarf_basetype_index(DataType base, int ptr) {
+    if (ptr > 0) return -1;
+    switch (base) {
+        case TYPE_I8:   return 0;
+        case TYPE_I16:  return 1;
+        case TYPE_I32:  return 2;
+        case TYPE_I64:  return 3;
+        case TYPE_U8:   return 4;
+        case TYPE_U16:  return 5;
+        case TYPE_U32:  return 6;
+        case TYPE_U64:  return 7;
+        case TYPE_USIZE:return 8;
+        case TYPE_F32:  return 9;
+        case TYPE_F64:  return 10;
+        case TYPE_BOOL: return 11;
+        case TYPE_CHAR: return 12;
+        default:        return -1;
+    }
+}
+
+/* DWARF emission for NASM (ELF64, used by sysv.c) */
+void emit_dwarf_nasm(Gen *g, const char *src_file) {
+    (void)src_file;
+    if (!mvs_debug_lines || g->ndbg_funcs == 0) return;
+    FILE *f = g->out;
+
+    /* base type table: name, byte_size, DW_ATE encoding */
+    static const struct { const char *name; int size; int enc; } btypes[] = {
+        {"i8",    1, 5}, {"i16",   2, 5}, {"i32",   4, 5}, {"i64",  8, 5},
+        {"u8",    1, 7}, {"u16",   2, 7}, {"u32",   4, 7}, {"u64",  8, 7},
+        {"usize", 8, 7}, {"f32",   4, 4}, {"f64",   8, 4}, {"bool", 1, 2},
+        {"char",  1, 8},
+    };
+    int nbt = (int)(sizeof(btypes) / sizeof(btypes[0]));
+
+    /* .debug_abbrev: fixed abbreviation table */
+    fprintf(f, "\nsection .debug_abbrev progbits\n");
+    fprintf(f, ".Labbrev_start:\n");
+    /* abbrev 1: DW_TAG_compile_unit (children) */
+    fprintf(f, "    db 1, 0x11, 1\n");           /* code=1, tag=compile_unit, has_children */
+    fprintf(f, "    db 0x25, 0x08\n");            /* DW_AT_producer, DW_FORM_string */
+    fprintf(f, "    db 0x13, 0x0b\n");            /* DW_AT_language, DW_FORM_data1 */
+    fprintf(f, "    db 0x11, 0x01\n");            /* DW_AT_low_pc, DW_FORM_addr */
+    fprintf(f, "    db 0x12, 0x07\n");            /* DW_AT_high_pc, DW_FORM_data8 */
+    fprintf(f, "    db 0, 0\n");                  /* end attrs */
+    /* abbrev 2: DW_TAG_base_type (no children) */
+    fprintf(f, "    db 2, 0x24, 0\n");            /* code=2, tag=base_type, no_children */
+    fprintf(f, "    db 0x03, 0x08\n");            /* DW_AT_name, DW_FORM_string */
+    fprintf(f, "    db 0x0b, 0x0b\n");            /* DW_AT_byte_size, DW_FORM_data1 */
+    fprintf(f, "    db 0x3e, 0x0b\n");            /* DW_AT_encoding, DW_FORM_data1 */
+    fprintf(f, "    db 0, 0\n");
+    /* abbrev 3: DW_TAG_subprogram (children) */
+    fprintf(f, "    db 3, 0x2e, 1\n");            /* code=3, tag=subprogram, has_children */
+    fprintf(f, "    db 0x03, 0x08\n");            /* DW_AT_name, DW_FORM_string */
+    fprintf(f, "    db 0x11, 0x01\n");            /* DW_AT_low_pc, DW_FORM_addr */
+    fprintf(f, "    db 0x12, 0x07\n");            /* DW_AT_high_pc, DW_FORM_data8 */
+    fprintf(f, "    db 0x40, 0x18\n");            /* DW_AT_frame_base, DW_FORM_exprloc */
+    fprintf(f, "    db 0, 0\n");
+    /* abbrev 4: DW_TAG_variable (no children) */
+    fprintf(f, "    db 4, 0x34, 0\n");            /* code=4, tag=variable, no_children */
+    fprintf(f, "    db 0x03, 0x08\n");            /* DW_AT_name, DW_FORM_string */
+    fprintf(f, "    db 0x49, 0x13\n");            /* DW_AT_type, DW_FORM_ref4 */
+    fprintf(f, "    db 0x02, 0x18\n");            /* DW_AT_location, DW_FORM_exprloc */
+    fprintf(f, "    db 0, 0\n");
+    /* abbrev 5: DW_TAG_pointer_type (no children) */
+    fprintf(f, "    db 5, 0x0f, 0\n");            /* code=5, tag=pointer_type, no_children */
+    fprintf(f, "    db 0x49, 0x13\n");            /* DW_AT_type, DW_FORM_ref4 */
+    fprintf(f, "    db 0x0b, 0x0b\n");            /* DW_AT_byte_size, DW_FORM_data1 */
+    fprintf(f, "    db 0, 0\n");
+    fprintf(f, "    db 0\n");                     /* end of abbrev table */
+
+    /* .debug_info: compilation unit with types, functions, variables */
+    fprintf(f, "\nsection .debug_info progbits\n");
+    fprintf(f, ".Lcu_start:\n");
+    fprintf(f, "    dd .Lcu_end - .Lcu_hdr\n");   /* unit_length */
+    fprintf(f, ".Lcu_hdr:\n");
+    fprintf(f, "    dw 4\n");                      /* DWARF version 4 */
+    fprintf(f, "    dd .Labbrev_start\n");         /* debug_abbrev_offset */
+    fprintf(f, "    db 8\n");                      /* address_size */
+
+    /* CU DIE (abbrev 1: compile_unit) */
+    fprintf(f, "    db 1\n");                      /* abbreviation code */
+    fprintf(f, "    db 'mvs', 0\n");               /* DW_AT_producer */
+    fprintf(f, "    db 0x01\n");                   /* DW_AT_language (DW_LANG_C89, closest) */
+    fprintf(f, "    dq %s\n", g->dbg_funcs[0].label); /* DW_AT_low_pc (first function) */
+    fprintf(f, "    dq .Lfe_%d - %s\n",
+            g->dbg_funcs[g->ndbg_funcs-1].end_label,
+            g->dbg_funcs[0].label);                /* DW_AT_high_pc (size) */
+
+    /* base type DIEs (abbrev 2) */
+    for (int i = 0; i < nbt; i++) {
+        fprintf(f, ".Lbt_%d:\n", i);
+        fprintf(f, "    db 2\n");                  /* abbreviation code */
+        fprintf(f, "    db '%s', 0\n", btypes[i].name);
+        fprintf(f, "    db %d\n", btypes[i].size);
+        fprintf(f, "    db %d\n", btypes[i].enc);
+    }
+
+    /* pointer type DIEs: one for each base type that appears with ptr > 0 */
+    int ptr_type_offset[13]; /* matches nbt; stores -1 if not needed */
+    for (int i = 0; i < nbt; i++) ptr_type_offset[i] = -1;
+    for (int i = 0; i < g->ndbg_vars; i++) {
+        if (g->dbg_vars[i].ptr > 0) {
+            int bi = dwarf_basetype_index(g->dbg_vars[i].base, 0);
+            if (bi >= 0 && bi < nbt) ptr_type_offset[bi] = 1;
+        }
+    }
+    for (int i = 0; i < nbt; i++) {
+        if (ptr_type_offset[i] != 1) continue;
+        fprintf(f, ".Lpt_%d:\n", i);
+        fprintf(f, "    db 5\n");                  /* abbreviation code (pointer_type) */
+        fprintf(f, "    dd .Lbt_%d - .Lcu_start\n", i); /* DW_AT_type (ref4 to base type) */
+        fprintf(f, "    db 8\n");                  /* DW_AT_byte_size */
+    }
+
+    /* subprogram DIEs with variable DIEs */
+    for (int fi = 0; fi < g->ndbg_funcs; fi++) {
+        fprintf(f, "    db 3\n");                  /* abbreviation code (subprogram) */
+        fprintf(f, "    db '%s', 0\n", g->dbg_funcs[fi].name);
+        fprintf(f, "    dq %s\n", g->dbg_funcs[fi].label);
+        fprintf(f, "    dq .Lfe_%d - %s\n",
+                g->dbg_funcs[fi].end_label, g->dbg_funcs[fi].label);
+        fprintf(f, "    db 1, 0x56\n");            /* exprloc: 1 byte, DW_OP_reg6 (rbp) */
+
+        int vs = g->dbg_funcs[fi].var_start;
+        int vc = g->dbg_funcs[fi].var_count;
+        for (int vi = vs; vi < vs + vc; vi++) {
+            int bi = dwarf_basetype_index(g->dbg_vars[vi].base, 0);
+            if (bi < 0) continue;
+
+            fprintf(f, "    db 4\n");              /* abbreviation code (variable) */
+            fprintf(f, "    db '%s', 0\n", g->dbg_vars[vi].name);
+
+            /* type reference */
+            if (g->dbg_vars[vi].ptr > 0 && ptr_type_offset[bi] == 1)
+                fprintf(f, "    dd .Lpt_%d - .Lcu_start\n", bi);
+            else
+                fprintf(f, "    dd .Lbt_%d - .Lcu_start\n", bi);
+
+            /* location: DW_OP_fbreg(offset) for stack vars, DW_OP_regN for register vars */
+            if (g->dbg_vars[vi].reg >= 0) {
+                /* x86-64 callee-saved: rbx=3, r12=12, r13=13, r14=14 */
+                static const int dwreg[] = {3, 12, 13, 14, 15, 0, 0, 0};
+                int dr = dwreg[g->dbg_vars[vi].reg < 8 ? g->dbg_vars[vi].reg : 0];
+                if (dr < 32) {
+                    fprintf(f, "    db 1, 0x%02x\n", 0x50 + dr); /* DW_OP_reg0..reg31 */
+                } else {
+                    fprintf(f, "    db 2, 0x90, %d\n", dr);      /* DW_OP_regx + ULEB128 */
+                }
+            } else {
+                unsigned char sleb[8];
+                int n = sleb128_encode(-g->dbg_vars[vi].offset, sleb);
+                fprintf(f, "    db %d, 0x91", 1 + n);  /* exprloc len, DW_OP_fbreg */
+                for (int b = 0; b < n; b++) fprintf(f, ", 0x%02x", sleb[b]);
+                fprintf(f, "\n");
+            }
+        }
+        fprintf(f, "    db 0\n");                  /* end children of subprogram */
+    }
+    fprintf(f, "    db 0\n");                      /* end children of compile_unit */
+    fprintf(f, ".Lcu_end:\n");
+}
+
+/* DWARF emission for GNU as (arm64, uses .uleb128/.sleb128 directives) */
+void emit_dwarf_gas(Gen *g, const char *src_file) {
+    (void)src_file;
+    if (!mvs_debug_lines || g->ndbg_funcs == 0) return;
+    FILE *f = g->out;
+
+    static const struct { const char *name; int size; int enc; } btypes[] = {
+        {"i8",    1, 5}, {"i16",   2, 5}, {"i32",   4, 5}, {"i64",  8, 5},
+        {"u8",    1, 7}, {"u16",   2, 7}, {"u32",   4, 7}, {"u64",  8, 7},
+        {"usize", 8, 7}, {"f32",   4, 4}, {"f64",   8, 4}, {"bool", 1, 2},
+        {"char",  1, 8},
+    };
+    int nbt = (int)(sizeof(btypes) / sizeof(btypes[0]));
+
+    /* .debug_abbrev */
+    fprintf(f, "\n.section .debug_abbrev,\"\",@progbits\n");
+    fprintf(f, ".Labbrev_start:\n");
+    fprintf(f, "    .byte 1, 0x11, 1\n");         /* compile_unit, has_children */
+    fprintf(f, "    .byte 0x25, 0x08\n");
+    fprintf(f, "    .byte 0x13, 0x0b\n");
+    fprintf(f, "    .byte 0x11, 0x01\n");
+    fprintf(f, "    .byte 0x12, 0x07\n");
+    fprintf(f, "    .byte 0, 0\n");
+    fprintf(f, "    .byte 2, 0x24, 0\n");         /* base_type, no_children */
+    fprintf(f, "    .byte 0x03, 0x08\n");
+    fprintf(f, "    .byte 0x0b, 0x0b\n");
+    fprintf(f, "    .byte 0x3e, 0x0b\n");
+    fprintf(f, "    .byte 0, 0\n");
+    fprintf(f, "    .byte 3, 0x2e, 1\n");         /* subprogram, has_children */
+    fprintf(f, "    .byte 0x03, 0x08\n");
+    fprintf(f, "    .byte 0x11, 0x01\n");
+    fprintf(f, "    .byte 0x12, 0x07\n");
+    fprintf(f, "    .byte 0x40, 0x18\n");
+    fprintf(f, "    .byte 0, 0\n");
+    fprintf(f, "    .byte 4, 0x34, 0\n");         /* variable, no_children */
+    fprintf(f, "    .byte 0x03, 0x08\n");
+    fprintf(f, "    .byte 0x49, 0x13\n");
+    fprintf(f, "    .byte 0x02, 0x18\n");
+    fprintf(f, "    .byte 0, 0\n");
+    fprintf(f, "    .byte 5, 0x0f, 0\n");         /* pointer_type, no_children */
+    fprintf(f, "    .byte 0x49, 0x13\n");
+    fprintf(f, "    .byte 0x0b, 0x0b\n");
+    fprintf(f, "    .byte 0, 0\n");
+    fprintf(f, "    .byte 0\n");
+
+    /* .debug_info */
+    fprintf(f, "\n.section .debug_info,\"\",@progbits\n");
+    fprintf(f, ".Lcu_start:\n");
+    fprintf(f, "    .4byte .Lcu_end - .Lcu_hdr\n");
+    fprintf(f, ".Lcu_hdr:\n");
+    fprintf(f, "    .2byte 4\n");                  /* DWARF4 */
+    fprintf(f, "    .4byte .Labbrev_start\n");
+    fprintf(f, "    .byte 8\n");                   /* address_size */
+
+    fprintf(f, "    .byte 1\n");                   /* CU DIE */
+    fprintf(f, "    .asciz \"mvs\"\n");
+    fprintf(f, "    .byte 0x01\n");
+    fprintf(f, "    .quad %s\n", g->dbg_funcs[0].label);
+    fprintf(f, "    .quad .Lfe_%d - %s\n",
+            g->dbg_funcs[g->ndbg_funcs-1].end_label,
+            g->dbg_funcs[0].label);
+
+    for (int i = 0; i < nbt; i++) {
+        fprintf(f, ".Lbt_%d:\n", i);
+        fprintf(f, "    .byte 2\n");
+        fprintf(f, "    .asciz \"%s\"\n", btypes[i].name);
+        fprintf(f, "    .byte %d\n", btypes[i].size);
+        fprintf(f, "    .byte %d\n", btypes[i].enc);
+    }
+
+    int ptr_type_offset[13];
+    for (int i = 0; i < nbt; i++) ptr_type_offset[i] = -1;
+    for (int i = 0; i < g->ndbg_vars; i++) {
+        if (g->dbg_vars[i].ptr > 0) {
+            int bi = dwarf_basetype_index(g->dbg_vars[i].base, 0);
+            if (bi >= 0 && bi < nbt) ptr_type_offset[bi] = 1;
+        }
+    }
+    for (int i = 0; i < nbt; i++) {
+        if (ptr_type_offset[i] != 1) continue;
+        fprintf(f, ".Lpt_%d:\n", i);
+        fprintf(f, "    .byte 5\n");
+        fprintf(f, "    .4byte .Lbt_%d - .Lcu_start\n", i);
+        fprintf(f, "    .byte 8\n");
+    }
+
+    for (int fi = 0; fi < g->ndbg_funcs; fi++) {
+        fprintf(f, "    .byte 3\n");
+        fprintf(f, "    .asciz \"%s\"\n", g->dbg_funcs[fi].name);
+        fprintf(f, "    .quad %s\n", g->dbg_funcs[fi].label);
+        fprintf(f, "    .quad .Lfe_%d - %s\n",
+                g->dbg_funcs[fi].end_label, g->dbg_funcs[fi].label);
+        /* frame base: DW_OP_reg29 (x29 = fp) on arm64 */
+        fprintf(f, "    .byte 1, 0x6d\n");        /* 1 byte, DW_OP_reg29 (0x50+29=0x6d) */
+
+        int vs = g->dbg_funcs[fi].var_start;
+        int vc = g->dbg_funcs[fi].var_count;
+        for (int vi = vs; vi < vs + vc; vi++) {
+            int bi = dwarf_basetype_index(g->dbg_vars[vi].base, 0);
+            if (bi < 0) continue;
+            fprintf(f, "    .byte 4\n");
+            fprintf(f, "    .asciz \"%s\"\n", g->dbg_vars[vi].name);
+            if (g->dbg_vars[vi].ptr > 0 && ptr_type_offset[bi] == 1)
+                fprintf(f, "    .4byte .Lpt_%d - .Lcu_start\n", bi);
+            else
+                fprintf(f, "    .4byte .Lbt_%d - .Lcu_start\n", bi);
+
+            if (g->dbg_vars[vi].reg >= 0) {
+                /* arm64 callee-saved: x19=19, x20=20, x21=21, x22=22 */
+                int dr = 19 + g->dbg_vars[vi].reg;
+                fprintf(f, "    .byte 1, 0x%02x\n", 0x50 + dr);
+            } else {
+                unsigned char sleb[8];
+                int n = sleb128_encode(-g->dbg_vars[vi].offset, sleb);
+                fprintf(f, "    .byte %d, 0x91", 1 + n);
+                for (int b = 0; b < n; b++) fprintf(f, ", 0x%02x", sleb[b]);
+                fprintf(f, "\n");
+            }
+        }
+        fprintf(f, "    .byte 0\n");               /* end subprogram children */
+    }
+    fprintf(f, "    .byte 0\n");                   /* end CU children */
+    fprintf(f, ".Lcu_end:\n");
+}
+
 /* ---------- reserving variable space on the stack ---------- */
 
 /* Add a local variable and assign its offset (slot rounded up to a multiple of 8 bytes); returns the offset.
