@@ -366,19 +366,31 @@ static void gen_binop_apply(Gen *g, TokenType op, int uns) {
             if (uns) fprintf(g->out, "    xor edx, edx\n    div rcx\n    mov rax, rdx\n");
             else     fprintf(g->out, "    cqo\n    idiv rcx\n    mov rax, rdx\n");
             break;
-        case TK_STARSTAR: { /* exponentiation by a repeated-multiply loop: rax=base, rcx=exponent */
+        case TK_STARSTAR: { /* exponentiation: rax=base, rcx=exponent; negative exp -> 1/result */
             int l = new_label(g);
             fprintf(g->out,
-                "    mov r8, rax\n"      /* r8 = base */
-                "    mov r9, rcx\n"      /* r9 = exponent counter */
-                "    mov rax, 1\n"       /* result starts at 1 */
+                "    mov r8, rax\n"
+                "    mov r9, rcx\n"
+                "    mov r10, rcx\n"
+                "    test r9, r9\n"
+                "    jns .Lpowabs%d\n"
+                "    neg r9\n"
+                ".Lpowabs%d:\n"
+                "    mov rax, 1\n"
                 ".Lpow%d:\n"
                 "    test r9, r9\n"
                 "    jle .Lpowend%d\n"
                 "    imul rax, r8\n"
                 "    dec r9\n"
                 "    jmp .Lpow%d\n"
-                ".Lpowend%d:\n", l, l, l, l);
+                ".Lpowend%d:\n"
+                "    test r10, r10\n"
+                "    jns .Lpowdone%d\n"
+                "    mov rcx, rax\n"
+                "    mov rax, 1\n", l, l, l, l, l, l, l);
+            if (uns) fprintf(g->out, "    xor edx, edx\n    div rcx\n");
+            else     fprintf(g->out, "    cqo\n    idiv rcx\n");
+            fprintf(g->out, ".Lpowdone%d:\n", l);
             break;
         }
         /* comparisons: set 0/1 into rax (pick signed/unsigned setcc) */
@@ -747,12 +759,19 @@ static void gen_expr(Gen *g, Node *n) {
                     else gen_itof_xmm(g, "xmm1", lt.base); /* base -> xmm1 */
                     int l = new_label(g);
                     fprintf(g->out,
-                        "    mov rax, 0x3FF0000000000000\n    movq xmm0, rax\n"  /* result starts at 1.0 */
+                        "    mov r8, rcx\n"
+                        "    test rcx, rcx\n    jns .Lfpowabs%d\n    neg rcx\n"
+                        ".Lfpowabs%d:\n"
+                        "    mov rax, 0x3FF0000000000000\n    movq xmm0, rax\n"
                         ".Lfpow%d:\n"
-                        "    cmp rcx, 0\n    jle .Lfpowend%d\n"
+                        "    test rcx, rcx\n    jle .Lfpowend%d\n"
                         "    mulsd xmm0, xmm1\n    dec rcx\n    jmp .Lfpow%d\n"
                         ".Lfpowend%d:\n"
-                        "    movq rax, xmm0\n", l, l, l, l);
+                        "    test r8, r8\n    jns .Lfpowdone%d\n"
+                        "    mov rax, 0x3FF0000000000000\n    movq xmm2, rax\n"
+                        "    divsd xmm2, xmm0\n    movsd xmm0, xmm2\n"
+                        ".Lfpowdone%d:\n"
+                        "    movq rax, xmm0\n", l, l, l, l, l, l, l, l);
                     break;
                 }
                 if (fop && (is_cmp || is_arith)) {

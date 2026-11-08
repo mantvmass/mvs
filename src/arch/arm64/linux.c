@@ -344,11 +344,16 @@ static void gen_binop_apply(Gen *g, TokenType op, int uns) {
             fprintf(g->out, uns ? "    udiv x9, x0, x1\n" : "    sdiv x9, x0, x1\n");
             fprintf(g->out, "    msub x0, x9, x1, x0\n");
             break;
-        case TK_STARSTAR: {
+        case TK_STARSTAR: { /* exponentiation: negative exp -> 1/result */
             int l = new_label(g);
             fprintf(g->out,
-                "    mov x9, x0\n"        /* base */
-                "    mov x10, x1\n"       /* exponent counter */
+                "    mov x9, x0\n"
+                "    mov x10, x1\n"
+                "    mov x11, x1\n"
+                "    cmp x10, #0\n"
+                "    b.ge .Lpowabs%d\n"
+                "    neg x10, x10\n"
+                ".Lpowabs%d:\n"
                 "    mov x0, #1\n"
                 ".Lpow%d:\n"
                 "    cmp x10, #0\n"
@@ -356,7 +361,15 @@ static void gen_binop_apply(Gen *g, TokenType op, int uns) {
                 "    mul x0, x0, x9\n"
                 "    sub x10, x10, #1\n"
                 "    b .Lpow%d\n"
-                ".Lpowend%d:\n", l, l, l, l);
+                ".Lpowend%d:\n"
+                "    cmp x11, #0\n"
+                "    b.ge .Lpowdone%d\n"
+                "    mov x1, x0\n"
+                "    mov x0, #1\n", l, l, l, l, l, l, l);
+            fprintf(g->out, uns ?
+                "    udiv x0, x0, x1\n" :
+                "    sdiv x0, x0, x1\n");
+            fprintf(g->out, ".Lpowdone%d:\n", l);
             break;
         }
         case TK_EQ:  fprintf(g->out, "    cmp x0, x1\n    cset x0, eq\n"); break;
@@ -689,7 +702,10 @@ static void gen_expr(Gen *g, Node *n) {
                 if (is_float_type(lt.base)) fprintf(g->out, "    fmov d1, x1\n");
                 else gen_itof(g, "d1", "x1", lt.base);
                 fprintf(g->out,
-                    "    ldr x0, =4607182418800017408\n"    /* 1.0 */
+                    "    mov x11, x10\n"
+                    "    cmp x10, #0\n    b.ge .Lfpowabs%d\n    neg x10, x10\n"
+                    ".Lfpowabs%d:\n"
+                    "    ldr x0, =4607182418800017408\n"
                     "    fmov d0, x0\n"
                     ".Lfpow%d:\n"
                     "    cmp x10, #0\n"
@@ -697,7 +713,12 @@ static void gen_expr(Gen *g, Node *n) {
                     "    fmul d0, d0, d1\n"
                     "    sub x10, x10, #1\n"
                     "    b .Lfpow%d\n"
-                    ".Lfpowe%d:\n    fmov x0, d0\n", l, l, l, l);
+                    ".Lfpowe%d:\n"
+                    "    cmp x11, #0\n    b.ge .Lfpowdone%d\n"
+                    "    ldr x0, =4607182418800017408\n    fmov d2, x0\n"
+                    "    fdiv d0, d2, d0\n"
+                    ".Lfpowdone%d:\n"
+                    "    fmov x0, d0\n", l, l, l, l, l, l, l, l);
                 break;
             }
             if (fop) {
