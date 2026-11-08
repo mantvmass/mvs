@@ -225,7 +225,20 @@ static void gen_coerce_num(Gen *g, ExprType from, ExprType to) {
         gen_itof_xmm(g, "xmm0", from.base);
         fprintf(g->out, "    movq rax, xmm0\n");
     } else {
-        fprintf(g->out, "    movq xmm0, rax\n    cvttsd2si rax, xmm0\n");
+        if (to.ptr == 0 && is_unsigned_val(to.base, 0) && type_size(g, to.base, 0, NULL) >= 8) {
+            int l = new_label(g);
+            fprintf(g->out,
+                "    movq xmm0, rax\n"
+                "    mov rcx, 0x43E0000000000000\n    movq xmm1, rcx\n"
+                "    ucomisd xmm0, xmm1\n    jae .Lc2u%d\n"
+                "    cvttsd2si rax, xmm0\n    jmp .Lc2ue%d\n"
+                ".Lc2u%d:\n"
+                "    subsd xmm0, xmm1\n    cvttsd2si rax, xmm0\n"
+                "    mov rcx, 0x8000000000000000\n    or rax, rcx\n"
+                ".Lc2ue%d:\n", l, l, l, l);
+        } else {
+            fprintf(g->out, "    movq xmm0, rax\n    cvttsd2si rax, xmm0\n");
+        }
     }
 }
 

@@ -183,7 +183,12 @@ static void gen_coerce_num(Gen *g, ExprType from, ExprType to) {
     int ff = is_float_type(from.base), tf = is_float_type(to.base);
     if (ff == tf) return;
     if (!ff && tf) { gen_itof(g, "d0", "x0", from.base); fprintf(g->out, "    fmov x0, d0\n"); }
-    else           fprintf(g->out, "    fmov d0, x0\n    fcvtzs x0, d0\n");
+    else {
+        if (to.ptr == 0 && is_unsigned_val(to.base, 0))
+            fprintf(g->out, "    fmov d0, x0\n    fcvtzu x0, d0\n");
+        else
+            fprintf(g->out, "    fmov d0, x0\n    fcvtzs x0, d0\n");
+    }
 }
 
 /* Copy x11 bytes from [x9] to [x10] (byte loop; only scratch registers) */
