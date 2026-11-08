@@ -596,7 +596,8 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `vec` | `Vec<T>` growable array: `Vec<i64>::new()` + `push`/`get`/`set`/`pop`/`len`/`is_empty`/`clear`/`drop`; bounds-checked, any element type incl. structs |
 | `map` | `HashMap<K, V>` (open addressing, linear probing): `HashMap<str, i64>::new()` + `insert`/`get` (returns `Option<V>`)/`contains`/`len`/`is_empty`/`drop`; keys `i64` and `str` |
 | `thread` | OS threads: `spawn(f, arg)` / `join(h)` with `func(*u8) -> *u8` workers (CreateThread vs pthreads via `@compile`); see section 4.16 |
-| `sync` | `Mutex` (`Mutex::new()` or a zeroed one, `lock`/`unlock`; SRWLOCK vs pthread_mutex) |
+| `sync` | `Mutex` (`lock`/`unlock`), `RwLock` (`read_lock`/`write_lock`), `CondVar` (`wait`/`signal`/`broadcast`); all zero-init safe |
+| `channel` | `Channel`: bounded MPMC channel for i64 values (`new(cap)`/`send`/`recv`/`close`/`drop`) |
 | `http` | the HTTP/1.1 server framework, in axum's shape: `Router::new().route("/users/:id", get(show).post(create))`, `Listener::bind("0.0.0.0:8080")` + `serve(&l, &app)`, handlers that return `Text`/`Html`/`Json`/`Status`/`Redirect`, `Request` (`param`/`query`/`header`/`body`), plus a small client (`fetch`, `send_request`, `read_response`); see section 4.18 |
 
 There is also a second package, **`core`**: pure MVS with no CRT/OS dependency, so
@@ -611,6 +612,7 @@ it stays importable under `--nostd` (freestanding):
 | `core/slice` | `Slice<T>` {ptr, len} view: `get`/`set` (unchecked) + `in_bounds`, `sub`, `len` |
 | `core/bits` | `rotl64`/`rotr64`, `popcount`, `clz64`/`ctz64`, `bswap64`, `bit` |
 | `core/arch` | CPU instructions: `pause`/`nop`, `fence`/`fence_load`/`fence_store`, `sync_instructions`, `timestamp()`, and the bare-metal `halt`/`wait_event`/`interrupts_off`/`interrupts_on`/`park` |
+| `core/atomic` | Lock-free atomics: `load`/`store`/`add`/`sub`/`cas`/`exchange` via the `__atomic` compiler intrinsic; sequential consistency, i64 only |
 
 #### Inline assembly: the `asm` intrinsic
 
@@ -635,6 +637,15 @@ func timestamp() -> u64 {                            // expression form
   tiny leaf functions and never touch a register the surrounding code may hold.
 - `asm` is a reserved name; declaring a function called `asm` is an error.
 - It works under `--nostd` (nothing but instructions are emitted).
+
+#### Atomic intrinsic: `__atomic`
+
+`__atomic("op", ptr, ...)` is a compiler intrinsic for hardware atomic
+operations. It is how `core/atomic` is written. The first argument is a
+string literal selecting the operation: `"load"`, `"store"`, `"add"`,
+`"sub"`, `"cas"`, `"xchg"`. The remaining arguments are the pointer and
+value(s). Emits `lock xadd` / `lock cmpxchg` / `xchg` on x86-64,
+`ldaxr`/`stlxr` loops on AArch64. `__atomic` is reserved like `asm`.
 
 ```txt
 import { mem, cmp, ptr, cstr, bits } from "core";   // works even with --nostd
@@ -797,7 +808,7 @@ that instance (Rust only checks the methods you call), so keep type-specific
 methods on their own structs. Finally, a generic function has no address of its
 own: `None` alone is an error, write `None()` or `None<i64>()`.
 
-### 4.16 Threads + Mutex (std/thread, std/sync)
+### 4.16 Threads + Mutex + CondVar (std/thread, std/sync)
 
 ```txt
 import { io, thread, sync } from "std";
@@ -821,9 +832,56 @@ pthread_create/join + pthread_mutex on Linux, selected with `@compile`. Linking
 on Linux takes `-lpthread` (older glibc; harmless on newer). Threads run REAL
 OS concurrency on every target, including under qemu-aarch64.
 
+`CondVar` (condition variable) completes the picture: `cv.wait(&m)` atomically
+releases the mutex and sleeps; `cv.signal()` wakes one waiter,
+`cv.broadcast()` wakes all. Windows CONDITION_VARIABLE, pthreads on Linux.
+
 The honest difference from Rust: MVS has no ownership system, so there is NO
 compile-time Send/Sync data-race checking. Shared mutable data compiles fine
 whether or not you lock; the discipline is yours, exactly like C.
+
+### 4.16.1 Atomics (core/atomic)
+
+```txt
+import { atomic } from "core";
+let counter: i64 = 0;
+atomic.store(&counter, 10);
+let old: i64 = atomic.add(&counter, 5);   // old = 10, counter = 15
+let val: i64 = atomic.load(&counter);      // val = 15
+let prev: i64 = atomic.cas(&counter, 15, 99);   // CAS: swap if == 15
+let swapped: i64 = atomic.exchange(&counter, 0); // unconditional swap
+```
+
+`__atomic("op", ptr, ...)` is a compiler intrinsic emitting hardware atomics
+directly: `lock xadd` / `lock cmpxchg` / `xchg` on x86-64,
+`ldaxr`/`stlxr` loops on AArch64. `core/atomic` wraps it with named
+functions. All operations are sequentially consistent. Only i64-sized,
+naturally aligned values are supported. Available under `--nostd`.
+
+### 4.16.2 Channels (std/channel)
+
+```txt
+import { io, thread } from "std";
+import { Channel } from "std/channel";
+
+let ch: Channel = Channel::new(8);  // bounded buffer for 8 values
+
+func producer(arg: *u8) -> *u8 {
+    let c: *Channel = arg as *Channel;
+    c.send(42);
+    return 0;
+}
+
+let t: usize = thread.spawn(producer, &ch as *u8);
+let v: i64 = ch.recv();
+thread.join(t);
+ch.drop();
+```
+
+A bounded, multi-producer multi-consumer channel carrying i64 values.
+`send()` blocks when full, `recv()` blocks when empty, `close()` wakes
+all waiters (recv on a closed empty channel returns 0). Built on Mutex +
+CondVar internally.
 
 ### 4.17 Enums + match (Rust-style)
 
@@ -887,8 +945,28 @@ let a: MyOpt<i64> = MyOpt<i64>::Just(21);
 match (a) { Just(v) => { ... } Nothing => { ... } }
 ```
 
-- Limits (v1): patterns are one level deep (bind then match again for nesting),
-  and each variant's payload fields exist side by side in the struct (a sum of
+**Advanced patterns (phase 3):**
+
+```txt
+// nested patterns
+match (opt_result) {
+    Some(Ok(v)) => { io.out("ok: {}\n", v); }
+    Some(Err(e)) => { io.out("err: {}\n", e); }
+    None => { io.out("none\n"); }
+}
+// literal patterns in payloads
+match (opt) { Some(42) => { ... } Some(_) => { ... } None => { ... } }
+// if guards
+match (opt) { Some(x) if x > 10 => { ... } Some(x) => { ... } None => { ... } }
+// value match with ranges
+match (n) { 1..=10 => { ... } 11..=20 => { ... } _ => { ... } }
+```
+
+- Nested patterns desugar to nested if-chains; the inner enum tag is checked
+  after the outer one.
+- Guards run after bindings (the bound variable is in scope inside the guard).
+- `..` is exclusive range, `..=` is inclusive.
+- Each variant's payload fields exist side by side in the struct (a sum of
   sizes, not a union). Printing an enum with io.out shows its raw desugared
   struct (a `__tag` field plus every payload slot).
 

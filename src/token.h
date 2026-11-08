@@ -49,6 +49,8 @@ typedef enum {
     TK_DYN,          /* dyn     - trait object type (dyn Trait = fat pointer {data, vtable}) */
     TK_WHERE,        /* where   - trait bound clause after the signature (where T: A + B) */
     TK_ELLIPSIS,     /* ...     - variadic parameter marker (args: ...dyn Display) */
+    TK_DOTDOT,       /* ..      - exclusive range (1..5 in match patterns) */
+    TK_DOTDOTEQ,     /* ..=     - inclusive range (1..=5 in match patterns) */
     TK_TRUE,         /* true    - boolean true */
     TK_FALSE,        /* false   - boolean false */
     TK_AS,           /* as      - explicit type cast (e.g. x as i32) */

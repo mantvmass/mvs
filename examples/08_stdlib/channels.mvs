@@ -1,0 +1,45 @@
+// Channels: bounded MPMC channel for thread communication
+import { io, thread } from "std";
+import { Channel } from "std/channel";
+
+let ch: Channel;
+
+func producer(arg: *u8) -> *u8 {
+    let id: i64 = *(arg as *i64);
+    let i: i64 = 0;
+    while (i < 5) {
+        let val: i64 = id * 100 + i;
+        ch.send(val);
+        i = i + 1;
+    }
+    return 0;
+}
+
+func main() -> i8 {
+    ch = Channel::new(4);
+
+    let id1: i64 = 1;
+    let id2: i64 = 2;
+    let t1: usize = thread.spawn(producer, &id1 as *u8);
+    let t2: usize = thread.spawn(producer, &id2 as *u8);
+
+    // receive all 10 values (5 from each producer)
+    let sum: i64 = 0;
+    let i: i64 = 0;
+    while (i < 10) {
+        let v: i64 = ch.recv();
+        sum = sum + v;
+        i = i + 1;
+    }
+
+    thread.join(t1);
+    thread.join(t2);
+
+    // producer 1 sends: 100,101,102,103,104 = 510
+    // producer 2 sends: 200,201,202,203,204 = 1010
+    io.out("received {} values, sum = {}\n", i, sum);
+    io.out("expected sum = {}\n", 510 + 1010);
+
+    ch.drop();
+    return 0;
+}

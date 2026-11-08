@@ -432,6 +432,12 @@ static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
         return IR_NONE;
     }
 
+    /* __atomic intrinsic: pass through to the backend like asm() */
+    if (callee->kind == ND_IDENT && strcmp(callee->name, "__atomic") == 0) {
+        emit_ioout(g, f, IR_NONE, n);
+        return IR_NONE;
+    }
+
     /* io.out intrinsic */
     if (callee->kind == ND_MEMBER && callee->operand->kind == ND_IDENT &&
         strcmp(callee->operand->name, "io") == 0 &&

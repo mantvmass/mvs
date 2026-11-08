@@ -1,5 +1,5 @@
 /*
- * std/sync.mvs - synchronization primitives (Mutex)
+ * std/sync.mvs - synchronization primitives (Mutex, RwLock, CondVar)
  *
  *     import { io, thread, sync } from "std";
  *
@@ -108,4 +108,63 @@ impl RwLock {
     func read_unlock(self: *RwLock) -> void { pthread_rwlock_unlock(&self.a); }
     func write_lock(self: *RwLock) -> void { pthread_rwlock_wrlock(&self.a); }
     func write_unlock(self: *RwLock) -> void { pthread_rwlock_unlock(&self.a); }
+}
+
+/*
+ * CondVar: a condition variable for thread signaling.
+ *
+ * Windows: CONDITION_VARIABLE (8 bytes, zero-initialized).
+ * Linux: pthread_cond_t (48 bytes on glibc, fits in 64 bytes with
+ * PTHREAD_COND_INITIALIZER being all-zero).
+ *
+ *     let cv: CondVar = CondVar::new();
+ *     let m: Mutex = Mutex::new();
+ *     // producer: m.lock(); ... cv.signal(); m.unlock();
+ *     // consumer: m.lock(); cv.wait(&m); m.unlock();
+ *
+ * wait() atomically releases the mutex and sleeps. When it returns the
+ * mutex is re-acquired. Always recheck the predicate in a loop: spurious
+ * wakeups are allowed by both platforms.
+ */
+
+@compile(target_os = "windows")
+extern func SleepConditionVariableSRW(cv: *u64, srw: *u64, ms: u32, flags: u32) -> i32;
+@compile(target_os = "windows")
+extern func WakeConditionVariable(cv: *u64) -> void;
+@compile(target_os = "windows")
+extern func WakeAllConditionVariable(cv: *u64) -> void;
+
+@compile(target_os = "linux")
+extern func pthread_cond_wait(cv: *u64, mtx: *u64) -> i32;
+@compile(target_os = "linux")
+extern func pthread_cond_signal(cv: *u64) -> i32;
+@compile(target_os = "linux")
+extern func pthread_cond_broadcast(cv: *u64) -> i32;
+
+struct CondVar {
+    a: u64; b: u64; c: u64; d: u64;
+    e: u64; f: u64; g: u64; h: u64;
+}
+
+impl CondVar {
+    func new() -> CondVar {
+        let cv: CondVar = CondVar { a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0 };
+        return cv;
+    }
+}
+
+@compile(target_os = "windows")
+impl CondVar {
+    func wait(self: *CondVar, m: *Mutex) -> void {
+        SleepConditionVariableSRW(&self.a, &m.a, 4294967295, 0);
+    }
+    func signal(self: *CondVar) -> void { WakeConditionVariable(&self.a); }
+    func broadcast(self: *CondVar) -> void { WakeAllConditionVariable(&self.a); }
+}
+
+@compile(target_os = "linux")
+impl CondVar {
+    func wait(self: *CondVar, m: *Mutex) -> void { pthread_cond_wait(&self.a, &m.a); }
+    func signal(self: *CondVar) -> void { pthread_cond_signal(&self.a); }
+    func broadcast(self: *CondVar) -> void { pthread_cond_broadcast(&self.a); }
 }

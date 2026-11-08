@@ -1150,9 +1150,82 @@ static Node *parse_enum(Parser *p) {
     return n;
 }
 
+/* parse_sub_pattern: a single sub-pattern inside payload parentheses.
+ *   sub_pattern := '_'
+ *               | [ENUM '::'] VARIANT [ '(' sub_pattern (',' sub_pattern)* ')' ]
+ *               | '-'? (INT | FLOAT)
+ *               | STRING | CHAR | TRUE | FALSE
+ *               | IDENT
+ * Stored as: ND_IDENT (binding), ND_INT/ND_FLOAT/ND_STR/ND_CHAR/ND_BOOL (literal),
+ *            or ND_MARM (nested constructor, recursive). Wildcard '_' => ND_IDENT with name "_". */
+static Node *parse_sub_pattern(Parser *p) {
+    if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "_") == 0) {
+        Node *b = node_new(ND_IDENT, p->cur.line);
+        b->name = strdup("_");
+        advance(p);
+        return b;
+    }
+    if (check(p, TK_INT) || check(p, TK_FLOAT) || check(p, TK_STRING) ||
+        check(p, TK_CHAR) || check(p, TK_TRUE) || check(p, TK_FALSE)) {
+        Node *lit = node_new(check(p, TK_INT) ? ND_INT : check(p, TK_FLOAT) ? ND_FLOAT :
+                             check(p, TK_STRING) ? ND_STR : check(p, TK_CHAR) ? ND_CHAR : ND_BOOL,
+                             p->cur.line);
+        if (lit->kind == ND_INT)   { lit->int_val = p->cur.int_val; lit->type = TYPE_I64; }
+        if (lit->kind == ND_FLOAT) { long long b; memcpy(&b, &p->cur.float_val, 8); lit->int_val = b; lit->type = TYPE_F64; }
+        if (lit->kind == ND_STR)   { lit->str_val = strdup(p->cur.lexeme); lit->str_len = (int)strlen(p->cur.lexeme); }
+        if (lit->kind == ND_CHAR)  { lit->int_val = p->cur.int_val; lit->type = TYPE_CHAR; }
+        if (lit->kind == ND_BOOL)  { lit->int_val = (check(p, TK_TRUE) ? 1 : 0); lit->type = TYPE_BOOL; }
+        advance(p);
+        return lit;
+    }
+    if (check(p, TK_MINUS)) {
+        advance(p);
+        if (check(p, TK_INT)) {
+            Node *lit = node_new(ND_INT, p->cur.line);
+            lit->int_val = -p->cur.int_val; lit->type = TYPE_I64;
+            advance(p); return lit;
+        }
+        if (check(p, TK_FLOAT)) {
+            Node *lit = node_new(ND_FLOAT, p->cur.line);
+            double v = -p->cur.float_val; memcpy(&lit->int_val, &v, 8); lit->type = TYPE_F64;
+            advance(p); return lit;
+        }
+        error(p, "expected a number after '-' in pattern"); return node_new(ND_INT, p->cur.line);
+    }
+    if (check(p, TK_IDENT)) {
+        char *first = strdup(p->cur.lexeme);
+        int line = p->cur.line;
+        advance(p);
+        if (check(p, TK_COLONCOLON) || check(p, TK_LPAREN)) {
+            Node *nested = node_new(ND_MARM, line);
+            if (match(p, TK_COLONCOLON)) {
+                nested->type_name = first;
+                if (!check(p, TK_IDENT)) { error(p, "expected variant after '::'"); return nested; }
+                nested->name = strdup(p->cur.lexeme);
+                advance(p);
+            } else {
+                nested->name = first;
+            }
+            if (match(p, TK_LPAREN)) {
+                do {
+                    node_add_item(nested, parse_sub_pattern(p));
+                } while (match(p, TK_COMMA));
+                expect(p, TK_RPAREN, "expected ')' in nested pattern");
+            }
+            return nested;
+        }
+        Node *b = node_new(ND_IDENT, line);
+        b->name = first;
+        return b;
+    }
+    error(p, "expected a pattern");
+    return node_new(ND_INT, p->cur.line);
+}
+
 /* match := 'match' '(' expr ')' '{' arm* '}'
- * arm   := pattern '=>' ( block | expr ) [',']
- * pattern := [ENUM '::'] VARIANT [ '(' IDENT (',' IDENT)* ')' ]   (bare = Rust style)
+ * arm   := pattern ['if' expr] '=>' ( block | expr ) [',']
+ * pattern := [ENUM '::'] VARIANT [ '(' sub_pattern (',' sub_pattern)* ')' ]
+ *          | literal ['..' | '..=' literal]
  *          | '_'
  * Block arms make a match STATEMENT; expression arms make a match VALUE
  * (usable as an initializer, assignment source, or return value). */
@@ -1167,6 +1240,23 @@ static Node *parse_match(Parser *p) {
         Node *arm = node_new(ND_MARM, p->cur.line);
         if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "_") == 0) {
             advance(p);                      /* the catch-all arm: '_' */
+        } else if (check(p, TK_INT) || check(p, TK_FLOAT) || check(p, TK_STRING) ||
+                   check(p, TK_CHAR) || check(p, TK_TRUE) || check(p, TK_FALSE) ||
+                   (check(p, TK_MINUS) && (p->lx->src[p->lx->pos] >= '0' && p->lx->src[p->lx->pos] <= '9'))) {
+            /* literal pattern, possibly with a range: 42 =>, 1..5 =>, 1..=5 => */
+            Node *lo = parse_sub_pattern(p);
+            if (check(p, TK_DOTDOT) || check(p, TK_DOTDOTEQ)) {
+                int inclusive = check(p, TK_DOTDOTEQ);
+                advance(p);
+                Node *hi = parse_sub_pattern(p);
+                Node *range = node_new(ND_BINARY, lo->line);
+                range->op = inclusive ? TK_DOTDOTEQ : TK_DOTDOT;
+                range->lhs = lo;
+                range->rhs = hi;
+                arm->lhs = range;
+            } else {
+                arm->lhs = lo;
+            }
         } else if (check(p, TK_IDENT)) {
             /* either Enum::Variant or a bare Variant (resolved from the scrutinee) */
             char *first = strdup(p->cur.lexeme);
@@ -1179,19 +1269,19 @@ static Node *parse_match(Parser *p) {
             } else {
                 arm->name = first;           /* bare variant, Rust style */
             }
-            if (match(p, TK_LPAREN)) {       /* payload bindings: Circle(r), Rect(w, h) */
+            if (match(p, TK_LPAREN)) {       /* payload sub-patterns: Circle(r), Some(Ok(v)), Some(42) */
                 do {
-                    if (!check(p, TK_IDENT)) { error(p, "expected a binding name in the pattern"); break; }
-                    Node *b = node_new(ND_IDENT, p->cur.line);
-                    b->name = strdup(p->cur.lexeme);
-                    node_add_item(arm, b);
-                    advance(p);
+                    node_add_item(arm, parse_sub_pattern(p));
                 } while (match(p, TK_COMMA));
                 expect(p, TK_RPAREN, "expected ')' after the pattern bindings");
             }
         } else {
-            error(p, "expected a match pattern (Enum::Variant(...), Variant(...), or _)");
+            error(p, "expected a match pattern");
             break;
+        }
+        if (check(p, TK_IF)) {              /* guard: Some(x) if x > 0 => */
+            advance(p);
+            arm->cond = parse_expr(p);
         }
         expect(p, TK_FATARROW, "expected '=>' after the match pattern");
         if (check(p, TK_LBRACE)) {

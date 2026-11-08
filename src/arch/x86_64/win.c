@@ -232,7 +232,7 @@ static void gen_addr(Gen *g, Node *n) {
         case ND_MEMBER: {
             ExprType bt = type_of(g, n->operand);
             StructInfo *s = find_struct(g, bt.sname);
-            if (!s) { fprintf(stderr, "codegen error: member access on non-struct\n"); g->had_error = 1; return; }
+            if (!s) { g->had_error = 1; return; }
             Field *f = find_field(s, n->name);
             if (!f) { fprintf(stderr, "codegen error: no field '%s' in struct '%s'\n", n->name, s->name); g->had_error = 1; return; }
             if (bt.ptr > 0) gen_expr(g, n->operand);  /* base is pointer-to-struct: use its value as address */
@@ -1064,6 +1064,70 @@ static void gen_expr(Gen *g, Node *n) {
                         g->had_error = 1; break;
                     }
                     fprintf(g->out, "    %s\n", n->items[i]->str_val);
+                }
+                break;
+            }
+
+            /* __atomic("op", ptr [, val [, val2]]) compiler intrinsic.
+             * op is a string literal: "load", "store", "add", "sub", "cas", "xchg".
+             * All operations work on aligned 64-bit values through a pointer.
+             * Returns the previous value (or loaded value for "load", 0 for "store"). */
+            if (callee->kind == ND_IDENT && strcmp(callee->name, "__atomic") == 0) {
+                if (n->nitems < 2 || n->items[0]->kind != ND_STR) {
+                    fprintf(stderr, "codegen error: __atomic(\"op\", ptr, ...) needs a string literal op and a pointer\n");
+                    g->had_error = 1; break;
+                }
+                const char *op = n->items[0]->str_val;
+                if (strcmp(op, "load") == 0) {
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    mov rax, [rax]\n");
+                } else if (strcmp(op, "store") == 0) {
+                    if (n->nitems < 3) { fprintf(stderr, "codegen error: __atomic(\"store\", ptr, val)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    push rax\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    pop rcx\n");
+                    fprintf(g->out, "    xchg [rax], rcx\n");
+                    fprintf(g->out, "    xor eax, eax\n");
+                } else if (strcmp(op, "add") == 0) {
+                    if (n->nitems < 3) { fprintf(stderr, "codegen error: __atomic(\"add\", ptr, val)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    push rax\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    pop rcx\n");
+                    fprintf(g->out, "    lock xadd [rax], rcx\n");
+                    fprintf(g->out, "    mov rax, rcx\n");
+                } else if (strcmp(op, "sub") == 0) {
+                    if (n->nitems < 3) { fprintf(stderr, "codegen error: __atomic(\"sub\", ptr, val)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    neg rax\n");
+                    fprintf(g->out, "    push rax\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    pop rcx\n");
+                    fprintf(g->out, "    lock xadd [rax], rcx\n");
+                    fprintf(g->out, "    mov rax, rcx\n");
+                } else if (strcmp(op, "cas") == 0) {
+                    if (n->nitems < 4) { fprintf(stderr, "codegen error: __atomic(\"cas\", ptr, expected, desired)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[3]);
+                    fprintf(g->out, "    push rax\n");
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    push rax\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    mov rdx, rax\n");
+                    fprintf(g->out, "    pop rax\n");
+                    fprintf(g->out, "    pop rcx\n");
+                    fprintf(g->out, "    lock cmpxchg [rdx], rcx\n");
+                } else if (strcmp(op, "xchg") == 0) {
+                    if (n->nitems < 3) { fprintf(stderr, "codegen error: __atomic(\"xchg\", ptr, val)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    push rax\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    pop rcx\n");
+                    fprintf(g->out, "    xchg [rax], rcx\n");
+                    fprintf(g->out, "    mov rax, rcx\n");
+                } else {
+                    fprintf(stderr, "codegen error: __atomic: unknown op \"%s\"\n", op);
+                    g->had_error = 1;
                 }
                 break;
             }

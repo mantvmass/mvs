@@ -1,0 +1,117 @@
+// Pattern matching phase 3: nested patterns, guards, literals, wildcards, ranges, value match
+import { io } from "std";
+import { Option, Some, None } from "std/option";
+import { Result, Ok, Err } from "std/result";
+
+func test_nested_pattern() -> void {
+    let inner: Result<i64, i64> = Ok<i64, i64>(99);
+    let a: Option<Result<i64, i64>> = Some(inner);
+    match (a) {
+        Some(Ok(v)) => {
+            io.out("nested: Ok {}\n", v);
+        }
+        Some(Err(e)) => {
+            io.out("nested: Err {}\n", e);
+        }
+        None => {
+            io.out("nested: none\n");
+        }
+    }
+
+    let inner2: Result<i64, i64> = Err<i64, i64>(42);
+    let b: Option<Result<i64, i64>> = Some(inner2);
+    match (b) {
+        Some(Ok(v)) => {
+            io.out("nested2: Ok {}\n", v);
+        }
+        Some(Err(e)) => {
+            io.out("nested2: Err {}\n", e);
+        }
+        None => {
+            io.out("nested2: none\n");
+        }
+    }
+}
+
+func test_guard() -> void {
+    let a: Option<i64> = Some(42);
+    match (a) {
+        Some(_x) if _x > 10 => {
+            io.out("guard: x > 10\n");
+        }
+        Some(_x) => {
+            io.out("guard: x <= 10\n");
+        }
+        None => {
+            io.out("guard: none\n");
+        }
+    }
+}
+
+func test_literal_in_payload() -> void {
+    let a: Option<i64> = Some(42);
+    match (a) {
+        Some(42) => {
+            io.out("literal: matched 42\n");
+        }
+        Some(_) => {
+            io.out("literal: other\n");
+        }
+        None => {
+            io.out("literal: none\n");
+        }
+    }
+}
+
+func test_wildcard_in_payload() -> void {
+    let a: Option<i64> = Some(7);
+    match (a) {
+        Some(_) => {
+            io.out("wildcard: some\n");
+        }
+        None => {
+            io.out("wildcard: none\n");
+        }
+    }
+}
+
+func test_value_match() -> void {
+    let x: i64 = 3;
+    match (x) {
+        1 => { io.out("value: one\n"); }
+        2 => { io.out("value: two\n"); }
+        3 => { io.out("value: three\n"); }
+        _ => { io.out("value: other\n"); }
+    }
+}
+
+func test_range_match() -> void {
+    let x: i64 = 15;
+    match (x) {
+        1..=10 => { io.out("range: 1 to 10\n"); }
+        11..=20 => { io.out("range: 11 to 20\n"); }
+        _ => { io.out("range: other\n"); }
+    }
+}
+
+func test_value_expr() -> void {
+    let x: i64 = 2;
+    let name: str = match (x) {
+        1 => "one",
+        2 => "two",
+        3 => "three",
+        _ => "other"
+    };
+    io.out("value expr: {}\n", name);
+}
+
+func main() -> i8 {
+    test_nested_pattern();
+    test_guard();
+    test_literal_in_payload();
+    test_wildcard_in_payload();
+    test_value_match();
+    test_range_match();
+    test_value_expr();
+    return 0;
+}

@@ -187,7 +187,7 @@ static Node *find_template(Node *prog, const char *name) {
 static int func_ret_type(Node *prog, const char *name, CType *out) {
     /* the inline-assembly intrinsic: its value is whatever the instructions left
      * in the result register, so it types as a plain 64-bit integer */
-    if (strcmp(name, "asm") == 0) {
+    if (strcmp(name, "asm") == 0 || strcmp(name, "__atomic") == 0) {
         out->base = TYPE_I64; out->ptr = 0; out->sname = NULL; out->sig = NULL; out->arr = 0;
         return 1;
     }
@@ -689,6 +689,148 @@ static void de_block_insert(Node *parent, int idx, Node *child) {
     parent->items[idx] = child;
 }
 
+/* build a condition tree for sub-pattern checks on a single payload field.
+ * base = the expression to test (e.g. __match0.v1_0), pat = the sub-pattern node.
+ * pre_blk = outer block where inner temp declarations go (before the condition).
+ * body_blk = then-block where bindings go (inside the condition).
+ * Returns NULL when the sub-pattern is just a binding (no condition needed). */
+static Node *de_pat_cond(Node *prog, const char *base_tmp, int vi, int fi,
+                         Node *pat, const Node *src, Bind *map, int *nmap,
+                         Node *pre_blk, Node *body_blk,
+                         EnumInfo *ei, char *gargs[4], int ngargs) {
+    char field[32];
+    snprintf(field, sizeof(field), "v%d_%d", vi, fi);
+
+    if (pat->kind == ND_IDENT) {
+        if (strcmp(pat->name, "_") == 0) return NULL;
+        Node *bd = de_node(ND_VAR_DECL, src);
+        bd->name = strdup(pat->name);
+        de_bind_type(bd, ei->decl->items[vi]->items[fi], ei->decl, gargs, ngargs);
+        bd->operand = de_member(base_tmp, field, src);
+        node_add_item(body_blk, bd);
+        add_bind(map, nmap, bd);
+        return NULL;
+    }
+    if (pat->kind == ND_INT || pat->kind == ND_BOOL || pat->kind == ND_CHAR) {
+        Node *cmp = de_node(ND_BINARY, src);
+        cmp->op = TK_EQ;
+        cmp->lhs = de_member(base_tmp, field, src);
+        cmp->rhs = node_clone(pat);
+        return cmp;
+    }
+    if (pat->kind == ND_STR) {
+        Node *call = de_node(ND_CALL, src);
+        call->name = strdup("strcmp");
+        node_add_item(call, de_member(base_tmp, field, src));
+        node_add_item(call, node_clone(pat));
+        Node *cmp = de_node(ND_BINARY, src);
+        cmp->op = TK_EQ;
+        cmp->lhs = call;
+        cmp->rhs = de_node(ND_INT, src);
+        cmp->rhs->int_val = 0;
+        cmp->rhs->type = TYPE_I32;
+        return cmp;
+    }
+    if (pat->kind == ND_MARM && pat->name) {
+        EnumInfo *inner_ei = NULL;
+        char *canon_name = NULL;
+        if (pat->type_name) {
+            inner_ei = de_find(pat->type_name);
+            if (inner_ei) canon_name = strdup(pat->type_name);
+        }
+        char *inner_gargs[4] = {0};
+        int inner_ngargs = 0;
+        if (!inner_ei) {
+            Node *pt = ei->decl->items[vi]->items[fi];
+            char *ptn = pt->type_name;
+            if (ptn) {
+                if (ei->decl->ngen > 0) ptn = de_subst_ptype(ptn, ei->decl, gargs, ngargs);
+                canon_name = strdup(ptn);
+                inner_ei = de_find_base(ptn, inner_gargs, &inner_ngargs);
+            }
+        }
+        if (!inner_ei) { free(canon_name); return NULL; }
+        int inner_vi = -1;
+        for (int v = 0; v < inner_ei->decl->nitems; v++)
+            if (strcmp(inner_ei->decl->items[v]->name, pat->name) == 0) { inner_vi = v; break; }
+        if (inner_vi < 0) { free(canon_name); return NULL; }
+        char inner_tmp[32];
+        snprintf(inner_tmp, sizeof(inner_tmp), "__match%d", de_tmp++);
+        Node *inner_decl = de_node(ND_VAR_DECL, src);
+        inner_decl->name = strdup(inner_tmp);
+        inner_decl->type = TYPE_STRUCT;
+        inner_decl->type_name = canon_name ? canon_name : strdup(inner_ei->name);
+        inner_decl->operand = de_member(base_tmp, field, src);
+        node_add_item(pre_blk, inner_decl);
+        add_bind(map, nmap, inner_decl);
+        Node *tag_cmp = de_node(ND_BINARY, src);
+        tag_cmp->op = TK_EQ;
+        tag_cmp->lhs = de_member(inner_tmp, "__tag", src);
+        tag_cmp->rhs = de_node(ND_INT, src);
+        tag_cmp->rhs->int_val = inner_vi;
+        tag_cmp->rhs->type = TYPE_I64;
+        Node *combined = tag_cmp;
+        for (int k = 0; k < pat->nitems && k < inner_ei->decl->items[inner_vi]->nitems; k++) {
+            Node *sub = de_pat_cond(prog, inner_tmp, inner_vi, k,
+                                    pat->items[k], src, map, nmap,
+                                    pre_blk, body_blk,
+                                    inner_ei, inner_gargs, inner_ngargs);
+            if (sub) {
+                Node *a = de_node(ND_BINARY, src);
+                a->op = TK_AND;
+                a->lhs = combined;
+                a->rhs = sub;
+                combined = a;
+            }
+        }
+        return combined;
+    }
+    return NULL;
+}
+
+/* emit the body/value of one arm into body_blk */
+static void de_arm_body(Node *prog, Node *arm, Bind *map, int *nmap,
+                        Node *body_blk, Node *assign_target, int ret_mode, int value_mode) {
+    if (value_mode) {
+        arm->operand = de_walk(prog, arm->operand, map, nmap);
+        Node *st;
+        if (ret_mode) {
+            st = de_node(ND_RETURN, arm);
+            st->operand = arm->operand;
+        } else {
+            Node *as = de_node(ND_ASSIGN, arm);
+            as->op = TK_ASSIGN;
+            as->lhs = node_clone(assign_target);
+            as->rhs = arm->operand;
+            st = de_node(ND_EXPR_STMT, arm);
+            st->operand = as;
+        }
+        node_add_item(body_blk, st);
+    } else {
+        arm->body = de_walk(prog, arm->body, map, nmap);
+        node_add_item(body_blk, arm->body);
+    }
+}
+
+/* wrap a then-block in a guard condition if the arm has one */
+static Node *de_guard_wrap(Node *prog, Node *arm, Node *tb, Bind *map, int *nmap,
+                           Node *assign_target, int ret_mode, int value_mode,
+                           Node *def_arm) {
+    if (!arm->cond) return tb;
+    arm->cond = de_walk(prog, arm->cond, map, nmap);
+    Node *guard_if = de_node(ND_IF, arm);
+    guard_if->cond = arm->cond;
+    guard_if->then_branch = tb;
+    if (def_arm) {
+        Node *fb = de_node(ND_BLOCK, arm);
+        de_arm_body(prog, def_arm, map, nmap, fb, assign_target, ret_mode, value_mode);
+        guard_if->else_branch = fb;
+    }
+    Node *wrap = de_node(ND_BLOCK, arm);
+    node_add_item(wrap, guard_if);
+    return wrap;
+}
+
 /* Desugar one ND_MATCH. Children are walked HERE (bindings must be in scope
  * for the arm bodies). Modes:
  *   assign_target != NULL -> value match; each arm assigns its expression
@@ -697,6 +839,103 @@ static void de_block_insert(Node *parent, int idx, Node *child) {
 static Node *de_match(Node *prog, Node *n, Bind *map, int *nmap, Node *assign_target, int ret_mode) {
     int value_mode = (assign_target != NULL) || ret_mode;
     n->cond = de_walk(prog, n->cond, map, nmap);
+
+    /* detect whether this is a value match (literal/range arms) or an enum match */
+    int is_value_match = 0;
+    for (int i = 0; i < n->nitems; i++)
+        if (n->items[i]->lhs) { is_value_match = 1; break; }
+
+    if (is_value_match) {
+        /* value match: the scrutinee is an integer/string/bool/float, arms compare directly */
+        CType ct = infer(prog, n->cond, map, *nmap);
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "__match%d", de_tmp++);
+        Node *blk = de_node(ND_BLOCK, n);
+        Node *decl = de_node(ND_VAR_DECL, n);
+        decl->name = strdup(tmp);
+        decl->type = ct.base;
+        decl->ptr = ct.ptr;
+        decl->type_name = ct.sname ? strdup(ct.sname) : NULL;
+        decl->operand = n->cond;
+        node_add_item(blk, decl);
+        int scope_base = *nmap;
+        add_bind(map, nmap, decl);
+
+        Node *def_arm = NULL;
+        for (int i = 0; i < n->nitems; i++)
+            if (!n->items[i]->name && !n->items[i]->lhs) { def_arm = n->items[i]; break; }
+
+        Node *first_if = NULL, *cur = NULL;
+        for (int i = 0; i < n->nitems; i++) {
+            Node *arm = n->items[i];
+            if (!arm->lhs) {
+                if (!arm->name) continue;
+                /* this would be an enum variant in a value match, error */
+                continue;
+            }
+            Node *cmp_node;
+            if (arm->lhs->kind == ND_BINARY &&
+                (arm->lhs->op == TK_DOTDOT || arm->lhs->op == TK_DOTDOTEQ)) {
+                /* range pattern: lo <= val && val < hi (or val <= hi for ..=) */
+                Node *lo_cmp = de_node(ND_BINARY, arm);
+                lo_cmp->op = TK_LE;
+                lo_cmp->lhs = node_clone(arm->lhs->lhs);
+                lo_cmp->rhs = de_ident(tmp, arm);
+                Node *hi_cmp = de_node(ND_BINARY, arm);
+                hi_cmp->op = (arm->lhs->op == TK_DOTDOTEQ) ? TK_LE : TK_LT;
+                hi_cmp->lhs = de_ident(tmp, arm);
+                hi_cmp->rhs = node_clone(arm->lhs->rhs);
+                cmp_node = de_node(ND_BINARY, arm);
+                cmp_node->op = TK_AND;
+                cmp_node->lhs = lo_cmp;
+                cmp_node->rhs = hi_cmp;
+            } else if (arm->lhs->kind == ND_STR) {
+                Node *call = de_node(ND_CALL, arm);
+                call->name = strdup("strcmp");
+                node_add_item(call, de_ident(tmp, arm));
+                node_add_item(call, node_clone(arm->lhs));
+                cmp_node = de_node(ND_BINARY, arm);
+                cmp_node->op = TK_EQ;
+                cmp_node->lhs = call;
+                cmp_node->rhs = de_node(ND_INT, arm);
+                cmp_node->rhs->int_val = 0;
+                cmp_node->rhs->type = TYPE_I32;
+            } else {
+                cmp_node = de_node(ND_BINARY, arm);
+                cmp_node->op = TK_EQ;
+                cmp_node->lhs = de_ident(tmp, arm);
+                cmp_node->rhs = node_clone(arm->lhs);
+            }
+            if (arm->cond) {
+                arm->cond = de_walk(prog, arm->cond, map, nmap);
+                Node *ga = de_node(ND_BINARY, arm);
+                ga->op = TK_AND;
+                ga->lhs = cmp_node;
+                ga->rhs = arm->cond;
+                cmp_node = ga;
+            }
+            Node *tb = de_node(ND_BLOCK, arm);
+            de_arm_body(prog, arm, map, nmap, tb, assign_target, ret_mode, value_mode);
+
+            Node *iff = de_node(ND_IF, arm);
+            iff->cond = cmp_node;
+            iff->then_branch = tb;
+            if (!first_if) first_if = iff;
+            else cur->else_branch = iff;
+            cur = iff;
+        }
+        if (def_arm) {
+            Node *db = de_node(ND_BLOCK, def_arm);
+            de_arm_body(prog, def_arm, map, nmap, db, assign_target, ret_mode, value_mode);
+            if (cur) cur->else_branch = db;
+            else if (!first_if) first_if = db;
+        }
+        if (first_if) node_add_item(blk, first_if);
+        *nmap = scope_base;
+        return blk;
+    }
+
+    /* --- enum match (original path, extended with nested patterns and guards) --- */
 
     /* resolve the enum: a qualified arm names it; otherwise the scrutinee's type */
     EnumInfo *ei = NULL;
@@ -778,17 +1017,22 @@ static Node *de_match(Node *prog, Node *n, Bind *map, int *nmap, Node *assign_ta
             de_err++;
             continue;
         }
-        if (seen[vi]) {
+        int has_nested_or_lit = 0;
+        for (int j = 0; j < arm->nitems; j++)
+            if (arm->items[j]->kind != ND_IDENT) { has_nested_or_lit = 1; break; }
+        int any_refine = arm->cond || has_nested_or_lit;
+        if (!any_refine && seen[vi] == 1) {
             diag_print(arm->file, arm->line, arm->col, "error",
                        "duplicate arm for variant '%s'", arm->name);
             de_err++;
         }
-        seen[vi] = 1;
+        if (seen[vi] == 0) seen[vi] = any_refine ? 2 : 1;
         int arity = ei->decl->items[vi]->nitems;
-        if (arm->nitems != arity) {
+        int pat_count = arm->nitems;
+        if (pat_count > 0 && pat_count != arity) {
             diag_print(arm->file, arm->line, arm->col, "error",
                        "variant '%s' carries %d value(s) but the pattern binds %d",
-                       arm->name, arity, arm->nitems);
+                       arm->name, arity, pat_count);
             de_err++;
         }
     }
@@ -833,51 +1077,91 @@ static Node *de_match(Node *prog, Node *n, Bind *map, int *nmap, Node *assign_ta
         Node *tb = de_node(ND_BLOCK, arm);
         Node *variant = ei->decl->items[vi];
         int arm_scope = *nmap;
+
+        /* sub-pattern conditions (nested constructors, literals) */
+        Node *extra_cond = NULL;
         for (int j = 0; j < arm->nitems && j < variant->nitems; j++) {
-            Node *pt = variant->items[j];
-            Node *bd = de_node(ND_VAR_DECL, arm);
-            bd->name = strdup(arm->items[j]->name);
-            de_bind_type(bd, pt, ei->decl, gargs, ngargs);
-            char f[32];
-            snprintf(f, sizeof(f), "v%d_%d", vi, j);
-            bd->operand = de_member(tmp, f, arm);
-            node_add_item(tb, bd);
-            add_bind(map, nmap, bd);             /* the arm body sees its bindings */
-        }
-        if (value_mode) {
-            arm->operand = de_walk(prog, arm->operand, map, nmap);
-            Node *st;
-            if (ret_mode) {
-                st = de_node(ND_RETURN, arm);
-                st->operand = arm->operand;
+            Node *pat = arm->items[j];
+            if (pat->kind == ND_IDENT && strcmp(pat->name, "_") != 0) {
+                /* simple binding, as before */
+                Node *pt = variant->items[j];
+                Node *bd = de_node(ND_VAR_DECL, arm);
+                bd->name = strdup(pat->name);
+                de_bind_type(bd, pt, ei->decl, gargs, ngargs);
+                char f[32];
+                snprintf(f, sizeof(f), "v%d_%d", vi, j);
+                bd->operand = de_member(tmp, f, arm);
+                node_add_item(tb, bd);
+                add_bind(map, nmap, bd);
+            } else if (pat->kind == ND_IDENT && strcmp(pat->name, "_") == 0) {
+                /* wildcard: no binding, no condition */
             } else {
-                Node *as = de_node(ND_ASSIGN, arm);
-                as->op = TK_ASSIGN;
-                as->lhs = node_clone(assign_target);
-                as->rhs = arm->operand;
-                st = de_node(ND_EXPR_STMT, arm);
-                st->operand = as;
+                /* nested constructor, literal, etc */
+                Node *sc = de_pat_cond(prog, tmp, vi, j, pat, arm,
+                                       map, nmap, blk, tb, ei, gargs, ngargs);
+                if (sc) {
+                    if (!extra_cond) extra_cond = sc;
+                    else {
+                        Node *a = de_node(ND_BINARY, arm);
+                        a->op = TK_AND;
+                        a->lhs = extra_cond;
+                        a->rhs = sc;
+                        extra_cond = a;
+                    }
+                }
             }
-            node_add_item(tb, st);
-        } else {
-            arm->body = de_walk(prog, arm->body, map, nmap);
-            node_add_item(tb, arm->body);
         }
+
+        de_arm_body(prog, arm, map, nmap, tb, assign_target, ret_mode, value_mode);
         *nmap = arm_scope;                       /* bindings drop out of scope */
-        if (!def_arm && i == last_variant) {     /* exhaustive: final arm needs no tag test */
-            if (cur) cur->else_branch = tb;
-            else if (!first_if) first_if = tb;   /* a single-arm match is just its block */
+
+        /* build the condition: tag == vi [&& extra_cond] [&& guard] */
+        int skip_tag = (!def_arm && !arm->cond && !extra_cond && i == last_variant);
+        if (skip_tag) {
+            Node *final_tb = de_guard_wrap(prog, arm, tb, map, nmap,
+                                           assign_target, ret_mode, value_mode, def_arm);
+            if (cur) cur->else_branch = final_tb;
+            else if (!first_if) first_if = final_tb;
             break;
         }
-        Node *iff = de_node(ND_IF, arm);
+
         Node *cmp = de_node(ND_BINARY, arm);
         cmp->op = TK_EQ;
         cmp->lhs = de_member(tmp, "__tag", arm);
         cmp->rhs = de_node(ND_INT, arm);
         cmp->rhs->int_val = vi;
         cmp->rhs->type = TYPE_I64;
-        iff->cond = cmp;
-        iff->then_branch = tb;
+
+        Node *full_cond = cmp;
+        if (extra_cond) {
+            Node *a = de_node(ND_BINARY, arm);
+            a->op = TK_AND;
+            a->lhs = full_cond;
+            a->rhs = extra_cond;
+            full_cond = a;
+        }
+
+        Node *final_tb = tb;
+        if (arm->cond) {
+            arm->cond = de_walk(prog, arm->cond, map, nmap);
+            Node *guard_if = de_node(ND_IF, arm);
+            guard_if->cond = arm->cond;
+            guard_if->then_branch = tb;
+            final_tb = de_node(ND_BLOCK, arm);
+            /* re-emit bindings into the outer block so the guard can see them */
+            for (int bi = 0; bi < tb->nitems - 1; bi++)
+                node_add_item(final_tb, node_clone(tb->items[bi]));
+            /* strip bindings from tb, keep only the body */
+            int body_idx = tb->nitems - 1;
+            Node *body_only = de_node(ND_BLOCK, arm);
+            node_add_item(body_only, tb->items[body_idx]);
+            guard_if->then_branch = body_only;
+            node_add_item(final_tb, guard_if);
+        }
+
+        Node *iff = de_node(ND_IF, arm);
+        iff->cond = full_cond;
+        iff->then_branch = final_tb;
         if (!first_if) first_if = iff;
         else cur->else_branch = iff;
         cur = iff;
@@ -1965,6 +2249,11 @@ int check_duplicates(Node *prog) {
         if (a->kind == ND_FUNC && a->name && !a->is_method && strcmp(a->name, "asm") == 0) {
             diag_print(a->file, a->line, a->col, "error",
                        "'asm' is a reserved intrinsic (inline assembly) and cannot be declared");
+            errc++;
+        }
+        if (a->kind == ND_FUNC && a->name && !a->is_method && strcmp(a->name, "__atomic") == 0) {
+            diag_print(a->file, a->line, a->col, "error",
+                       "'__atomic' is a reserved intrinsic and cannot be declared");
             errc++;
         }
         if (a->kind != ND_STRUCT_DECL && a->kind != ND_TRAIT && a->kind != ND_FUNC) continue;

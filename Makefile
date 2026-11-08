@@ -43,6 +43,7 @@ EXAMPLES = examples/demo \
            examples/01_language/args examples/01_language/arrays examples/01_language/int128 \
            examples/01_language/shadow examples/01_language/compile_attr examples/01_language/hexbin \
            examples/01_language/enums examples/01_language/bounds \
+           examples/01_language/match_phase3 \
            examples/02_functions/generics examples/02_functions/overload examples/02_functions/recursion \
            examples/02_functions/funcptr examples/02_functions/defaults \
            examples/03_structs/structs examples/03_structs/methods examples/03_structs/pointers \
@@ -61,6 +62,7 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/lib_fs examples/08_stdlib/lib_vec2 examples/08_stdlib/lib_sync \
            examples/08_stdlib/lib_rand2 examples/08_stdlib/lib_math2 examples/08_stdlib/lib_io2 \
            examples/08_stdlib/lib_map2 examples/08_stdlib/lib_test \
+           examples/08_stdlib/atomics examples/08_stdlib/channels \
            examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop \
            examples/10_json/main examples/11_vm/main examples/12_http/main
 

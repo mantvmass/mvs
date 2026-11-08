@@ -1,0 +1,7 @@
+4 threads x 10000 iterations
+
+counter = 40000 (expected 40000)
+
+done = 4
+
+cas 40000->99: old = 40000, now = 99

@@ -21,12 +21,14 @@ qemu-user.
 
 ## Language
 
-- Pattern matching phase 3: nested patterns (`Some(Ok(v))`), literal and range
-  patterns, `if` guards. Phases 1 and 2 shipped (payload variants, exhaustive
-  `match` as statement and expression, bare patterns, generic enums).
-- Concurrency phase 2: channels, atomics as compiler intrinsics, a scoped join
-  helper. Threads + Mutex shipped. Send/Sync-style race checking would need an
-  ownership system and is not planned.
+- Pattern matching phase 3: shipped. Nested patterns (`Some(Ok(v))`), literal
+  patterns in payloads, range patterns (`1..=10`), `if` guards, wildcard
+  sub-patterns, value match on integers, match-as-expression. Phases 1-3 done.
+- Concurrency phase 2: shipped. `__atomic` compiler intrinsic (load, store, add,
+  sub, cas, xchg on all three backends), `core/atomic` wrapper, `CondVar` in
+  `std/sync`, bounded MPMC `Channel` in `std/channel`. Scoped join helper is
+  still open. Send/Sync-style race checking would need an ownership system and
+  is not planned.
 - Generic struct extensions: array type arguments, `impl Trait for Vec<T>`.
 - More collections: `HashSet`, ordered maps. (`remove()` on `HashMap` shipped
   with tombstone deletion.)
@@ -36,25 +38,21 @@ qemu-user.
 
 ## Codegen: an IR
 
-The biggest open decision. Today the pipeline is AST straight to assembly:
-`gen_expr` sees one node at a time, so it plays it safe with the temp stack,
-and `-O` can never grow past peephole patterns. An intermediate representation
-(three-address code between the AST and the backends) would change that:
+The IR layer is implemented (`src/ir.h`, `src/ir.c`, `src/lower.h`,
+`src/lower.c`): three-address code with virtual registers, typed
+instructions, and high-level call nodes. The AST lowers to IR once; each
+backend then translates IR to assembly. This eliminates the duplicated
+`gen_expr`/`gen_stmt` logic across three backends.
 
-- AST lowers to IR once, replacing `gen_expr`/`gen_stmt` in all three
-  backend files; each backend then only translates IR to instructions.
-- Optimizations (CSE, strength reduction, constant folding, real register
-  allocation over every value, not just named locals) are IR-to-IR passes,
-  written once for all targets. A plain IR + regalloc compiler lands around
-  1.2-1.5x gcc -O2; the current stack machine sits at about 3x.
+What the IR enables next (none committed):
+
+- Optimization passes (CSE, strength reduction, constant folding, real
+  register allocation over every value). A plain IR + regalloc compiler
+  lands around 1.2-1.5x gcc -O2; the current stack machine sits at about 3x.
 - New features lower to IR once instead of being emitted three times.
 
-The price: rewriting three stable, golden-tested backends, and every golden
-diff breaks in the transition (the differential tests are the safety net).
-The deeper cost is the project's stated point: with an optimizer in the
-middle, `-S` output no longer maps line by line back to the source. Either
-the 3x gap is the price of readable output, or readability is the price of
-closing it. Undecided, so this stays a sketch.
+The trade-off remains: with an optimizer in the middle, `-S` output no
+longer maps line by line back to the source.
 
 ## Core library
 
@@ -67,8 +65,10 @@ the `asm()` intrinsic), `panic` (freestanding abort with replaceable handler),
 sort, binary search, min/max). Still open:
 
 - `core/cell`: interior mutability.
-- `core/sync::atomic`: needs compare-exchange intrinsics on top of `asm`.
 - `core/ffi`: C-compatible type aliases.
+
+`core/atomic` shipped (load, store, add, sub, cas, exchange via the
+`__atomic` compiler intrinsic).
 
 ## Conditional compilation
 

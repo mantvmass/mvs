@@ -376,6 +376,14 @@ Token lexer_next(Lexer *lx) {
                 advance(lx); advance(lx);
                 return simple_token(TK_ELLIPSIS, "...", line, col);
             }
+            if (peek(lx) == '.') {
+                advance(lx);
+                if (peek(lx) == '=') {                        /* '..=' inclusive range */
+                    advance(lx);
+                    return simple_token(TK_DOTDOTEQ, "..=", line, col);
+                }
+                return simple_token(TK_DOTDOT, "..", line, col); /* '..' exclusive range */
+            }
             return simple_token(TK_DOT, ".", line, col);
     }
 

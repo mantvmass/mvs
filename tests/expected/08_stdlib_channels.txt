@@ -1,0 +1,3 @@
+received 10 values, sum = 1520
+
+expected sum = 1520

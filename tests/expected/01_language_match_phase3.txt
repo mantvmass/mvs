@@ -1,0 +1,15 @@
+nested: Ok 99
+
+nested2: Err 42
+
+guard: x > 10
+
+literal: matched 42
+
+wildcard: some
+
+value: three
+
+range: 11 to 20
+
+value expr: two

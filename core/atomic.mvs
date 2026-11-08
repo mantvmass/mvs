@@ -1,0 +1,52 @@
+/*
+ * core/atomic.mvs - lock-free atomic operations (--nostd safe)
+ *
+ *     import { atomic } from "core";
+ *
+ *     let counter: i64 = 0;
+ *     atomic.store(&counter, 10);
+ *     let old: i64 = atomic.add(&counter, 5);   // old = 10, counter = 15
+ *     let val: i64 = atomic.load(&counter);      // val = 15
+ *
+ * Every function here wraps the __atomic compiler intrinsic, which emits
+ * hardware atomic instructions directly: lock xadd / lock cmpxchg / xchg
+ * on x86-64, ldaxr/stlxr loops on AArch64.
+ *
+ * All operations provide sequential consistency (the strongest ordering).
+ * Relaxed/acquire/release orderings are not exposed; use core/arch fences
+ * for manual ordering when profiling shows seq_cst is too expensive.
+ *
+ * Only i64-sized (8-byte, naturally aligned) values are supported.
+ * Passing an unaligned pointer is undefined behavior on all targets.
+ */
+
+// read the value at ptr atomically; returns the current value
+func load(ptr: *i64) -> i64 {
+    return __atomic("load", ptr);
+}
+
+// write val to ptr atomically; the previous value is discarded
+func store(ptr: *i64, val: i64) -> void {
+    __atomic("store", ptr, val);
+}
+
+// atomically add val to *ptr; returns the OLD value (before the add)
+func add(ptr: *i64, val: i64) -> i64 {
+    return __atomic("add", ptr, val);
+}
+
+// atomically subtract val from *ptr; returns the OLD value (before the sub)
+func sub(ptr: *i64, val: i64) -> i64 {
+    return __atomic("sub", ptr, val);
+}
+
+// compare-and-swap: if *ptr == expected, set *ptr = desired.
+// returns the value that was at *ptr (== expected on success, != on failure).
+func cas(ptr: *i64, expected: i64, desired: i64) -> i64 {
+    return __atomic("cas", ptr, expected, desired);
+}
+
+// atomically replace *ptr with val; returns the OLD value
+func exchange(ptr: *i64, val: i64) -> i64 {
+    return __atomic("xchg", ptr, val);
+}

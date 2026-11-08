@@ -1,0 +1,109 @@
+/*
+ * std/channel.mvs - bounded MPMC channel for i64 values
+ *
+ *     import { io, thread } from "std";
+ *     import { Channel } from "std/channel";
+ *
+ *     let ch: Channel = Channel::new(8);  // buffer for 8 values
+ *
+ *     func producer(arg: *u8) -> *u8 {
+ *         let c: *Channel = arg as *Channel;
+ *         c.send(42);
+ *         return 0;
+ *     }
+ *     func consumer(arg: *u8) -> *u8 {
+ *         let c: *Channel = arg as *Channel;
+ *         let v: i64 = c.recv();
+ *         io.out("got {}\n", v);
+ *         return 0;
+ *     }
+ *
+ *     let t1: usize = thread.spawn(producer, &ch as *u8);
+ *     let t2: usize = thread.spawn(consumer, &ch as *u8);
+ *     thread.join(t1);
+ *     thread.join(t2);
+ *     ch.drop();
+ *
+ * send() blocks when the buffer is full; recv() blocks when empty.
+ * close() wakes all waiters: a recv() on a closed empty channel returns 0.
+ * Not safe to copy by value after creation (contains OS handles).
+ */
+
+import { Mutex, CondVar } from "std/sync";
+
+extern func malloc(n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+
+struct Channel {
+    lock: Mutex;
+    not_empty: CondVar;
+    not_full: CondVar;
+    buf: *i64;
+    head: i64;
+    count: i64;
+    cap: i64;
+    closed: i64;
+}
+
+impl Channel {
+    func new(cap: i64) -> Channel {
+        let sz: usize = (cap * 8) as usize;
+        let p: *i64 = malloc(sz) as *i64;
+        let ch: Channel = Channel {
+            lock: Mutex::new(),
+            not_empty: CondVar::new(),
+            not_full: CondVar::new(),
+            buf: p,
+            head: 0,
+            count: 0,
+            cap: cap,
+            closed: 0
+        };
+        return ch;
+    }
+
+    func send(self: *Channel, val: i64) -> void {
+        self.lock.lock();
+        while (self.count == self.cap && self.closed == 0) {
+            self.not_full.wait(&self.lock);
+        }
+        if (self.closed != 0) {
+            self.lock.unlock();
+            return;
+        }
+        let idx: i64 = (self.head + self.count) % self.cap;
+        *(self.buf + idx) = val;
+        self.count = self.count + 1;
+        self.not_empty.signal();
+        self.lock.unlock();
+    }
+
+    func recv(self: *Channel) -> i64 {
+        self.lock.lock();
+        while (self.count == 0 && self.closed == 0) {
+            self.not_empty.wait(&self.lock);
+        }
+        if (self.count == 0) {
+            self.lock.unlock();
+            return 0;
+        }
+        let val: i64 = *(self.buf + self.head);
+        self.head = (self.head + 1) % self.cap;
+        self.count = self.count - 1;
+        self.not_full.signal();
+        self.lock.unlock();
+        return val;
+    }
+
+    func close(self: *Channel) -> void {
+        self.lock.lock();
+        self.closed = 1;
+        self.not_empty.broadcast();
+        self.not_full.broadcast();
+        self.lock.unlock();
+    }
+
+    func drop(self: *Channel) -> void {
+        free(self.buf as *u8);
+    }
+}

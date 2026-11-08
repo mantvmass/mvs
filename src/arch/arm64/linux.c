@@ -947,6 +947,89 @@ static void gen_expr(Gen *g, Node *n) {
                 }
                 break;
             }
+            /* __atomic("op", ptr [, val [, val2]]) compiler intrinsic.
+             * AArch64 uses ldaxr/stlxr (load-acquire exclusive / store-release exclusive). */
+            if (callee->kind == ND_IDENT && strcmp(callee->name, "__atomic") == 0) {
+                if (n->nitems < 2 || n->items[0]->kind != ND_STR) {
+                    fprintf(stderr, "codegen error: __atomic(\"op\", ptr, ...) needs a string literal op and a pointer\n");
+                    g->had_error = 1; break;
+                }
+                const char *op = n->items[0]->str_val;
+                int lbl_retry = g->label_id++;
+                int lbl_done = g->label_id++;
+                if (strcmp(op, "load") == 0) {
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    ldar x0, [x0]\n");
+                } else if (strcmp(op, "store") == 0) {
+                    if (n->nitems < 3) { fprintf(stderr, "codegen error: __atomic(\"store\", ptr, val)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    str x0, [sp, #-16]!\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    mov x1, x0\n");
+                    fprintf(g->out, "    ldr x2, [sp], #16\n");
+                    fprintf(g->out, ".L%d:\n", lbl_retry);
+                    fprintf(g->out, "    ldaxr x3, [x1]\n");
+                    fprintf(g->out, "    stlxr w4, x2, [x1]\n");
+                    fprintf(g->out, "    cbnz w4, .L%d\n", lbl_retry);
+                    fprintf(g->out, "    mov x0, #0\n");
+                } else if (strcmp(op, "add") == 0) {
+                    if (n->nitems < 3) { fprintf(stderr, "codegen error: __atomic(\"add\", ptr, val)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    str x0, [sp, #-16]!\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    mov x1, x0\n");
+                    fprintf(g->out, "    ldr x2, [sp], #16\n");
+                    fprintf(g->out, ".L%d:\n", lbl_retry);
+                    fprintf(g->out, "    ldaxr x0, [x1]\n");
+                    fprintf(g->out, "    add x3, x0, x2\n");
+                    fprintf(g->out, "    stlxr w4, x3, [x1]\n");
+                    fprintf(g->out, "    cbnz w4, .L%d\n", lbl_retry);
+                } else if (strcmp(op, "sub") == 0) {
+                    if (n->nitems < 3) { fprintf(stderr, "codegen error: __atomic(\"sub\", ptr, val)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    str x0, [sp, #-16]!\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    mov x1, x0\n");
+                    fprintf(g->out, "    ldr x2, [sp], #16\n");
+                    fprintf(g->out, ".L%d:\n", lbl_retry);
+                    fprintf(g->out, "    ldaxr x0, [x1]\n");
+                    fprintf(g->out, "    sub x3, x0, x2\n");
+                    fprintf(g->out, "    stlxr w4, x3, [x1]\n");
+                    fprintf(g->out, "    cbnz w4, .L%d\n", lbl_retry);
+                } else if (strcmp(op, "cas") == 0) {
+                    if (n->nitems < 4) { fprintf(stderr, "codegen error: __atomic(\"cas\", ptr, expected, desired)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[3]);
+                    fprintf(g->out, "    str x0, [sp, #-16]!\n");
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    str x0, [sp, #-16]!\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    mov x1, x0\n");
+                    fprintf(g->out, "    ldr x5, [sp], #16\n");
+                    fprintf(g->out, "    ldr x2, [sp], #16\n");
+                    fprintf(g->out, ".L%d:\n", lbl_retry);
+                    fprintf(g->out, "    ldaxr x0, [x1]\n");
+                    fprintf(g->out, "    cmp x0, x5\n");
+                    fprintf(g->out, "    b.ne .L%d\n", lbl_done);
+                    fprintf(g->out, "    stlxr w4, x2, [x1]\n");
+                    fprintf(g->out, "    cbnz w4, .L%d\n", lbl_retry);
+                    fprintf(g->out, ".L%d:\n", lbl_done);
+                } else if (strcmp(op, "xchg") == 0) {
+                    if (n->nitems < 3) { fprintf(stderr, "codegen error: __atomic(\"xchg\", ptr, val)\n"); g->had_error = 1; break; }
+                    gen_expr(g, n->items[2]);
+                    fprintf(g->out, "    str x0, [sp, #-16]!\n");
+                    gen_expr(g, n->items[1]);
+                    fprintf(g->out, "    mov x1, x0\n");
+                    fprintf(g->out, "    ldr x2, [sp], #16\n");
+                    fprintf(g->out, ".L%d:\n", lbl_retry);
+                    fprintf(g->out, "    ldaxr x0, [x1]\n");
+                    fprintf(g->out, "    stlxr w4, x2, [x1]\n");
+                    fprintf(g->out, "    cbnz w4, .L%d\n", lbl_retry);
+                } else {
+                    fprintf(stderr, "codegen error: __atomic: unknown op \"%s\"\n", op);
+                    g->had_error = 1;
+                }
+                break;
+            }
             if (callee->kind == ND_MEMBER && callee->operand->kind == ND_IDENT &&
                 strcmp(callee->operand->name, "io") == 0 && strcmp(callee->name, "out") == 0) {
                 if (!g->io_imported) {
