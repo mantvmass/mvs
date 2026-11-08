@@ -371,11 +371,20 @@ static void gen_binop_apply(Gen *g, TokenType op, int uns) {
     }
 }
 
-static void emit_overflow_trap(Gen *g, TokenType op, int uns) {
+static void emit_overflow_trap(Gen *g, TokenType op, int uns, DataType base) {
     if (!mvs_overflow_checks || uns) return;
     if (op != TK_PLUS && op != TK_MINUS && op != TK_STAR) return;
     int l = new_label(g);
-    fprintf(g->out, "    jno .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+    int sz = type_size(g, base, 0, NULL);
+    if (sz >= 8) {
+        fprintf(g->out, "    jno .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+    } else if (sz == 4) {
+        fprintf(g->out, "    movsxd rcx, eax\n    cmp rax, rcx\n    je .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+    } else if (sz == 2) {
+        fprintf(g->out, "    movsx rcx, ax\n    cmp rax, rcx\n    je .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+    } else {
+        fprintf(g->out, "    movsx rcx, al\n    cmp rax, rcx\n    je .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+    }
 }
 
 /* ---------- 128-bit integer support ----------
@@ -791,7 +800,7 @@ static void gen_expr(Gen *g, Node *n) {
             else
                 uns = is_unsigned_val(lt.base, lt.ptr) || is_unsigned_val(rt.base, rt.ptr);
             gen_binop_apply(g, n->op, uns);
-            emit_overflow_trap(g, n->op, uns);
+            emit_overflow_trap(g, n->op, uns, lt.base);
             /* ptr - ptr : divide the byte difference by the element size to get the element count */
             if (ptrdiff_scale > 1)
                 fprintf(g->out, "    cqo\n    mov rcx, %d\n    idiv rcx\n", ptrdiff_scale);
@@ -1010,7 +1019,7 @@ static void gen_expr(Gen *g, Node *n) {
                         }
                         fprintf(g->out, "    mov rax, %s\n", tr);
                         gen_binop_apply(g, bop, is_unsigned_val(tt.base, tt.ptr));
-                        emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr));
+                        emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr), tt.base);
                         fprintf(g->out, "    mov %s, rax\n", tr);
                     }
                     break;                                        /* rax = the assigned value */
@@ -1049,7 +1058,7 @@ static void gen_expr(Gen *g, Node *n) {
                         if (sc != 1) fprintf(g->out, "    imul rcx, %d\n", sc);
                     }
                     gen_binop_apply(g, bop, is_unsigned_val(tt.base, tt.ptr)); /* rax = old op rhs */
-                    emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr));
+                    emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr), tt.base);
                 }
                 fprintf(g->out, "    mov rcx, rax\n");            /* rcx = the computed result */
                 pop_tmp(g, "rax");                                /* rax = the stashed address */

@@ -362,11 +362,18 @@ static void gen_binop_apply(Gen *g, TokenType op, int uns) {
     }
 }
 
-static void emit_overflow_trap(Gen *g, TokenType op, int uns) {
+static void emit_overflow_trap(Gen *g, TokenType op, int uns, DataType base) {
     if (!mvs_overflow_checks || uns) return;
-    if (op == TK_PLUS || op == TK_MINUS) {
-        int l = new_label(g);
-        fprintf(g->out, "    b.vc .Lok%d\n    brk #1\n.Lok%d:\n", l, l);
+    if (op != TK_PLUS && op != TK_MINUS && op != TK_STAR) return;
+    int l = new_label(g);
+    int sz = type_size(g, base, 0, NULL);
+    if (sz >= 8) {
+        if (op == TK_PLUS || op == TK_MINUS) {
+            fprintf(g->out, "    b.vc .Lok%d\n    brk #1\n.Lok%d:\n", l, l);
+        }
+    } else {
+        const char *ext = sz == 4 ? "sxtw" : sz == 2 ? "sxth" : "sxtb";
+        fprintf(g->out, "    %s x9, w0\n    cmp x0, x9\n    b.eq .Lok%d\n    brk #1\n.Lok%d:\n", ext, l, l);
     }
 }
 
@@ -732,7 +739,7 @@ static void gen_expr(Gen *g, Node *n) {
                 else
                     uns = is_unsigned_val(lt.base, lt.ptr) || is_unsigned_val(rt.base, rt.ptr);
                 gen_binop_apply(g, n->op, uns);
-                emit_overflow_trap(g, n->op, uns);
+                emit_overflow_trap(g, n->op, uns, lt.base);
             }
             break;
         }
@@ -918,7 +925,7 @@ static void gen_expr(Gen *g, Node *n) {
                         }
                         fprintf(g->out, "    mov x0, %s\n", tr);
                         gen_binop_apply(g, bop2, is_unsigned_val(tt.base, tt.ptr));
-                        emit_overflow_trap(g, bop2, is_unsigned_val(tt.base, tt.ptr));
+                        emit_overflow_trap(g, bop2, is_unsigned_val(tt.base, tt.ptr), tt.base);
                         fprintf(g->out, "    mov %s, x0\n", tr);
                     }
                     break;                                       /* x0 = the assigned value */
@@ -953,7 +960,7 @@ static void gen_expr(Gen *g, Node *n) {
                         if (sc != 1) fprintf(g->out, "    mov x9, #%d\n    mul x1, x1, x9\n", sc);
                     }
                     gen_binop_apply(g, bop, is_unsigned_val(tt.base, tt.ptr));
-                    emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr));
+                    emit_overflow_trap(g, bop, is_unsigned_val(tt.base, tt.ptr), tt.base);
                 }
                 fprintf(g->out, "    mov x1, x0\n");
                 pop_tmp(g, "x0");                           /* the stashed address */
