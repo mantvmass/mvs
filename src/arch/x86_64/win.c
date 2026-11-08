@@ -817,15 +817,35 @@ static void gen_expr(Gen *g, Node *n) {
                     if (sc != 1) fprintf(g->out, "    imul rax, %d\n", sc);   /* lhs (int) *= size */
                 }
             }
-            /* pick the signedness matching the operand types:
-             *   - shift / div / mod : based on the left operand only (the shifted value / the dividend)
-             *     (a shift count is naturally unsigned; OR-ing it in would turn signed >> n into a logical shift)
-             *   - comparison : if either side is unsigned, treat as unsigned (so big u64 values are not seen as negative) */
             int uns;
             if (n->op==TK_SHL || n->op==TK_SHR || n->op==TK_SLASH || n->op==TK_PERCENT)
                 uns = is_unsigned_val(lt.base, lt.ptr);
-            else
+            else {
                 uns = is_unsigned_val(lt.base, lt.ptr) || is_unsigned_val(rt.base, rt.ptr);
+                if (uns && lt.ptr == 0 && rt.ptr == 0 &&
+                    !is_float_type(lt.base) && !is_float_type(rt.base) &&
+                    is_unsigned_val(lt.base, 0) != is_unsigned_val(rt.base, 0)) {
+                    int lsz = type_size(g, lt.base, 0, NULL);
+                    int rsz = type_size(g, rt.base, 0, NULL);
+                    if (lsz == rsz && lsz < 4) uns = 0;
+                    else if (is_unsigned_val(lt.base, 0) && lsz < rsz) uns = 0;
+                    else if (is_unsigned_val(rt.base, 0) && rsz < lsz) uns = 0;
+                }
+            }
+            /* mixed-sign 32-bit comparison normalize: when uns stayed 1 and
+             * the common width is 4, the sign-extended side differs in the
+             * upper 32 bits. Zero-extend both so the 64-bit cmp matches. */
+            if (uns &&
+                (n->op == TK_EQ || n->op == TK_NEQ || n->op == TK_LT ||
+                 n->op == TK_GT || n->op == TK_LE  || n->op == TK_GE) &&
+                lt.ptr == 0 && rt.ptr == 0 &&
+                !is_float_type(lt.base) && !is_float_type(rt.base) &&
+                is_unsigned_val(lt.base, 0) != is_unsigned_val(rt.base, 0)) {
+                int lsz = type_size(g, lt.base, 0, NULL);
+                int rsz = type_size(g, rt.base, 0, NULL);
+                int w = lsz > rsz ? lsz : rsz;
+                if (w == 4) fprintf(g->out, "    mov eax, eax\n    mov ecx, ecx\n");
+            }
             gen_binop_apply(g, n->op, uns);
             emit_overflow_trap(g, n->op, uns, lt.base);
             /* ptr - ptr : divide the byte difference by the element size to get the element count */

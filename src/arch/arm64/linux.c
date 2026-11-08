@@ -748,8 +748,29 @@ static void gen_expr(Gen *g, Node *n) {
                 int uns;
                 if (n->op==TK_SHL || n->op==TK_SHR || n->op==TK_SLASH || n->op==TK_PERCENT)
                     uns = is_unsigned_val(lt.base, lt.ptr);
-                else
+                else {
                     uns = is_unsigned_val(lt.base, lt.ptr) || is_unsigned_val(rt.base, rt.ptr);
+                    if (uns && lt.ptr == 0 && rt.ptr == 0 &&
+                        !is_float_type(lt.base) && !is_float_type(rt.base) &&
+                        is_unsigned_val(lt.base, 0) != is_unsigned_val(rt.base, 0)) {
+                        int lsz = type_size(g, lt.base, 0, NULL);
+                        int rsz = type_size(g, rt.base, 0, NULL);
+                        if (lsz == rsz && lsz < 4) uns = 0;
+                        else if (is_unsigned_val(lt.base, 0) && lsz < rsz) uns = 0;
+                        else if (is_unsigned_val(rt.base, 0) && rsz < lsz) uns = 0;
+                    }
+                }
+                if (uns &&
+                    (n->op == TK_EQ || n->op == TK_NEQ || n->op == TK_LT ||
+                     n->op == TK_GT || n->op == TK_LE  || n->op == TK_GE) &&
+                    lt.ptr == 0 && rt.ptr == 0 &&
+                    !is_float_type(lt.base) && !is_float_type(rt.base) &&
+                    is_unsigned_val(lt.base, 0) != is_unsigned_val(rt.base, 0)) {
+                    int lsz = type_size(g, lt.base, 0, NULL);
+                    int rsz = type_size(g, rt.base, 0, NULL);
+                    int w = lsz > rsz ? lsz : rsz;
+                    if (w == 4) fprintf(g->out, "    and x0, x0, #0xFFFFFFFF\n    and x1, x1, #0xFFFFFFFF\n");
+                }
                 gen_binop_apply(g, n->op, uns);
                 emit_overflow_trap(g, n->op, uns, lt.base);
             }
