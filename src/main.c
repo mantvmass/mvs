@@ -698,7 +698,6 @@ int main(int argc, char **argv) {
         else if (argv[i][0] != '-') input = argv[i];
     }
     if (!input) { fprintf(stderr, "error: no input file\n"); return 1; }
-    if (mvs_overflow_checks && mvs_use_ir) mvs_use_ir = 0;
     /* elf64/arm64 objects cannot be linked into a Windows exe here: stop at the .o
      * (link on a Linux system, e.g. `gcc file.o -o file`) */
     if (arch == ARCH_X86_64_SYSV || arch == ARCH_ARM64_LINUX) emit_obj = 1;

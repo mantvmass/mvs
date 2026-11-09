@@ -2356,6 +2356,18 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             LOAD_A();
             fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
             fprintf(g->out, "    %s rax, rcx\n", op);
+            if (mvs_overflow_checks && inst->is_signed &&
+                (inst->op == IR_ADD || inst->op == IR_SUB || inst->op == IR_MUL)) {
+                int l = new_label(g);
+                if (inst->size >= 8)
+                    fprintf(g->out, "    jno .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+                else if (inst->size == 4)
+                    fprintf(g->out, "    movsxd rcx, eax\n    cmp rax, rcx\n    je .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+                else if (inst->size == 2)
+                    fprintf(g->out, "    movsx rcx, ax\n    cmp rax, rcx\n    je .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+                else
+                    fprintf(g->out, "    movsx rcx, al\n    cmp rax, rcx\n    je .Lok%d\n    ud2\n.Lok%d:\n", l, l);
+            }
             fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
             break;
         }

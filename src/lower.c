@@ -781,7 +781,9 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                 return IR_NONE;
             }
             int dst = ir_vreg(f);
-            ir_emit(f, bop, dst, lhs, rhs);
+            IRInst *ci = ir_emit(f, bop, dst, lhs, rhs);
+            ci->is_signed = !uns;
+            ci->size = type_size(g, lt.base, 0, NULL);
             return dst;
         }
 
@@ -990,7 +992,9 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
             int uns = is_unsigned_val(tt.base, tt.ptr);
             IROp iop = binop_for(bop, uns);
             int res = ir_vreg(f);
-            ir_emit(f, iop, res, old, rhs);
+            IRInst *ci = ir_emit(f, iop, res, old, rhs);
+            ci->is_signed = !uns;
+            ci->size = type_size(g, tt.base, 0, NULL);
             emit_store(g, f, addr, res, tt.base, tt.ptr, tt.sname);
             return res;
         }

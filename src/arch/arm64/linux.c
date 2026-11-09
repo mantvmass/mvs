@@ -2177,13 +2177,37 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
 
         case IR_ADD: case IR_SUB: case IR_MUL:
         case IR_BAND: case IR_BOR: case IR_BXOR: {
-            const char *op = inst->op==IR_ADD ? "add" : inst->op==IR_SUB ? "sub" :
-                             inst->op==IR_MUL ? "mul" : inst->op==IR_BAND ? "and" :
-                             inst->op==IR_BOR ? "orr" : "eor";
+            int ov = mvs_overflow_checks && inst->is_signed &&
+                     (inst->op == IR_ADD || inst->op == IR_SUB || inst->op == IR_MUL);
             LOAD_A();
             addr_local(g, "x9", VREG_OFF(fs, inst->b));
             fprintf(g->out, "    ldr x1, [x9]\n");
-            fprintf(g->out, "    %s x0, x0, x1\n", op);
+            if (ov && inst->op == IR_MUL && inst->size >= 8) {
+                int l = new_label(g);
+                fprintf(g->out,
+                    "    smulh x9, x0, x1\n    mul x0, x0, x1\n"
+                    "    cmp x9, x0, asr #63\n    b.eq .Lok%d\n    brk #1\n.Lok%d:\n", l, l);
+            } else {
+                const char *op;
+                if (ov && inst->size >= 8 && inst->op == IR_ADD)      op = "adds";
+                else if (ov && inst->size >= 8 && inst->op == IR_SUB) op = "subs";
+                else if (inst->op == IR_ADD)  op = "add";
+                else if (inst->op == IR_SUB)  op = "sub";
+                else if (inst->op == IR_MUL)  op = "mul";
+                else if (inst->op == IR_BAND) op = "and";
+                else if (inst->op == IR_BOR)  op = "orr";
+                else                          op = "eor";
+                fprintf(g->out, "    %s x0, x0, x1\n", op);
+                if (ov && inst->size >= 8) {
+                    int l = new_label(g);
+                    fprintf(g->out, "    b.vc .Lok%d\n    brk #1\n.Lok%d:\n", l, l);
+                }
+            }
+            if (ov && inst->size < 8) {
+                int l = new_label(g);
+                const char *ext = inst->size == 4 ? "sxtw" : inst->size == 2 ? "sxth" : "sxtb";
+                fprintf(g->out, "    %s x9, w0\n    cmp x0, x9\n    b.eq .Lok%d\n    brk #1\n.Lok%d:\n", ext, l, l);
+            }
             addr_local(g, "x9", VREG_OFF(fs, inst->dst));
             fprintf(g->out, "    str x0, [x9]\n");
             break;
