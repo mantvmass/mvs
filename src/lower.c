@@ -339,11 +339,10 @@ static int lower_addr(Gen *g, IRFunc *f, Node *n) {
 
         case ND_CALL: {
             ExprType rt = type_of(g, n);
-            if (rt.base == TYPE_STRUCT && rt.ptr == 0 && n->int_val) {
-                int addr = emit_local_addr(f, (int)n->int_val);
-                /* emit the call through IR_IOOUT so the backend handles sret */
-                IRInst *io = emit_ioout(g, f, IR_NONE, n);
-                io->a = addr;
+            if ((rt.base == TYPE_STRUCT || is_blob16(rt.base, rt.ptr)) &&
+                rt.ptr == 0 && n->int_val) {
+                int sret = emit_local_addr(f, (int)n->int_val);
+                lower_call_inner(g, f, n, sret);
                 return emit_local_addr(f, (int)n->int_val);
             }
             fprintf(stderr, "lower error: cannot take address of this call result\n");
@@ -440,6 +439,87 @@ static void lower_store_struct(Gen *g, IRFunc *f, int dst_addr, Node *value) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  lower_power: a ** b using a loop (replaces the backend's inline    */
+/*  assembly power sequence)                                           */
+/* ------------------------------------------------------------------ */
+
+static int lower_power(Gen *g, IRFunc *f, Node *n, int fop) {
+    int base_v = lower_expr(g, f, n->lhs);
+    int exp_v  = lower_expr(g, f, n->rhs);
+    int uns    = !fop && is_unsigned_val(type_of(g, n->lhs).base, 0);
+
+    int result   = ir_vreg(f);
+    int abs_exp  = ir_vreg(f);
+    int orig_exp = ir_vreg(f);
+    int zero     = emit_imm(f, 0);
+    int ione     = emit_imm(f, 1);
+    int one_val;
+    if (fop) {
+        one_val = ir_vreg(f);
+        ir_emit(f, IR_IMM, one_val, IR_NONE, IR_NONE)->imm = 0x3FF0000000000000LL;
+    } else {
+        one_val = ione;
+    }
+
+    int labs  = ir_label(f);
+    int lneg  = ir_label(f);
+    int ltop  = ir_label(f);
+    int lbody = ir_label(f);
+    int lend  = ir_label(f);
+    int ldiv  = ir_label(f);
+    int ldone = ir_label(f);
+
+    ir_emit(f, IR_MOV, orig_exp, exp_v, IR_NONE);
+    ir_emit(f, IR_MOV, abs_exp, exp_v, IR_NONE);
+
+    int cmp1 = ir_vreg(f);
+    IRInst *c1 = ir_emit(f, IR_CMP, cmp1, exp_v, zero);
+    c1->cmp = CMP_SGE;
+    IRInst *br1 = ir_emit(f, IR_BR, IR_NONE, cmp1, IR_NONE);
+    br1->label = labs; br1->label2 = lneg;
+
+    ir_emit(f, IR_LABEL, IR_NONE, IR_NONE, IR_NONE)->label = lneg;
+    ir_emit(f, IR_NEG, abs_exp, abs_exp, IR_NONE);
+    ir_emit(f, IR_JMP, IR_NONE, IR_NONE, IR_NONE)->label = labs;
+
+    ir_emit(f, IR_LABEL, IR_NONE, IR_NONE, IR_NONE)->label = labs;
+    ir_emit(f, IR_MOV, result, one_val, IR_NONE);
+
+    ir_emit(f, IR_LABEL, IR_NONE, IR_NONE, IR_NONE)->label = ltop;
+    int cmp2 = ir_vreg(f);
+    IRInst *c2 = ir_emit(f, IR_CMP, cmp2, abs_exp, zero);
+    c2->cmp = CMP_SLE;
+    IRInst *br2 = ir_emit(f, IR_BR, IR_NONE, cmp2, IR_NONE);
+    br2->label = lend; br2->label2 = lbody;
+
+    ir_emit(f, IR_LABEL, IR_NONE, IR_NONE, IR_NONE)->label = lbody;
+    if (fop)
+        ir_emit(f, IR_FMUL, result, result, base_v);
+    else
+        ir_emit(f, IR_MUL, result, result, base_v);
+    ir_emit(f, IR_SUB, abs_exp, abs_exp, ione);
+    ir_emit(f, IR_JMP, IR_NONE, IR_NONE, IR_NONE)->label = ltop;
+
+    ir_emit(f, IR_LABEL, IR_NONE, IR_NONE, IR_NONE)->label = lend;
+    int cmp3 = ir_vreg(f);
+    IRInst *c3 = ir_emit(f, IR_CMP, cmp3, orig_exp, zero);
+    c3->cmp = CMP_SGE;
+    IRInst *br3 = ir_emit(f, IR_BR, IR_NONE, cmp3, IR_NONE);
+    br3->label = ldone; br3->label2 = ldiv;
+
+    ir_emit(f, IR_LABEL, IR_NONE, IR_NONE, IR_NONE)->label = ldiv;
+    if (fop)
+        ir_emit(f, IR_FDIV, result, one_val, result);
+    else if (uns)
+        ir_emit(f, IR_UDIV, result, one_val, result);
+    else
+        ir_emit(f, IR_SDIV, result, one_val, result);
+
+    ir_emit(f, IR_LABEL, IR_NONE, IR_NONE, IR_NONE)->label = ldone;
+    return result;
+}
+
+/* ------------------------------------------------------------------ */
 /*  lower_call: lower a function call to IR                            */
 /* ------------------------------------------------------------------ */
 
@@ -458,11 +538,81 @@ static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
         return IR_NONE;
     }
 
-    /* io.out intrinsic */
+    /* io.out intrinsic: lower to IR_CALL printf */
     if (callee->kind == ND_MEMBER && callee->operand->kind == ND_IDENT &&
         strcmp(callee->operand->name, "io") == 0 &&
         strcmp(callee->name, "out") == 0) {
-        emit_ioout(g, f, IR_NONE, n);
+        if (!g->io_imported) {
+            fprintf(stderr, "codegen error: io is not imported (use: import { io } from \"std\";)\n");
+            g->had_error = 1;
+            return IR_NONE;
+        }
+        if (n->nitems < 1 || n->items[0]->kind != ND_STR) {
+            fprintf(stderr, "codegen error: io.out: first argument must be a string literal\n");
+            g->had_error = 1;
+            return IR_NONE;
+        }
+        int flen, nph, nv;
+        Node *vals[256];
+        char *cf = build_c_format(g, n, n->items[0]->str_val, &flen, &nph, vals, &nv, 256);
+        int nvals = n->nitems - 1;
+        if (nph != nvals) {
+            fprintf(stderr, "codegen error: io.out: %d placeholder(s) but %d argument(s)\n", nph, nvals);
+            g->had_error = 1;
+            free(cf);
+            return IR_NONE;
+        }
+        int sidx = intern_string(g, cf, flen);
+        free(cf);
+
+        /* pre-materialize struct-returning calls so all fields read from the temp */
+        for (int k = 1; k < n->nitems; k++) {
+            Node *a = n->items[k];
+            if (a->kind == ND_CALL && a->int_val) {
+                ExprType at = type_of(g, a);
+                if (at.base == TYPE_STRUCT && at.ptr == 0)
+                    lower_expr(g, f, a);
+            }
+        }
+
+        /* lower every expanded value to a vreg; format string is arg 0 */
+        struct { int vreg; DataType type; int ptr; } pargs[258];
+        int np = 0;
+        int fmt_v = ir_vreg(f);
+        ir_emit(f, IR_STR, fmt_v, IR_NONE, IR_NONE)->imm = sidx;
+        pargs[np++] = (typeof(pargs[0])){ fmt_v, TYPE_STR, 1 };
+
+        for (int i = 0; i < nv; i++) {
+            ExprType vt = type_of(g, vals[i]);
+            if (is_i128(vt.base, vt.ptr)) {
+                g->need_i128 = 1;
+                int addr = lower_expr(g, f, vals[i]);
+                int as = ir_arg_start(f);
+                ir_arg(f, addr, TYPE_USIZE, 1, NULL, 8);
+                int sv = ir_vreg(f);
+                IRInst *hc = ir_emit(f, IR_CALL, sv, IR_NONE, IR_NONE);
+                hc->name = strdup(vt.base == TYPE_U128 ? "mvs_u128_str" : "mvs_i128_str");
+                hc->arg_start = as;
+                hc->nargs = 1;
+                pargs[np++] = (typeof(pargs[0])){ sv, TYPE_STR, 1 };
+            } else {
+                int v = lower_expr(g, f, vals[i]);
+                pargs[np++] = (typeof(pargs[0])){ v, vt.base, vt.ptr };
+            }
+        }
+
+        /* emit IR_CALL to printf */
+        int as = ir_arg_start(f);
+        for (int i = 0; i < np; i++)
+            ir_arg(f, pargs[i].vreg, pargs[i].type, pargs[i].ptr, NULL, 8);
+        static Node printf_sig = {0};
+        printf_sig.is_extern = 1;
+        printf_sig.type = TYPE_I64;
+        IRInst *pc = ir_emit(f, IR_CALL, IR_NONE, IR_NONE, IR_NONE);
+        pc->name = strdup("printf");
+        pc->arg_start = as;
+        pc->nargs = np;
+        pc->sig = &printf_sig;
         return IR_NONE;
     }
 
@@ -674,12 +824,8 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
             /* float path */
             int fop = (is_float_type(lt.base) && lt.ptr == 0) ||
                       (is_float_type(rt.base) && rt.ptr == 0);
-            if (fop && n->op == TK_STARSTAR) {
-                /* float power: delegate complex lowering to backend */
-                int dst = ir_vreg(f);
-                emit_ioout(g, f, dst, n);
-                return dst;
-            }
+            if (fop && n->op == TK_STARSTAR)
+                return lower_power(g, f, n, 1);
             if (fop && (is_cmp_op(n->op) || is_arith_op(n->op))) {
                 int lhs = lower_expr(g, f, n->lhs);
                 int rhs = lower_expr(g, f, n->rhs);
@@ -713,13 +859,8 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                 }
             }
 
-            /* integer power: repeated multiply */
-            if (n->op == TK_STARSTAR) {
-                /* delegate to backend for now (loop with labels) */
-                int dst = ir_vreg(f);
-                emit_ioout(g, f, dst, n);
-                return dst;
-            }
+            if (n->op == TK_STARSTAR)
+                return lower_power(g, f, n, 0);
 
             /* generic integer binary */
             int lhs = lower_expr(g, f, n->lhs);

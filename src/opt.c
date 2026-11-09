@@ -410,6 +410,22 @@ void ir_opt_store_forward(IRFunc *f) {
         if (inst->op == IR_STORE) {
             /* invalidate load cache for this address and any alias */
             lc_n = 0;
+            /* f32 stores narrow f64->f32 in the backend, so the stored
+             * value differs from the vreg value; skip caching them */
+            if (inst->type == TYPE_F32 && inst->ptr == 0) {
+                if (inst->a >= 0 && inst->a < nv && is_la[inst->a]) {
+                    int off = (int)la_off[inst->a];
+                    for (int j = 0; j < sf_n; j++)
+                        if (sf_off[j] == off) {
+                            sf_off[j] = sf_off[sf_n - 1];
+                            sf_val[j] = sf_val[sf_n - 1];
+                            sf_n--; break;
+                        }
+                } else {
+                    sf_n = 0;
+                }
+                continue;
+            }
             if (inst->a >= 0 && inst->a < nv && is_la[inst->a]) {
                 int off = (int)la_off[inst->a];
                 int found = -1;
