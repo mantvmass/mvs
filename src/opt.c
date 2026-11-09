@@ -402,7 +402,10 @@ void ir_opt_store_forward(IRFunc *f) {
         if (inst->op == IR_LABEL || inst->op == IR_BR ||
             inst->op == IR_JMP   || inst->op == IR_RET ||
             inst->op == IR_CALL  || inst->op == IR_ICALL ||
-            inst->op == IR_IOOUT) {
+            inst->op == IR_IOOUT ||
+            inst->op == IR_I128_STORE || inst->op == IR_I128_BINOP ||
+            inst->op == IR_I128_UNOP  || inst->op == IR_I128_FROM  ||
+            inst->op == IR_DYN_STORE) {
             sf_n = 0; lc_n = 0;
             continue;
         }

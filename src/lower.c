@@ -252,6 +252,21 @@ static void emit_i128_store(Gen *g, IRFunc *f, int dst_addr, Node *src_expr) {
     st->ptr = et.ptr;
 }
 
+static void emit_dyn_store(Gen *g, IRFunc *f, int dst_addr, Node *src_expr,
+                           const char *trait) {
+    int val = lower_expr(g, f, src_expr);
+    ExprType et = type_of(g, src_expr);
+    IRInst *st = ir_emit(f, IR_DYN_STORE, IR_NONE, dst_addr, val);
+    st->type = et.base;
+    st->ptr = et.ptr;
+    st->name = (char *)trait;
+    if (is_dyn(et.base, et.ptr)) {
+        st->sname = NULL;
+    } else {
+        st->sname = et.base == TYPE_STRUCT ? et.sname : (char *)datatype_name(et.base);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /*  lower_addr: compute the address of an lvalue                       */
 /* ------------------------------------------------------------------ */
@@ -438,9 +453,7 @@ static void lower_store_struct(Gen *g, IRFunc *f, int dst_addr, Node *value) {
                     } else if (is_i128(fi->type, fi->ptr)) {
                         emit_i128_store(g, f, elem_addr, el);
                     } else if (is_dyn(fi->type, fi->ptr)) {
-                        IRInst *io = emit_ioout(g, f, IR_NONE, value);
-                        io->a = dst_addr;
-                        return;
+                        emit_dyn_store(g, f, elem_addr, el, fi->sname);
                     } else {
                         int val = lower_expr(g, f, el);
                         ExprType vt2 = type_of(g, el);
@@ -454,9 +467,7 @@ static void lower_store_struct(Gen *g, IRFunc *f, int dst_addr, Node *value) {
             } else if (is_i128(fi->type, fi->ptr)) {
                 emit_i128_store(g, f, field_addr, rhs);
             } else if (is_dyn(fi->type, fi->ptr)) {
-                IRInst *io = emit_ioout(g, f, IR_NONE, value);
-                io->a = dst_addr;
-                return;
+                emit_dyn_store(g, f, field_addr, rhs, fi->sname);
             } else {
                 int val = lower_expr(g, f, rhs);
                 ExprType vt = type_of(g, rhs);
@@ -1176,11 +1187,11 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                 emit_i128_store(g, f, addr, n->rhs);
                 return addr;
             }
-            /* dyn assignment: delegate */
-            if (is_dyn(tt.base, tt.ptr)) {
-                int dst = ir_vreg(f);
-                emit_ioout(g, f, dst, n);
-                return dst;
+            /* dyn assignment */
+            if (is_dyn(tt.base, tt.ptr) && n->op == TK_ASSIGN) {
+                int addr = lower_addr(g, f, target);
+                emit_dyn_store(g, f, addr, n->rhs, tt.sname);
+                return addr;
             }
 
             /* whole-struct assignment */
@@ -1347,9 +1358,8 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
                         int eaddr = emit_local_addr(f, eoff);
                         emit_i128_store(g, f, eaddr, el);
                     } else if (is_dyn(s->type, s->ptr)) {
-                        emit_ioout(g, f, IR_NONE, n);
-                        g->visible[g->nvisible++] = (int)n->int_val;
-                        return;
+                        int eaddr = emit_local_addr(f, eoff);
+                        emit_dyn_store(g, f, eaddr, el, s->sname);
                     } else {
                         int val = lower_expr(g, f, el);
                         ExprType vt2 = type_of(g, el);
@@ -1370,7 +1380,10 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
                 else              addr = emit_local_addr(f, s->offset);
                 emit_i128_store(g, f, addr, n->operand);
             } else if (is_dyn(s->type, s->ptr)) {
-                emit_ioout(g, f, IR_NONE, n);
+                int addr;
+                if (s->is_global) addr = emit_global_addr(f, s->name);
+                else              addr = emit_local_addr(f, s->offset);
+                emit_dyn_store(g, f, addr, n->operand, s->sname);
             } else {
                 int val = lower_expr(g, f, n->operand);
                 ExprType vt = type_of(g, n->operand);
@@ -1397,7 +1410,9 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
                     break;
                 }
                 if (g->cur_ret_dyn) {
-                    emit_ioout(g, f, IR_NONE, n);
+                    int sret = emit_local_addr(f, g->sret_off);
+                    int sptr = emit_load(g, f, sret, TYPE_USIZE, 1, NULL);
+                    emit_dyn_store(g, f, sptr, n->operand, g->cur_ret_dyn);
                     ir_emit(f, IR_RET, IR_NONE, IR_NONE, IR_NONE);
                     break;
                 }
@@ -1700,8 +1715,7 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
                         } else if (is_i128(s->type, s->ptr)) {
                             emit_i128_store(g, f, eaddr, el);
                         } else if (is_dyn(s->type, s->ptr)) {
-                            emit_ioout(g, f, IR_NONE, d);
-                            break;
+                            emit_dyn_store(g, f, eaddr, el, s->sname);
                         } else {
                             int val = lower_expr(g, f, el);
                             ExprType vt2 = type_of(g, el);
@@ -1717,7 +1731,8 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
                     int addr = emit_global_addr(f, s->name);
                     emit_i128_store(g, f, addr, d->operand);
                 } else if (is_dyn(s->type, s->ptr)) {
-                    emit_ioout(g, f, IR_NONE, d);
+                    int addr = emit_global_addr(f, s->name);
+                    emit_dyn_store(g, f, addr, d->operand, s->sname);
                 } else {
                     int val = lower_expr(g, f, d->operand);
                     ExprType vt = type_of(g, d->operand);

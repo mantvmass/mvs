@@ -2864,6 +2864,24 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
             break;
 
+        case IR_DYN_STORE: {
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            if (is_dyn(inst->type, inst->ptr)) {
+                fprintf(g->out, "    mov rdx, [rcx]\n    mov [rax], rdx\n");
+                fprintf(g->out, "    mov rdx, [rcx + 8]\n    mov [rax + 8], rdx\n");
+            } else if (inst->ptr == 1 && inst->name && inst->sname) {
+                g->need_vtables = 1;
+                fprintf(g->out, "    mov [rax], rcx\n");
+                fprintf(g->out, "    lea rdx, [rel mvs_vt_%s_%s]\n    mov [rax + 8], rdx\n",
+                        inst->name, inst->sname);
+            } else {
+                fprintf(stderr, "emit_ir error: IR_DYN_STORE with unexpected source type\n");
+                g->had_error = 1;
+            }
+            break;
+        }
+
         default:
             break;
         }
@@ -2874,7 +2892,7 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             rv = -1; break;
         case IR_CALL: case IR_ICALL:
             rv = (inst->dst != IR_NONE) ? inst->dst : -1; break;
-        case IR_STORE: case IR_I128_STORE:
+        case IR_STORE: case IR_I128_STORE: case IR_DYN_STORE:
             rv = inst->a; break;
         case IR_COPY:
         case IR_I128_BINOP: case IR_I128_UNOP: case IR_I128_CMP:

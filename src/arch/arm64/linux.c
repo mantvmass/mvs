@@ -2747,6 +2747,27 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             break;
         }
 
+        case IR_DYN_STORE: {
+            addr_local(g, "x9", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    ldr x0, [x9]\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            if (is_dyn(inst->type, inst->ptr)) {
+                fprintf(g->out, "    ldp x2, x3, [x1]\n    stp x2, x3, [x0]\n");
+            } else if (inst->ptr == 1 && inst->name && inst->sname) {
+                g->need_vtables = 1;
+                fprintf(g->out, "    str x1, [x0]\n");
+                char vt_label[256];
+                snprintf(vt_label, sizeof(vt_label), "mvs_vt_%s_%s", inst->name, inst->sname);
+                addr_label(g, "x2", vt_label);
+                fprintf(g->out, "    str x2, [x0, #8]\n");
+            } else {
+                fprintf(stderr, "emit_ir error: IR_DYN_STORE with unexpected source type\n");
+                g->had_error = 1;
+            }
+            break;
+        }
+
         default:
             break;
         }
@@ -2757,7 +2778,7 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             rv = -1; break;
         case IR_CALL: case IR_ICALL:
             rv = (inst->dst != IR_NONE) ? inst->dst : -1; break;
-        case IR_STORE: case IR_I128_STORE:
+        case IR_STORE: case IR_I128_STORE: case IR_DYN_STORE:
             rv = inst->a; break;
         case IR_COPY:
         case IR_I128_BINOP: case IR_I128_UNOP: case IR_I128_CMP:
