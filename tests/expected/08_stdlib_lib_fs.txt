@@ -1,5 +1,5 @@
 exists = 1
-size = 12
+size = 11
 read_line = hello
 after append, read = hello
 world

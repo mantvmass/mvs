@@ -43,7 +43,7 @@ extern func mkdir(path: str, mode: u32) -> i32;
 
 // write a string to a file (overwrite); returns 0 on success, -1 on failure
 func write(path: str, content: str) -> i32 {
-    let f: *u8 = fopen(path, "w");
+    let f: *u8 = fopen(path, "wb");
     if (f == 0) { return 0 - 1; }
     fputs(content, f);
     fclose(f);
@@ -52,7 +52,7 @@ func write(path: str, content: str) -> i32 {
 
 // append a string to a file; returns 0 on success, -1 on failure
 func append(path: str, content: str) -> i32 {
-    let f: *u8 = fopen(path, "a");
+    let f: *u8 = fopen(path, "ab");
     if (f == 0) { return 0 - 1; }
     fputs(content, f);
     fclose(f);
