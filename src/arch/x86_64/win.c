@@ -2246,6 +2246,9 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
         }
     }
 
+    int lbase = g->label_id;
+    g->label_id += f->next_label;
+
     int rv = -1;
     for (int ip = 0; ip < f->ninsts; ip++) {
         IRInst *inst = &f->insts[ip];
@@ -2512,16 +2515,16 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             break;
 
         case IR_LABEL:
-            fprintf(g->out, ".Lir_%d:\n", inst->label);
+            fprintf(g->out, ".L%d:\n", lbase + inst->label);
             break;
         case IR_BR:
             LOAD_A();
             fprintf(g->out, "    test rax, rax\n");
-            fprintf(g->out, "    jnz .Lir_%d\n", inst->label);
-            fprintf(g->out, "    jmp .Lir_%d\n", inst->label2);
+            fprintf(g->out, "    jnz .L%d\n", lbase + inst->label);
+            fprintf(g->out, "    jmp .L%d\n", lbase + inst->label2);
             break;
         case IR_JMP:
-            fprintf(g->out, "    jmp .Lir_%d\n", inst->label);
+            fprintf(g->out, "    jmp .L%d\n", lbase + inst->label);
             break;
         case IR_RET:
             if (inst->a != IR_NONE) {
@@ -2648,7 +2651,9 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             rv = (inst->dst != IR_NONE) ? inst->dst : -1; break;
         case IR_STORE:
             rv = inst->a; break;
-        case IR_NOP: case IR_COPY: case IR_LINE:
+        case IR_COPY:
+            rv = -1; break;
+        case IR_NOP: case IR_LINE:
             break;
         default:
             if (inst->dst != IR_NONE) rv = inst->dst;

@@ -284,46 +284,50 @@ void ir_opt_cse_addr(IRFunc *f) {
     }
 }
 
-/* ---- copy/move propagation ---- */
+/* ---- copy/move propagation (local, per basic block) ---- */
 
 void ir_opt_copy_prop(IRFunc *f) {
     int nv = f->next_vreg;
     if (nv <= 0) return;
 
     int *alias = malloc(nv * sizeof(int));
-    for (int i = 0; i < nv; i++) alias[i] = i;
+    for (int j = 0; j < nv; j++) alias[j] = j;
 
     for (int i = 0; i < f->ninsts; i++) {
         IRInst *inst = &f->insts[i];
-        if (inst->op == IR_MOV && inst->a != IR_NONE &&
-            inst->dst >= 0 && inst->dst < nv) {
-            int src = inst->a;
-            int steps = 0;
-            while (src >= 0 && src < nv && alias[src] != src && steps < nv) {
-                src = alias[src]; steps++;
-            }
-            alias[inst->dst] = src;
-        }
-    }
 
-    /* resolve all aliases to their root */
-    for (int i = 0; i < nv; i++) {
-        int r = i, steps = 0;
-        while (r >= 0 && r < nv && alias[r] != r && steps < nv) {
-            r = alias[r]; steps++;
+        if (inst->op == IR_LABEL) {
+            for (int j = 0; j < nv; j++) alias[j] = j;
+            continue;
         }
-        alias[i] = r;
-    }
 
-    /* apply to all operands */
-    for (int i = 0; i < f->ninsts; i++) {
-        IRInst *inst = &f->insts[i];
+        /* substitute operands a, b */
         if (inst->a >= 0 && inst->a < nv) inst->a = alias[inst->a];
         if (inst->b >= 0 && inst->b < nv) inst->b = alias[inst->b];
-    }
-    for (int i = 0; i < f->nargs; i++) {
-        int v = f->args[i].vreg;
-        if (v >= 0 && v < nv) f->args[i].vreg = alias[v];
+
+        /* substitute call arguments */
+        for (int k = 0; k < inst->nargs; k++) {
+            int idx = inst->arg_start + k;
+            int v = f->args[idx].vreg;
+            if (v >= 0 && v < nv) f->args[idx].vreg = alias[v];
+        }
+
+        /* record or kill alias for the destination */
+        if (inst->dst >= 0 && inst->dst < nv) {
+            if (inst->op == IR_MOV && inst->a != IR_NONE) {
+                alias[inst->dst] = inst->a;
+            } else {
+                int killed = inst->dst;
+                alias[killed] = killed;
+                for (int j = 0; j < nv; j++)
+                    if (alias[j] == killed && j != killed)
+                        alias[j] = j;
+            }
+        }
+
+        if (inst->op == IR_BR || inst->op == IR_JMP || inst->op == IR_RET) {
+            for (int j = 0; j < nv; j++) alias[j] = j;
+        }
     }
 
     free(alias);

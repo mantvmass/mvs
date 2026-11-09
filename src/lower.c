@@ -266,6 +266,7 @@ static int lower_addr(Gen *g, IRFunc *f, Node *n) {
             int base;
             if (bt.arr > 0) {
                 esz = type_size(g, bt.base, bt.ptr, bt.sname);
+                if (bt.arr2 > 0) esz *= bt.arr2;
                 base = lower_addr(g, f, n->lhs);
             } else if (bt.ptr > 0) {
                 esz = type_size(g, bt.base, bt.ptr - 1, bt.sname);
