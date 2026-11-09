@@ -215,6 +215,43 @@ static int is_arith_op(TokenType op) {
            op==TK_AMP||op==TK_PIPE||op==TK_CARET;
 }
 
+static IR128Op i128_op_for(TokenType op) {
+    switch (op) {
+        case TK_PLUS:    return I128_ADD;
+        case TK_MINUS:   return I128_SUB;
+        case TK_STAR:    return I128_MUL;
+        case TK_SLASH:   return I128_SDIV;
+        case TK_PERCENT: return I128_SMOD;
+        case TK_SHL:     return I128_SHL;
+        case TK_SHR:     return I128_SHR;
+        case TK_AMP:     return I128_AND;
+        case TK_PIPE:    return I128_OR;
+        case TK_CARET:   return I128_XOR;
+        default:         return I128_ADD;
+    }
+}
+
+static int lower_i128_operand(Gen *g, IRFunc *f, Node *expr) {
+    int val = lower_expr(g, f, expr);
+    ExprType t = type_of(g, expr);
+    if (is_i128(t.base, t.ptr)) return val;
+    int tidx = f->n_i128_temps++;
+    int dst = ir_vreg(f);
+    IRInst *fi = ir_emit(f, IR_I128_FROM, dst, val, IR_NONE);
+    fi->imm = tidx;
+    fi->is_signed = is_signed_type(t.base) && t.ptr == 0;
+    return dst;
+}
+
+static void emit_i128_store(Gen *g, IRFunc *f, int dst_addr, Node *src_expr) {
+    int val = lower_expr(g, f, src_expr);
+    ExprType et = type_of(g, src_expr);
+    IRInst *st = ir_emit(f, IR_I128_STORE, IR_NONE, dst_addr, val);
+    st->is_signed = is_signed_type(et.base) && et.ptr == 0;
+    st->type = et.base;
+    st->ptr = et.ptr;
+}
+
 /* ------------------------------------------------------------------ */
 /*  lower_addr: compute the address of an lvalue                       */
 /* ------------------------------------------------------------------ */
@@ -398,7 +435,9 @@ static void lower_store_struct(Gen *g, IRFunc *f, int dst_addr, Node *value) {
                     }
                     if (fi->type == TYPE_STRUCT && fi->ptr == 0) {
                         lower_store_struct(g, f, elem_addr, el);
-                    } else if (is_blob16(fi->type, fi->ptr)) {
+                    } else if (is_i128(fi->type, fi->ptr)) {
+                        emit_i128_store(g, f, elem_addr, el);
+                    } else if (is_dyn(fi->type, fi->ptr)) {
                         IRInst *io = emit_ioout(g, f, IR_NONE, value);
                         io->a = dst_addr;
                         return;
@@ -412,8 +451,9 @@ static void lower_store_struct(Gen *g, IRFunc *f, int dst_addr, Node *value) {
                 }
             } else if (fi->type == TYPE_STRUCT && fi->ptr == 0) {
                 lower_store_struct(g, f, field_addr, rhs);
-            } else if (is_blob16(fi->type, fi->ptr)) {
-                /* i128/dyn field: delegate to backend */
+            } else if (is_i128(fi->type, fi->ptr)) {
+                emit_i128_store(g, f, field_addr, rhs);
+            } else if (is_dyn(fi->type, fi->ptr)) {
                 IRInst *io = emit_ioout(g, f, IR_NONE, value);
                 io->a = dst_addr;
                 return;
@@ -814,10 +854,32 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
 
             ExprType lt = type_of(g, n->lhs), rt = type_of(g, n->rhs);
 
-            /* 128-bit: delegate to backend */
+            /* 128-bit operations */
             if (is_i128(lt.base, lt.ptr) || is_i128(rt.base, rt.ptr)) {
+                int a = lower_i128_operand(g, f, n->lhs);
+                int b = lower_i128_operand(g, f, n->rhs);
+                int uns = (lt.base == TYPE_U128 || rt.base == TYPE_U128 ||
+                           (is_unsigned_val(lt.base, lt.ptr) && is_unsigned_val(rt.base, rt.ptr)));
+                if (is_cmp_op(n->op)) {
+                    int tidx = f->n_i128_temps;
+                    f->n_i128_temps += 2;
+                    int dst = ir_vreg(f);
+                    IRInst *ci = ir_emit(f, IR_I128_CMP, dst, a, b);
+                    ci->cmp = cmp_op_for(n->op, uns);
+                    ci->is_signed = !uns;
+                    ci->imm = tidx;
+                    return dst;
+                }
+                IR128Op iop = i128_op_for(n->op);
+                if (uns && (n->op == TK_SLASH)) iop = I128_UDIV;
+                if (uns && (n->op == TK_PERCENT)) iop = I128_UMOD;
+                int tidx = f->n_i128_temps;
+                f->n_i128_temps += 3;
                 int dst = ir_vreg(f);
-                emit_ioout(g, f, dst, n);
+                IRInst *bi = ir_emit(f, IR_I128_BINOP, dst, a, b);
+                bi->i128_op = iop;
+                bi->imm = tidx;
+                bi->is_signed = !uns;
                 return dst;
             }
 
@@ -931,10 +993,15 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
         case ND_UNARY: {
             ExprType ot = type_of(g, n->operand);
 
-            /* i128 unary: delegate */
+            /* i128 unary */
             if ((n->op == TK_MINUS || n->op == TK_TILDE) && is_i128(ot.base, ot.ptr)) {
+                int a = lower_expr(g, f, n->operand);
+                int tidx = f->n_i128_temps;
+                f->n_i128_temps += 2;
                 int dst = ir_vreg(f);
-                emit_ioout(g, f, dst, n);
+                IRInst *ui = ir_emit(f, IR_I128_UNOP, dst, a, IR_NONE);
+                ui->i128_op = n->op == TK_MINUS ? I128_NEG : I128_NOT;
+                ui->imm = tidx;
                 return dst;
             }
 
@@ -1009,11 +1076,43 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
         case ND_CAST: {
             ExprType st = type_of(g, n->operand);
 
-            /* i128 casts: delegate */
-            if (is_i128(n->type, n->ptr) || is_i128(st.base, st.ptr)) {
+            /* cast TO i128 */
+            if (is_i128(n->type, n->ptr) && !is_i128(st.base, st.ptr)) {
+                int val = lower_expr(g, f, n->operand);
+                int tidx = f->n_i128_temps++;
                 int dst = ir_vreg(f);
-                emit_ioout(g, f, dst, n);
+                IRInst *fi = ir_emit(f, IR_I128_FROM, dst, val, IR_NONE);
+                fi->imm = tidx;
+                fi->is_signed = is_signed_type(st.base) && st.ptr == 0;
                 return dst;
+            }
+            /* cast FROM i128 */
+            if (!is_i128(n->type, n->ptr) && is_i128(st.base, st.ptr)) {
+                int addr = lower_expr(g, f, n->operand);
+                int lo = ir_vreg(f);
+                IRInst *ld = ir_emit(f, IR_LOAD, lo, addr, IR_NONE);
+                ld->type = TYPE_USIZE; ld->size = 8;
+                if (n->type == TYPE_BOOL && n->ptr == 0) {
+                    int ha = ir_vreg(f);
+                    ir_emit(f, IR_OFFSET, ha, addr, IR_NONE)->imm = 8;
+                    int hi = ir_vreg(f);
+                    IRInst *ldh = ir_emit(f, IR_LOAD, hi, ha, IR_NONE);
+                    ldh->type = TYPE_USIZE; ldh->size = 8;
+                    int orv = ir_vreg(f);
+                    ir_emit(f, IR_BOR, orv, lo, hi);
+                    int dst = ir_vreg(f);
+                    ir_emit(f, IR_BOOL, dst, orv, IR_NONE);
+                    return dst;
+                }
+                int sz = type_size(g, n->type, n->ptr, n->type_name);
+                if (sz < 8 && n->ptr == 0) {
+                    int dst = ir_vreg(f);
+                    IRInst *ext = ir_emit(f, is_signed_type(n->type) ? IR_SEXT : IR_ZEXT,
+                                          dst, lo, IR_NONE);
+                    ext->size = sz;
+                    return dst;
+                }
+                return lo;
             }
 
             int val = lower_expr(g, f, n->operand);
@@ -1071,8 +1170,14 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                 return IR_NONE;
             }
 
-            /* i128/dyn assignment: delegate */
-            if (is_i128(tt.base, tt.ptr) || is_dyn(tt.base, tt.ptr)) {
+            /* i128 simple assignment */
+            if (is_i128(tt.base, tt.ptr) && n->op == TK_ASSIGN) {
+                int addr = lower_addr(g, f, target);
+                emit_i128_store(g, f, addr, n->rhs);
+                return addr;
+            }
+            /* dyn assignment: delegate */
+            if (is_dyn(tt.base, tt.ptr)) {
                 int dst = ir_vreg(f);
                 emit_ioout(g, f, dst, n);
                 return dst;
@@ -1238,8 +1343,10 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
                     if (s->type == TYPE_STRUCT && s->ptr == 0) {
                         int eaddr = emit_local_addr(f, eoff);
                         lower_store_struct(g, f, eaddr, el);
-                    } else if (is_blob16(s->type, s->ptr)) {
-                        /* delegate i128/dyn array element to backend */
+                    } else if (is_i128(s->type, s->ptr)) {
+                        int eaddr = emit_local_addr(f, eoff);
+                        emit_i128_store(g, f, eaddr, el);
+                    } else if (is_dyn(s->type, s->ptr)) {
                         emit_ioout(g, f, IR_NONE, n);
                         g->visible[g->nvisible++] = (int)n->int_val;
                         return;
@@ -1257,8 +1364,12 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
                 if (s->is_global) addr = emit_global_addr(f, s->name);
                 else              addr = emit_local_addr(f, s->offset);
                 lower_store_struct(g, f, addr, n->operand);
-            } else if (is_blob16(s->type, s->ptr)) {
-                /* i128/dyn: delegate to backend */
+            } else if (is_i128(s->type, s->ptr)) {
+                int addr;
+                if (s->is_global) addr = emit_global_addr(f, s->name);
+                else              addr = emit_local_addr(f, s->offset);
+                emit_i128_store(g, f, addr, n->operand);
+            } else if (is_dyn(s->type, s->ptr)) {
                 emit_ioout(g, f, IR_NONE, n);
             } else {
                 int val = lower_expr(g, f, n->operand);
@@ -1278,8 +1389,14 @@ static void lower_stmt(Gen *g, IRFunc *f, Node *n) {
         case ND_RETURN: {
             int returns_struct = (g->sret_off != 0);
             if (returns_struct && n->operand) {
-                if (g->cur_ret_i128 || g->cur_ret_dyn) {
-                    /* i128/dyn return: delegate to backend */
+                if (g->cur_ret_i128) {
+                    int sret = emit_local_addr(f, g->sret_off);
+                    int sptr = emit_load(g, f, sret, TYPE_USIZE, 1, NULL);
+                    emit_i128_store(g, f, sptr, n->operand);
+                    ir_emit(f, IR_RET, IR_NONE, IR_NONE, IR_NONE);
+                    break;
+                }
+                if (g->cur_ret_dyn) {
                     emit_ioout(g, f, IR_NONE, n);
                     ir_emit(f, IR_RET, IR_NONE, IR_NONE, IR_NONE);
                     break;
@@ -1580,7 +1697,9 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
                         }
                         if (s->type == TYPE_STRUCT && s->ptr == 0) {
                             lower_store_struct(g, f, eaddr, el);
-                        } else if (is_blob16(s->type, s->ptr)) {
+                        } else if (is_i128(s->type, s->ptr)) {
+                            emit_i128_store(g, f, eaddr, el);
+                        } else if (is_dyn(s->type, s->ptr)) {
                             emit_ioout(g, f, IR_NONE, d);
                             break;
                         } else {
@@ -1594,7 +1713,10 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
                 } else if (s->type == TYPE_STRUCT && s->ptr == 0) {
                     int addr = emit_global_addr(f, s->name);
                     lower_store_struct(g, f, addr, d->operand);
-                } else if (is_blob16(s->type, s->ptr)) {
+                } else if (is_i128(s->type, s->ptr)) {
+                    int addr = emit_global_addr(f, s->name);
+                    emit_i128_store(g, f, addr, d->operand);
+                } else if (is_dyn(s->type, s->ptr)) {
                     emit_ioout(g, f, IR_NONE, d);
                 } else {
                     int val = lower_expr(g, f, d->operand);

@@ -2211,13 +2211,15 @@ static void emit_i128_helpers(Gen *g) {
 /* ------------------------------------------------------------------ */
 
 #define VREG_OFF(fs, v) ((fs) + 8 + (v) * 8)
+#define I128_TEMP(fs, nv, idx) (VREG_OFF(fs, nv) + (idx) * 16 + 8)
 #define LOAD_A() do { if (inst->a != rv) fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a)); } while(0)
 
 static void emit_ir_func(Gen *g, IRFunc *f) {
     Node *fn = f->fn;
     int fs = f->frame_size;
     int vreg_area = f->next_vreg * 8;
-    int total_frame = ((fs + vreg_area) + 15) / 16 * 16;
+    int i128_area = f->n_i128_temps * 16;
+    int total_frame = ((fs + vreg_area + i128_area) + 15) / 16 * 16;
 
     fprintf(g->out, "\n%s:\n", f->name);
     fprintf(g->out, "    push rbp\n    mov rbp, rsp\n");
@@ -2681,6 +2683,187 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             g->had_error = 1;
             break;
 
+        case IR_I128_BINOP: {
+            int nv = f->next_vreg;
+            int ao = I128_TEMP(fs, nv, inst->imm);
+            int bo = I128_TEMP(fs, nv, inst->imm + 1);
+            int ro = I128_TEMP(fs, nv, inst->imm + 2);
+            int uns = !inst->is_signed;
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    mov r10, rax\n");
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    mov r11, rax\n");
+            fprintf(g->out, "    mov rcx, [r10]\n    mov rdx, [r10 + 8]\n");
+            fprintf(g->out, "    mov [rbp - %d], rcx\n    mov [rbp - %d], rdx\n", ao, ao - 8);
+            fprintf(g->out, "    mov rcx, [r11]\n    mov rdx, [r11 + 8]\n");
+            fprintf(g->out, "    mov [rbp - %d], rcx\n    mov [rbp - %d], rdx\n", bo, bo - 8);
+            switch (inst->i128_op) {
+                case I128_ADD:
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    mov rdx, [rbp - %d]\n", ao, ao - 8);
+                    fprintf(g->out, "    add rax, [rbp - %d]\n    adc rdx, [rbp - %d]\n", bo, bo - 8);
+                    fprintf(g->out, "    mov [rbp - %d], rax\n    mov [rbp - %d], rdx\n", ro, ro - 8);
+                    break;
+                case I128_SUB:
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    mov rdx, [rbp - %d]\n", ao, ao - 8);
+                    fprintf(g->out, "    sub rax, [rbp - %d]\n    sbb rdx, [rbp - %d]\n", bo, bo - 8);
+                    fprintf(g->out, "    mov [rbp - %d], rax\n    mov [rbp - %d], rdx\n", ro, ro - 8);
+                    break;
+                case I128_AND: case I128_OR: case I128_XOR: {
+                    const char *op = inst->i128_op == I128_AND ? "and" :
+                                     inst->i128_op == I128_OR  ? "or"  : "xor";
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    %s rax, [rbp - %d]\n    mov [rbp - %d], rax\n", ao, op, bo, ro);
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    %s rax, [rbp - %d]\n    mov [rbp - %d], rax\n", ao - 8, op, bo - 8, ro - 8);
+                    break;
+                }
+                case I128_SHL: case I128_SHR: {
+                    int l = new_label(g);
+                    fprintf(g->out, "    mov rcx, [rbp - %d]\n    and rcx, 127\n", bo);
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    mov rdx, [rbp - %d]\n", ao, ao - 8);
+                    if (inst->i128_op == I128_SHL) {
+                        fprintf(g->out,
+                            "    cmp cl, 64\n    jb .Lsh%d\n"
+                            "    mov rdx, rax\n    xor eax, eax\n    sub cl, 64\n    shl rdx, cl\n    jmp .Lshd%d\n"
+                            ".Lsh%d:\n    shld rdx, rax, cl\n    shl rax, cl\n"
+                            ".Lshd%d:\n", l, l, l, l);
+                    } else if (uns) {
+                        fprintf(g->out,
+                            "    cmp cl, 64\n    jb .Lsh%d\n"
+                            "    mov rax, rdx\n    xor edx, edx\n    sub cl, 64\n    shr rax, cl\n    jmp .Lshd%d\n"
+                            ".Lsh%d:\n    shrd rax, rdx, cl\n    shr rdx, cl\n"
+                            ".Lshd%d:\n", l, l, l, l);
+                    } else {
+                        fprintf(g->out,
+                            "    cmp cl, 64\n    jb .Lsh%d\n"
+                            "    mov rax, rdx\n    sar rdx, 63\n    sub cl, 64\n    sar rax, cl\n    jmp .Lshd%d\n"
+                            ".Lsh%d:\n    shrd rax, rdx, cl\n    sar rdx, cl\n"
+                            ".Lshd%d:\n", l, l, l, l);
+                    }
+                    fprintf(g->out, "    mov [rbp - %d], rax\n    mov [rbp - %d], rdx\n", ro, ro - 8);
+                    break;
+                }
+                case I128_MUL:
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    mul qword [rbp - %d]\n", ao, bo);
+                    fprintf(g->out, "    mov [rbp - %d], rax\n    mov rcx, rdx\n", ro);
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    imul rax, [rbp - %d]\n    add rcx, rax\n", ao, bo - 8);
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    imul rax, [rbp - %d]\n    add rcx, rax\n", ao - 8, bo);
+                    fprintf(g->out, "    mov [rbp - %d], rcx\n", ro - 8);
+                    break;
+                case I128_SDIV: case I128_UDIV: case I128_SMOD: case I128_UMOD: {
+                    g->need_i128 = 1;
+                    int div_uns = (inst->i128_op == I128_UDIV || inst->i128_op == I128_UMOD);
+                    const char *fn = div_uns ? "mvs_u128_divmod" : "mvs_s128_divmod";
+                    int is_mod = (inst->i128_op == I128_SMOD || inst->i128_op == I128_UMOD);
+                    int qoff = is_mod ? ao : ro;
+                    int roff = is_mod ? ro : ao;
+                    fprintf(g->out, "    lea rcx, [rbp - %d]\n    lea rdx, [rbp - %d]\n", ao, bo);
+                    fprintf(g->out, "    lea r8, [rbp - %d]\n    lea r9, [rbp - %d]\n", qoff, roff);
+                    fprintf(g->out, "    sub rsp, 32\n    call %s\n    add rsp, 32\n", fn);
+                    break;
+                }
+                default: break;
+            }
+            fprintf(g->out, "    lea rax, [rbp - %d]\n", ro);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+
+        case IR_I128_UNOP: {
+            int nv = f->next_vreg;
+            int ao = I128_TEMP(fs, nv, inst->imm);
+            int ro = I128_TEMP(fs, nv, inst->imm + 1);
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    mov rcx, [rax]\n    mov rdx, [rax + 8]\n");
+            fprintf(g->out, "    mov [rbp - %d], rcx\n    mov [rbp - %d], rdx\n", ao, ao - 8);
+            fprintf(g->out, "    mov rax, [rbp - %d]\n    mov rdx, [rbp - %d]\n", ao, ao - 8);
+            if (inst->i128_op == I128_NEG)
+                fprintf(g->out, "    not rax\n    not rdx\n    add rax, 1\n    adc rdx, 0\n");
+            else
+                fprintf(g->out, "    not rax\n    not rdx\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n    mov [rbp - %d], rdx\n", ro, ro - 8);
+            fprintf(g->out, "    lea rax, [rbp - %d]\n", ro);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+
+        case IR_I128_CMP: {
+            int nv = f->next_vreg;
+            int ao = I128_TEMP(fs, nv, inst->imm);
+            int bo = I128_TEMP(fs, nv, inst->imm + 1);
+            int uns = !inst->is_signed;
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    mov r10, rax\n");
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    mov r11, rax\n");
+            fprintf(g->out, "    mov rcx, [r10]\n    mov rdx, [r10 + 8]\n");
+            fprintf(g->out, "    mov [rbp - %d], rcx\n    mov [rbp - %d], rdx\n", ao, ao - 8);
+            fprintf(g->out, "    mov rcx, [r11]\n    mov rdx, [r11 + 8]\n");
+            fprintf(g->out, "    mov [rbp - %d], rcx\n    mov [rbp - %d], rdx\n", bo, bo - 8);
+            switch (inst->cmp) {
+                case CMP_EQ: case CMP_NE:
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    xor rax, [rbp - %d]\n", ao, bo);
+                    fprintf(g->out, "    mov rcx, [rbp - %d]\n    xor rcx, [rbp - %d]\n    or rax, rcx\n", ao - 8, bo - 8);
+                    fprintf(g->out, inst->cmp == CMP_EQ ?
+                        "    cmp rax, 0\n    sete al\n    movzx rax, al\n" :
+                        "    cmp rax, 0\n    setne al\n    movzx rax, al\n");
+                    break;
+                default: {
+                    int l = new_label(g);
+                    const char *hi_cc, *lo_cc;
+                    switch (inst->cmp) {
+                        case CMP_SLT: case CMP_ULT: hi_cc = uns ? "setb" : "setl"; lo_cc = "setb";  break;
+                        case CMP_SGT: case CMP_UGT: hi_cc = uns ? "seta" : "setg"; lo_cc = "seta";  break;
+                        case CMP_SLE: case CMP_ULE: hi_cc = uns ? "setb" : "setl"; lo_cc = "setbe"; break;
+                        case CMP_SGE: case CMP_UGE: hi_cc = uns ? "seta" : "setg"; lo_cc = "setae"; break;
+                        default: hi_cc = "setl"; lo_cc = "setb"; break;
+                    }
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    cmp rax, [rbp - %d]\n    jne .Li128c%d\n", ao - 8, bo - 8, l);
+                    fprintf(g->out, "    mov rax, [rbp - %d]\n    cmp rax, [rbp - %d]\n    %s al\n    jmp .Li128d%d\n", ao, bo, lo_cc, l);
+                    fprintf(g->out, ".Li128c%d:\n    %s al\n", l, hi_cc);
+                    fprintf(g->out, ".Li128d%d:\n    movzx rax, al\n", l);
+                    break;
+                }
+            }
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+
+        case IR_I128_FROM: {
+            int nv = f->next_vreg;
+            int to = I128_TEMP(fs, nv, inst->imm);
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    mov [rbp - %d], rax\n", to);
+            if (inst->is_signed)
+                fprintf(g->out, "    mov rcx, rax\n    sar rcx, 63\n    mov [rbp - %d], rcx\n", to - 8);
+            else
+                fprintf(g->out, "    mov qword [rbp - %d], 0\n", to - 8);
+            fprintf(g->out, "    lea rax, [rbp - %d]\n", to);
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+        }
+
+        case IR_I128_STORE: {
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    mov rcx, [rbp - %d]\n", VREG_OFF(fs, inst->b));
+            if (is_i128(inst->type, inst->ptr)) {
+                fprintf(g->out, "    mov rdx, [rcx]\n    mov [rax], rdx\n");
+                fprintf(g->out, "    mov rdx, [rcx + 8]\n    mov [rax + 8], rdx\n");
+            } else if (!inst->is_signed) {
+                fprintf(g->out, "    mov [rax], rcx\n    mov qword [rax + 8], 0\n");
+            } else {
+                fprintf(g->out, "    mov [rax], rcx\n    mov rdx, rcx\n    sar rdx, 63\n    mov [rax + 8], rdx\n");
+            }
+            break;
+        }
+
+        case IR_I128_LOAD:
+            fprintf(g->out, "    mov rax, [rbp - %d]\n", VREG_OFF(fs, inst->a));
+            if (inst->imm == 0)
+                fprintf(g->out, "    mov rax, [rax]\n");
+            else
+                fprintf(g->out, "    mov rax, [rax + 8]\n");
+            fprintf(g->out, "    mov [rbp - %d], rax\n", VREG_OFF(fs, inst->dst));
+            break;
+
         default:
             break;
         }
@@ -2691,9 +2874,11 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             rv = -1; break;
         case IR_CALL: case IR_ICALL:
             rv = (inst->dst != IR_NONE) ? inst->dst : -1; break;
-        case IR_STORE:
+        case IR_STORE: case IR_I128_STORE:
             rv = inst->a; break;
         case IR_COPY:
+        case IR_I128_BINOP: case IR_I128_UNOP: case IR_I128_CMP:
+        case IR_I128_FROM: case IR_I128_LOAD:
             rv = -1; break;
         case IR_NOP: case IR_LINE:
             break;

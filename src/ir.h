@@ -212,6 +212,8 @@ typedef struct {
 
     int      frame_size;    /* locals frame size (from add_local/collect_locals); the emitter
                              * extends this by next_vreg * 8 for the vreg spill area */
+    int      n_i128_temps;  /* 16-byte temporary slots for i128 operations; the emitter
+                             * adds n_i128_temps * 16 beyond the vreg area */
     int      nlocals_snap;  /* g->nlocals after lower_func setup (for emitter's visible fixup) */
     int      param_start;   /* index of first parameter in g->locals[] */
     int      nparams;       /* number of parameters */

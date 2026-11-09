@@ -2014,13 +2014,15 @@ static void emit_i128_helpers(Gen *g) {
 /* ------------------------------------------------------------------ */
 
 #define VREG_OFF(fs, v) ((fs) + 8 + (v) * 8)
+#define I128_TEMP(fs, nv, idx) (VREG_OFF(fs, nv) + (idx) * 16 + 8)
 #define LOAD_A() do { if (inst->a != rv) { addr_local(g, "x9", VREG_OFF(fs, inst->a)); fprintf(g->out, "    ldr x0, [x9]\n"); } } while(0)
 
 static void emit_ir_func(Gen *g, IRFunc *f) {
     Node *fn = f->fn;
     int fs = f->frame_size;
     int vreg_area = f->next_vreg * 8;
-    int total_frame = ((fs + vreg_area) + 15) / 16 * 16;
+    int i128_area = f->n_i128_temps * 16;
+    int total_frame = ((fs + vreg_area + i128_area) + 15) / 16 * 16;
 
     fprintf(g->out, "\n%s:\n", f->name);
     fprintf(g->out, "    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n");
@@ -2553,6 +2555,198 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             g->had_error = 1;
             break;
 
+        case IR_I128_BINOP: {
+            int nv = f->next_vreg;
+            int ao = I128_TEMP(fs, nv, inst->imm);
+            int bo = I128_TEMP(fs, nv, inst->imm + 1);
+            int ro = I128_TEMP(fs, nv, inst->imm + 2);
+            int uns = !inst->is_signed;
+            addr_local(g, "x9", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    ldr x10, [x9]\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x11, [x9]\n");
+            fprintf(g->out, "    ldp x2, x3, [x10]\n");
+            addr_local(g, "x9", ao);
+            fprintf(g->out, "    stp x2, x3, [x9]\n");
+            fprintf(g->out, "    ldp x4, x5, [x11]\n");
+            addr_local(g, "x9", bo);
+            fprintf(g->out, "    stp x4, x5, [x9]\n");
+            switch (inst->i128_op) {
+                case I128_ADD:
+                    fprintf(g->out, "    adds x2, x2, x4\n    adc x3, x3, x5\n");
+                    break;
+                case I128_SUB:
+                    fprintf(g->out, "    subs x2, x2, x4\n    sbc x3, x3, x5\n");
+                    break;
+                case I128_AND:
+                    fprintf(g->out, "    and x2, x2, x4\n    and x3, x3, x5\n");
+                    break;
+                case I128_OR:
+                    fprintf(g->out, "    orr x2, x2, x4\n    orr x3, x3, x5\n");
+                    break;
+                case I128_XOR:
+                    fprintf(g->out, "    eor x2, x2, x4\n    eor x3, x3, x5\n");
+                    break;
+                case I128_MUL:
+                    fprintf(g->out, "    umulh x6, x2, x4\n");
+                    fprintf(g->out, "    madd x6, x2, x5, x6\n");
+                    fprintf(g->out, "    madd x6, x3, x4, x6\n");
+                    fprintf(g->out, "    mul x2, x2, x4\n    mov x3, x6\n");
+                    break;
+                case I128_SHL: {
+                    int l = new_label(g);
+                    fprintf(g->out, "    and x4, x4, #127\n");
+                    fprintf(g->out, "    cbz x4, .Lshd%d\n", l);
+                    fprintf(g->out, "    cmp x4, #64\n    b.lt .Lsh%d\n", l);
+                    fprintf(g->out, "    sub x4, x4, #64\n    lsl x3, x2, x4\n    mov x2, xzr\n    b .Lshd%d\n", l);
+                    fprintf(g->out, ".Lsh%d:\n", l);
+                    fprintf(g->out, "    lsl x3, x3, x4\n    mov x5, #64\n    sub x5, x5, x4\n");
+                    fprintf(g->out, "    lsr x6, x2, x5\n    orr x3, x3, x6\n    lsl x2, x2, x4\n");
+                    fprintf(g->out, ".Lshd%d:\n", l);
+                    break;
+                }
+                case I128_SHR: {
+                    int l = new_label(g);
+                    const char *hi_shift = uns ? "lsr" : "asr";
+                    fprintf(g->out, "    and x4, x4, #127\n");
+                    fprintf(g->out, "    cbz x4, .Lshd%d\n", l);
+                    fprintf(g->out, "    cmp x4, #64\n    b.lt .Lsh%d\n", l);
+                    fprintf(g->out, "    sub x4, x4, #64\n    %s x2, x3, x4\n", hi_shift);
+                    if (uns) fprintf(g->out, "    mov x3, xzr\n");
+                    else     fprintf(g->out, "    asr x3, x3, #63\n");
+                    fprintf(g->out, "    b .Lshd%d\n.Lsh%d:\n", l, l);
+                    fprintf(g->out, "    lsr x2, x2, x4\n    mov x5, #64\n    sub x5, x5, x4\n");
+                    fprintf(g->out, "    lsl x6, x3, x5\n    orr x2, x2, x6\n    %s x3, x3, x4\n", hi_shift);
+                    fprintf(g->out, ".Lshd%d:\n", l);
+                    break;
+                }
+                case I128_SDIV: case I128_UDIV: case I128_SMOD: case I128_UMOD: {
+                    g->need_i128 = 1;
+                    int div_uns = (inst->i128_op == I128_UDIV || inst->i128_op == I128_UMOD);
+                    const char *fn = div_uns ? "mvs_u128_divmod" : "mvs_s128_divmod";
+                    int is_mod = (inst->i128_op == I128_SMOD || inst->i128_op == I128_UMOD);
+                    int qoff = is_mod ? ao : ro;
+                    int roff = is_mod ? ro : ao;
+                    addr_local(g, "x0", ao);
+                    addr_local(g, "x1", bo);
+                    addr_local(g, "x2", qoff);
+                    addr_local(g, "x3", roff);
+                    fprintf(g->out, "    bl %s\n", fn);
+                    addr_local(g, "x0", ro);
+                    addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+                    fprintf(g->out, "    str x0, [x9]\n");
+                    break;
+                }
+                default: break;
+            }
+            if (inst->i128_op != I128_SDIV && inst->i128_op != I128_UDIV &&
+                inst->i128_op != I128_SMOD && inst->i128_op != I128_UMOD) {
+                addr_local(g, "x9", ro);
+                fprintf(g->out, "    stp x2, x3, [x9]\n");
+                fprintf(g->out, "    mov x0, x9\n");
+                addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+                fprintf(g->out, "    str x0, [x9]\n");
+            }
+            break;
+        }
+
+        case IR_I128_UNOP: {
+            int nv = f->next_vreg;
+            int ao = I128_TEMP(fs, nv, inst->imm);
+            int ro = I128_TEMP(fs, nv, inst->imm + 1);
+            addr_local(g, "x9", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    ldr x10, [x9]\n");
+            fprintf(g->out, "    ldp x2, x3, [x10]\n");
+            addr_local(g, "x9", ao);
+            fprintf(g->out, "    stp x2, x3, [x9]\n");
+            if (inst->i128_op == I128_NEG)
+                fprintf(g->out, "    mvn x2, x2\n    mvn x3, x3\n    adds x2, x2, #1\n    adc x3, x3, xzr\n");
+            else
+                fprintf(g->out, "    mvn x2, x2\n    mvn x3, x3\n");
+            addr_local(g, "x9", ro);
+            fprintf(g->out, "    stp x2, x3, [x9]\n    mov x0, x9\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+
+        case IR_I128_CMP: {
+            int uns = !inst->is_signed;
+            addr_local(g, "x9", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    ldr x10, [x9]\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x11, [x9]\n");
+            fprintf(g->out, "    ldp x2, x3, [x10]\n");
+            fprintf(g->out, "    ldp x4, x5, [x11]\n");
+            switch (inst->cmp) {
+                case CMP_EQ: case CMP_NE:
+                    fprintf(g->out, "    eor x2, x2, x4\n    eor x3, x3, x5\n    orr x2, x2, x3\n");
+                    fprintf(g->out, "    cmp x2, #0\n    cset x0, %s\n", inst->cmp == CMP_EQ ? "eq" : "ne");
+                    break;
+                default: {
+                    int l = new_label(g);
+                    const char *hi_cc, *lo_cc;
+                    switch (inst->cmp) {
+                        case CMP_SLT: case CMP_ULT: hi_cc = uns ? "lo" : "lt"; lo_cc = "lo"; break;
+                        case CMP_SGT: case CMP_UGT: hi_cc = uns ? "hi" : "gt"; lo_cc = "hi"; break;
+                        case CMP_SLE: case CMP_ULE: hi_cc = uns ? "lo" : "lt"; lo_cc = "ls"; break;
+                        case CMP_SGE: case CMP_UGE: hi_cc = uns ? "hi" : "gt"; lo_cc = "hs"; break;
+                        default: hi_cc = "lt"; lo_cc = "lo"; break;
+                    }
+                    fprintf(g->out, "    cmp x3, x5\n    b.ne .Lic%d\n", l);
+                    fprintf(g->out, "    cmp x2, x4\n    cset x0, %s\n    b .Lid%d\n", lo_cc, l);
+                    fprintf(g->out, ".Lic%d:\n    cset x0, %s\n.Lid%d:\n", l, hi_cc, l);
+                    break;
+                }
+            }
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+
+        case IR_I128_FROM: {
+            int nv = f->next_vreg;
+            int to = I128_TEMP(fs, nv, inst->imm);
+            addr_local(g, "x9", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    ldr x2, [x9]\n");
+            addr_local(g, "x9", to);
+            if (inst->is_signed)
+                fprintf(g->out, "    asr x3, x2, #63\n    stp x2, x3, [x9]\n");
+            else
+                fprintf(g->out, "    stp x2, xzr, [x9]\n");
+            fprintf(g->out, "    mov x0, x9\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+
+        case IR_I128_STORE: {
+            addr_local(g, "x9", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    ldr x0, [x9]\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->b));
+            fprintf(g->out, "    ldr x1, [x9]\n");
+            if (is_i128(inst->type, inst->ptr)) {
+                fprintf(g->out, "    ldp x2, x3, [x1]\n    stp x2, x3, [x0]\n");
+            } else if (!inst->is_signed) {
+                fprintf(g->out, "    stp x1, xzr, [x0]\n");
+            } else {
+                fprintf(g->out, "    asr x2, x1, #63\n    stp x1, x2, [x0]\n");
+            }
+            break;
+        }
+
+        case IR_I128_LOAD: {
+            addr_local(g, "x9", VREG_OFF(fs, inst->a));
+            fprintf(g->out, "    ldr x10, [x9]\n");
+            if (inst->imm == 0)
+                fprintf(g->out, "    ldr x0, [x10]\n");
+            else
+                fprintf(g->out, "    ldr x0, [x10, #8]\n");
+            addr_local(g, "x9", VREG_OFF(fs, inst->dst));
+            fprintf(g->out, "    str x0, [x9]\n");
+            break;
+        }
+
         default:
             break;
         }
@@ -2563,9 +2757,11 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             rv = -1; break;
         case IR_CALL: case IR_ICALL:
             rv = (inst->dst != IR_NONE) ? inst->dst : -1; break;
-        case IR_STORE:
+        case IR_STORE: case IR_I128_STORE:
             rv = inst->a; break;
         case IR_COPY:
+        case IR_I128_BINOP: case IR_I128_UNOP: case IR_I128_CMP:
+        case IR_I128_FROM: case IR_I128_LOAD:
             rv = -1; break;
         case IR_NOP: case IR_LINE:
             break;
