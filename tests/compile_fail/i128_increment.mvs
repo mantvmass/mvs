@@ -1,0 +1,7 @@
+//~ ERROR: not supported on 128-bit
+// ++ on i128 is rejected (use x = x + 1)
+func main() -> i8 {
+    let x: i128 = 1 as i128;
+    x++;
+    return 0;
+}

@@ -52,6 +52,21 @@ AST walk). Six optimization passes run in two iterations: constant
 folding, strength reduction, CSE on addresses, copy propagation, store
 forwarding, and dead code elimination (`src/opt.c`).
 
+Address-as-value types now lower to dedicated IR instructions instead of
+falling back to the legacy AST walk:
+
+- **i128/u128**: `IR_I128_BINOP`, `IR_I128_UNOP`, `IR_I128_CMP`,
+  `IR_I128_FROM`, `IR_I128_STORE`, `IR_I128_LOAD` cover all arithmetic,
+  bitwise, comparison, widening, and memory operations.
+- **dyn Trait stores**: `IR_DYN_STORE` handles both dyn-to-dyn copies
+  (16-byte memcpy) and ptr-to-concrete wrapping ({data, vtable}).
+
+Five operations still use `IR_IOOUT` (the escape hatch to the legacy
+emitter): `asm()`, `__atomic`, dyn method dispatch, variadic MVS calls,
+and dyn argument wrapping. Once these are lowered, the old
+`gen_expr`/`gen_stmt` code (~5700 lines across three backends) can be
+removed.
+
 What the IR enables next:
 
 - Real register allocation over every value (not just the busiest
@@ -108,9 +123,11 @@ Roughly in order of value:
   (stack offsets and register-allocated locals), so a debugger can print
   locals. The NASM backends (win64/elf64) still provide line info only;
   NASM's built-in DWARF generation conflicts with hand-written sections.
-- Performance: locals are register allocated and simple operands skip the temp
-  stack (about 3x gcc -O2 on the benchmark, from 8.4x). Going further means an
-  IR; see the codegen section above.
+- Performance: locals are register allocated, simple operands skip the temp
+  stack, and the IR optimizer (const fold, CSE, copy prop, store forward, DCE)
+  eliminates redundant loads and stores (about 3x gcc -O2 on the benchmark,
+  from 8.4x). Going further means full register allocation; see the codegen
+  section above.
 - Deterministic release builds and a signed-artifact story.
 
 ## Tooling

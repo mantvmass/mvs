@@ -28,7 +28,7 @@ A grab-bag showcase: io.out, variables, functions, arithmetic, control flow.
 | `control.mvs` | if/elseif/else, while, for, do-while, switch |
 | `args.mvs` | command-line args via `main(argc, argv)` |
 | `arrays.mvs` | `[T; N]`: literals, indexing, `.len`, decay to `*T` |
-| `int128.mvs` | 128-bit arithmetic past 64 bits |
+| `int128.mvs` | 128-bit arithmetic: all ops, comparisons, u128 div/mod, casts |
 | `shadow.mvs` | scope shadowing |
 | `compile_attr.mvs` | `@compile(target_os/target_arch)` |
 | `hexbin.mvs` | hex and binary literals, `{:x}` output |
@@ -61,7 +61,7 @@ A grab-bag showcase: io.out, variables, functions, arithmetic, control flow.
 |------|----------|
 | `traits.mvs` | trait, `impl Trait for`, `<T: Trait>` static dispatch |
 | `display.mvs` | trait `Display` + `fmt.println` |
-| `dynamic.mvs` | `dyn Trait`: vtable dispatch, dyn arrays/params, `where` |
+| `dynamic.mvs` | `dyn Trait`: vtable dispatch, dyn arrays/params, dyn-to-dyn copy, `where` |
 
 ## 05_strings
 

@@ -7,4 +7,5 @@ d = circle  = 75
 describe(r) = 12
 describe(c) = 75
 total       = 87
+dyn copy    = 75
 both(r)     = 13

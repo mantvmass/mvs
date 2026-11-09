@@ -515,6 +515,61 @@ func main() -> i8 {
 EOF
 check infer "infer ok"
 
+# --- 9. i128 through every context ------------------------------------------
+cat > "$TMP/i128ctx.mvs" <<'EOF'
+import { io } from "std";
+
+struct Big { val: i128; tag: i64; }
+
+impl Big {
+    func doubled(self: *Big) -> i128 {
+        return self.val + self.val;
+    }
+}
+
+func add128(a: i128, b: i128) -> i128 { return a + b; }
+
+func main() -> i8 {
+    let x: i128 = (1 as i128) << 80;            // local
+    if (x == (0 as i128)) { return 1; }
+
+    let y: i128 = add128(x, x);                 // parameter + return
+    if (y != x + x) { return 2; }
+
+    let b: Big = Big { val: x, tag: 1 };        // struct field
+    if (b.val != x) { return 3; }
+    if (b.doubled() != y) { return 4; }         // method on struct with i128
+
+    b.val = (1 as i128) << 100;                 // struct field reassignment
+    if (b.val != (1 as i128) << 100) { return 5; }
+
+    let arr: [i128; 2] = [x, y];                // array element
+    if (arr[0] != x) { return 6; }
+    if (arr[1] != y) { return 7; }
+
+    // all arithmetic ops
+    let a: i128 = (1 as i128) << 64;
+    let c: i128 = a + 1;
+    if (c - a != (1 as i128)) { return 8; }     // sub
+    if ((a & 0) != (0 as i128)) { return 9; }   // and
+    if ((a | 1) <= a) { return 10; }             // or
+    if ((a ^ a) != (0 as i128)) { return 11; }  // xor
+
+    // comparisons
+    let neg: i128 = (0 as i128) - a;
+    if (!(neg < (0 as i128))) { return 12; }
+    if (!(neg <= (0 as i128))) { return 13; }
+    if (!(a > (0 as i128))) { return 14; }
+    if (!(a >= a)) { return 15; }
+    if (a == neg) { return 16; }
+    if (!(a != neg)) { return 17; }
+
+    io.out("i128ctx ok");
+    return 0;
+}
+EOF
+check i128ctx "i128ctx ok"
+
 echo
 if [ "$fail" -gt 0 ]; then echo "FEATURE MATRIX FAILED: $fail case(s), $pass passed"; rm -rf "$TMP"; exit 1; fi
 echo "FEATURE MATRIX OK: $pass feature area(s) verified"

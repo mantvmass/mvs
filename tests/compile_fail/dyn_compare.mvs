@@ -1,0 +1,12 @@
+//~ ERROR: cannot compare
+// comparing two dyn values is not supported
+struct A { x: i32; }
+trait T { func f(self: *Self) -> i32; }
+impl T for A { func f(self: *A) -> i32 { return 1; } }
+func main() -> i8 {
+    let a: A = A { x: 1 };
+    let d1: dyn T = &a;
+    let d2: dyn T = &a;
+    if (d1 == d2) { return 1; }
+    return 0;
+}

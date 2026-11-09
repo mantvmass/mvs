@@ -92,6 +92,7 @@ examples: $(TARGET)
 	./$(TARGET) examples/09_no_std/intrinsics.mvs --nostd
 	./$(TARGET) examples/09_no_std/use_core_all.mvs --nostd
 	./$(TARGET) examples/09_no_std/use_cell.mvs --nostd
+	./$(TARGET) examples/09_no_std/use_ffi.mvs --nostd
 	@echo "All examples compiled"
 
 # run the test suite: golden output tests + compile-only + compile-fail (expected errors)

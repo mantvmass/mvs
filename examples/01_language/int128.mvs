@@ -45,6 +45,27 @@ func main() -> i8 {
     // i128 passes to and returns from functions (hidden-pointer convention)
     io.out("(2^50)^2     = {}", square128((1 as i128) << 50));   // 2^100
 
+    // subtraction
+    io.out("big - 1      = {}", big - 1);
+
+    // bitwise AND, OR, XOR
+    let mask: i128 = ((1 as i128) << 64) - 1;
+    io.out("big & mask   = {}", big & mask);         // low 64 bits of 2^100
+    io.out("big | 7      = {}", big | 7);
+    io.out("big ^ big    = {}", big ^ big);          // 0
+
+    // equality and ordering comparisons
+    io.out("big == big   = {}", big == big);         // 1
+    io.out("big != neg   = {}", big != neg);         // 1
+    io.out("big >= 1     = {}", big >= 1);           // 1
+    io.out("neg <= 0     = {}", neg <= 0);           // 1
+
+    // u128 division and modulo
+    let umax: u128 = 0 as u128;
+    umax = umax - 1;                                 // 2^128 - 1
+    io.out("umax / 3     = {}", umax / 3);           // 113427455640312821154458202477256070485
+    io.out("umax % 3     = {}", umax % 3);           // 0
+
     // explicit narrowing back to 64-bit
     io.out("low 64 bits  = {}", (big + 42) as i64); // 42
     return 0;

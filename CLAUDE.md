@@ -111,9 +111,9 @@ Worth knowing beyond the guide:
   or example), and `tests/diff/ops_*` from `gen_ops_diff.py` (every operator on
   every numeric type with C as the oracle, 1924 checks). When a bug turns up,
   add the axis that would have caught it, not a single regression test.
-- **Dogfood.** Two real programs, 2477 lines of MVS between them:
-  `examples/10_json` and `examples/11_vm`. Run them before claiming a language
-  change is ergonomic; both have caught gaps the suite missed.
+- **Dogfood.** Seven real programs under `examples/10_json` through
+  `examples/16_bf`. Run them before claiming a language change is ergonomic;
+  they have caught gaps no test suite caught.
 
 ## Project-specific cautions (full list in docs/rules.md)
 

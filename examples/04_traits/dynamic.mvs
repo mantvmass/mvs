@@ -71,6 +71,12 @@ func main() -> i8 {
     }
     io.out("total       = {}", total);           // 87
 
+    // dyn-to-dyn assignment: copies the 16-byte fat pointer (data + vtable)
+    let src: dyn Shape = &c;
+    let dst: dyn Shape = &r;
+    dst = src;
+    io.out("dyn copy    = {}", dst.area());      // 75
+
     // where clause with two bounds (static dispatch, checked at instantiation)
     io.out("both(r)     = {}", both(r));         // 13
     return 0;

@@ -34,13 +34,18 @@ in the standard library (`std/*.mvs`) and must be imported. None of it is baked 
 ## 2. Source to executable
 
 ```
-lexer   (src/lexer.c)     characters -> tokens
-parser  (src/parser.c)    tokens     -> AST
-module  (src/module.c)    merge imported files into one AST
-codegen (src/arch/...)    walk the AST -> NASM assembly (.asm)
-nasm -f win64             .asm -> .obj
-clang                     link with the C runtime -> .exe
+lexer   (src/lexer.c)       characters -> tokens
+parser  (src/parser.c)      tokens     -> AST
+module  (src/module.c)      merge imported files into one AST
+lower   (src/lower.c)       AST -> three-address IR (virtual regs)
+opt     (src/opt.c)         optimize IR (const fold, CSE, copy prop, store fwd, DCE)
+emit    (src/arch/...)      IR -> NASM/GNU as assembly (.asm/.s)
+nasm -f win64               .asm -> .obj
+clang                       link with the C runtime -> .exe
 ```
+
+The IR path is the default since 0.4.0. Pass `--no-ir` to fall back to the
+legacy AST-walk codegen.
 
 Build modes:
 
@@ -55,6 +60,8 @@ Build modes:
 | `mvs file.mvs --nostd --target elf64` | `.o` (freestanding ELF) | GNU ld / GRUB multiboot OS dev |
 | `mvs file.mvs -O` | same, fewer instructions | peephole cleanup of the assembly (all targets) |
 | `mvs file.mvs --no-check` | same, no bounds checks | trust every array index (see section 4.2) |
+| `mvs file.mvs --check-overflow` | same, traps on signed overflow | `ud2`/`brk #1` on signed `+`, `-`, `*` overflow |
+| `mvs file.mvs --no-ir` | same, legacy codegen | fall back to the AST-walk backends (no optimizer) |
 | `mvs file.mvs -g` | same + DWARF line info | step through the `.mvs` source in gdb/lldb (keeps the .asm) |
 | `mvs test` | test report | run the golden suite from the repo root (no PowerShell needed) |
 | `mvs --version` | version string | |
@@ -71,13 +78,16 @@ src/
   generic.c          post-parse passes: enum/match desugar, monomorphization
                      (functions AND structs), overload resolution, type checking
   diag.{h,c}         Rust-style diagnostics: source excerpts, carets, help notes
+  ir.{h,c}           IR data structures (three-address code, virtual regs), construction, dump
+  lower.{h,c}        AST-to-IR lowering (one pass, replaces per-backend gen_expr/gen_stmt)
+  opt.c              IR optimizer: const fold, strength reduce, CSE, copy prop, store fwd, DCE
   codegen.{h,c}      driver: picks the backend by TargetArch
   arch/
     common.{h,c}     arch-independent: type system, struct layout, symbol table,
                      variable allocation, reachability, format strings
-    x86_64/win.c     x86-64 Windows (win64 ABI, NASM)
-    x86_64/sysv.c    x86-64 Linux/ELF (SysV ABI, NASM): 6 GPR args + xmm class, no shadow space
-    arm64/linux.c    AArch64 Linux (AAPCS64, GNU as syntax)
+    x86_64/win.c     x86-64 Windows (win64 ABI, NASM): IR emitter + legacy AST walk
+    x86_64/sysv.c    x86-64 Linux/ELF (SysV ABI, NASM): IR emitter + legacy AST walk
+    arm64/linux.c    AArch64 Linux (AAPCS64, GNU as syntax): IR emitter + legacy AST walk
   main.c             CLI driving the pipeline (+ the built-in `mvs test` runner and -O peephole)
 std/                 standard library in MVS (io, fs, net, string, fmt, math, mem,
                      time, env, process, rand, test, option, result, vec, thread, sync)
@@ -1654,12 +1664,11 @@ Everything section 4 describes is implemented and tested; the one command that
 runs every check there is (golden suites, feature matrices, differential tests
 against C, sanitizers, the fuzzer) is `sh scripts/audit.sh`.
 
-What is left lives in [../ROADMAP.md](../ROADMAP.md): nested patterns, more
-collections, more `core` modules, a macOS target. Known minor limits, low
-risk and not yet fixed:
+What is left lives in [../ROADMAP.md](../ROADMAP.md): more collections, more
+`core` modules, a macOS target. Known minor limits, low risk and not yet
+fixed:
 
-- Generic params beyond 4 are clamped; arrays of arrays (`[[T; N]; M]`) are
-  not supported yet.
+- Generic params beyond 4 are clamped.
 - Function pointers (v1): the type doesn't take varargs in its signature;
   can't overload by function-pointer type (all mangle to `func`); assignment
   to a func-ptr variable is type-checked leniently; pointing one at a C extern
