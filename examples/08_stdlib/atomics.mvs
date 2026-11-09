@@ -37,5 +37,9 @@ func main() -> i8 {
     let old: i64 = atomic.cas(&counter, iters * 4, 99);
     io.out("cas {}->99: old = {}, now = {}\n", iters * 4, old, counter);
 
+    // exchange test: unconditionally swap and get the old value
+    let prev: i64 = atomic.exchange(&counter, 42);
+    io.out("exchange: prev = {}, now = {}\n", prev, counter);
+
     return 0;
 }

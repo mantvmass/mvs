@@ -5,6 +5,8 @@ import { test, math } from "std";
 import { String } from "std/string";
 import { Option, Some, None } from "std/option";
 import { HashMap, map_hash, map_eq } from "std/map";
+import { set_hash, set_eq } from "std/set";
+import { SortedMap, map_cmp } from "std/sorted_map";
 import { ptr, arch } from "core";
 
 struct Point { x: i64; y: i64; }
@@ -81,6 +83,35 @@ func api_map_internals() -> void {
     test.ok(map_hash(7) == map_hash(7));
     test.ok(map_hash("ab") == map_hash("ab"));
     test.ok(map_hash("ab") != map_hash("ac"));
+}
+
+@test
+func api_set_internals() -> void {
+    test.ok(set_eq(7, 7));
+    test.ok(!set_eq(7, 8));
+    test.ok(set_eq("ab", "ab"));
+    test.ok(!set_eq("ab", "ac"));
+    test.ok(set_hash(7) == set_hash(7));
+    test.ok(set_hash("ab") == set_hash("ab"));
+    test.ok(set_hash("ab") != set_hash("ac"));
+}
+
+@test
+func api_sorted_map_internals() -> void {
+    test.ok(map_cmp(1, 2) < 0);
+    test.ok(map_cmp(2, 1) > 0);
+    test.ok(map_cmp(5, 5) == 0);
+    test.ok(map_cmp("apple", "banana") < 0);
+    test.ok(map_cmp("banana", "apple") > 0);
+    test.ok(map_cmp("abc", "abc") == 0);
+    let m: SortedMap<i64, i64> = SortedMap<i64, i64>::new();
+    m.insert(10, 100);
+    m.insert(5, 50);
+    let found: i64 = 0;
+    let idx: usize = m.bsearch(5, &found);
+    test.eq(found, 1);
+    test.eq(idx as i64, 0);
+    m.drop();
 }
 
 @test

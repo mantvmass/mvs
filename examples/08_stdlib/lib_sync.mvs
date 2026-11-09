@@ -1,5 +1,17 @@
-// std/sync: RwLock coverage (single-threaded exercise of the API)
-import { io, sync } from "std";
+// std/sync: RwLock and CondVar coverage
+import { io, sync, thread } from "std";
+
+let g_ready: i64 = 0;
+let g_mu: Mutex;
+let g_cv: CondVar;
+
+func signaler(_arg: *u8) -> *u8 {
+    g_mu.lock();
+    g_ready = 1;
+    g_cv.signal();
+    g_mu.unlock();
+    return 0;
+}
 
 func main() -> void {
     let rw: RwLock = RwLock::new();
@@ -7,5 +19,19 @@ func main() -> void {
     rw.read_unlock();
     rw.write_lock();
     rw.write_unlock();
-    io.out("RwLock ok");
+    io.out("RwLock ok\n");
+
+    // CondVar: wait for a signal from another thread (globals, zero-init is valid)
+    g_mu.lock();
+    let t: usize = thread.spawn(signaler, 0 as *u8);
+    while (g_ready == 0) {
+        g_cv.wait(&g_mu);
+    }
+    g_mu.unlock();
+    thread.join(t);
+    io.out("CondVar signal ok\n");
+
+    // broadcast: safe to call with no waiters
+    g_cv.broadcast();
+    io.out("CondVar broadcast ok\n");
 }

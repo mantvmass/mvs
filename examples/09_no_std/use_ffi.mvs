@@ -12,6 +12,16 @@ func main() -> i32 {
     if (ffi.c_int_max() != 2147483647)  { return 6; }
     if (ffi.c_int_min() != -2147483648) { return 7; }
     if (ffi.c_uchar_max() != 255)       { return 8; }
+    if (ffi.c_char_max() != 127)   { return 11; }
+    if (ffi.c_char_min() != -128)  { return 12; }
+    if (ffi.c_float_size() != 4)   { return 13; }
+    if (ffi.c_int_align() != 4)    { return 14; }
+    if (ffi.c_longlong_size() != 8) { return 15; }
+    if (ffi.c_pointer_align() != 8) { return 16; }
+    if (ffi.c_short_max() != 32767)  { return 17; }
+    if (ffi.c_short_min() != -32768) { return 18; }
+    if (ffi.c_size_t_size() != 8)    { return 19; }
+    if (ffi.c_uint_max() != 4294967295) { return 20; }
     // c_long_size is ABI-dependent: 4 on Windows (LLP64), 8 on Linux (LP64)
     @compile(target_os = "windows") {
         if (ffi.c_long_size() != 4)  { return 9; }
