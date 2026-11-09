@@ -683,6 +683,7 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--check-overflow") == 0) mvs_overflow_checks = 1;
         else if (strcmp(argv[i], "-g") == 0) { mvs_debug_lines = 1; keep = 1; }
         else if (strcmp(argv[i], "--ir") == 0) mvs_use_ir = 1;
+        else if (strcmp(argv[i], "--no-ir") == 0) mvs_use_ir = 0;
         else if (strcmp(argv[i], "--test-main") == 0) test_main = 1;
         else if (strcmp(argv[i], "--nostd") == 0) { nostd = 1; emit_obj = 1; } /* freestanding -> produce .obj */
         else if (strcmp(argv[i], "--keep") == 0) keep = 1;
@@ -697,6 +698,7 @@ int main(int argc, char **argv) {
         else if (argv[i][0] != '-') input = argv[i];
     }
     if (!input) { fprintf(stderr, "error: no input file\n"); return 1; }
+    if (mvs_overflow_checks && mvs_use_ir) mvs_use_ir = 0;
     /* elf64/arm64 objects cannot be linked into a Windows exe here: stop at the .o
      * (link on a Linux system, e.g. `gcc file.o -o file`) */
     if (arch == ARCH_X86_64_SYSV || arch == ARCH_ARM64_LINUX) emit_obj = 1;

@@ -501,8 +501,8 @@ int mvs_overflow_checks = 0;
 /* debug line information (see common.h); main.c turns it on for -g */
 int mvs_debug_lines = 0;
 
-/* IR lowering path (see common.h); main.c turns it on for --ir */
-int mvs_use_ir = 0;
+/* IR lowering path: on by default since 0.4.0; --no-ir falls back to the old AST walk */
+int mvs_use_ir = 1;
 
 /* One line directive per statement. The assembler turns these into a DWARF
  * line table, which is what lets gdb/lldb show .mvs source. Repeats of the

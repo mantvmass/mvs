@@ -2050,17 +2050,24 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             continue;
         }
         if (is_float_param) {
-            if (pnf < 8) {
-                if (fn->is_export && p->type == TYPE_F32)
-                    fprintf(g->out, "    fcvt d%d, s%d\n", pnf, pnf);
-                fprintf(g->out, "    fmov x0, d%d\n", pnf++);
-            } else if (fn->is_export && p->type == TYPE_F32) {
-                fprintf(g->out, "    ldr s0, [x29, #%d]\n    fcvt d0, s0\n    fmov x0, d0\n", 16 + 8 * pnstk++);
+            if (fn->is_export && p->type == TYPE_F32 && p->ptr == 0) {
+                if (pnf < 8) {
+                    addr_local(g, "x9", psym->offset);
+                    fprintf(g->out, "    str s%d, [x9]\n", pnf++);
+                } else {
+                    fprintf(g->out, "    ldr w0, [x29, #%d]\n", 16 + 8 * pnstk++);
+                    addr_local(g, "x9", psym->offset);
+                    fprintf(g->out, "    str w0, [x9]\n");
+                }
             } else {
-                fprintf(g->out, "    ldr x0, [x29, #%d]\n", 16 + 8 * pnstk++);
+                if (pnf < 8) {
+                    fprintf(g->out, "    fmov x0, d%d\n", pnf++);
+                } else {
+                    fprintf(g->out, "    ldr x0, [x29, #%d]\n", 16 + 8 * pnstk++);
+                }
+                addr_local(g, "x9", psym->offset);
+                fprintf(g->out, "    str x0, [x9]\n");
             }
-            addr_local(g, "x9", psym->offset);
-            fprintf(g->out, "    str x0, [x9]\n");
         } else {
             if (png < 8) fprintf(g->out, "    mov x9, x%d\n", png++);
             else         fprintf(g->out, "    ldr x9, [x29, #%d]\n", 16 + 8 * pnstk++);
@@ -2120,7 +2127,7 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
         case IR_LOAD:
             LOAD_A();
             if (inst->type == TYPE_F32 && inst->ptr == 0)
-                fprintf(g->out, "    ldr s0, [x0]\n    fcvt d0, s0\n    fmov x0, d0\n");
+                fprintf(g->out, "    ldr w0, [x0]\n");
             else
                 gen_load_at(g, inst->size, inst->is_signed);
             addr_local(g, "x9", VREG_OFF(fs, inst->dst));

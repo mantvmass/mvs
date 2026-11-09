@@ -565,6 +565,12 @@ static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
                 return f->insts[f->ninsts - 1].dst;
             }
             av = coerce_num(g, f, av, at, pt);
+            if (!indirect && target && (target->is_export || target->is_extern) &&
+                pp->type == TYPE_F32 && pp->ptr == 0) {
+                int nv = ir_vreg(f);
+                ir_emit(f, IR_F64_F32, nv, av, IR_NONE);
+                av = nv;
+            }
         }
         pre[npre++] = (typeof(pre[0])){ av, at.base, at.ptr, at.sname,
                                           type_size(g, at.base, at.ptr, at.sname) };

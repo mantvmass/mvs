@@ -47,11 +47,15 @@ instructions, and high-level call nodes. The AST lowers to IR once; each
 backend then translates IR to assembly. This eliminates the duplicated
 `gen_expr`/`gen_stmt` logic across three backends.
 
-What the IR enables next (none committed):
+Since 0.4.0, the IR path is the default (`--no-ir` falls back to the old
+AST walk). Six optimization passes run in two iterations: constant
+folding, strength reduction, CSE on addresses, copy propagation, store
+forwarding, and dead code elimination (`src/opt.c`).
 
-- Optimization passes (CSE, strength reduction, constant folding, real
-  register allocation over every value). A plain IR + regalloc compiler
-  lands around 1.2-1.5x gcc -O2; the current stack machine sits at about 3x.
+What the IR enables next:
+
+- Real register allocation over every value (not just the busiest
+  scalars). A plain IR + regalloc compiler lands around 1.2-1.5x gcc -O2.
 - New features lower to IR once instead of being emitted three times.
 
 The trade-off remains: with an optimizer in the middle, `-S` output no

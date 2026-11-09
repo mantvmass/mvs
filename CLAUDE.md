@@ -38,10 +38,11 @@ make test       # golden output + compile-only + compile-fail suite
 ## Code architecture
 
 ```
-.mvs -> [lexer] -> tokens -> [parser] -> AST -> [codegen driver] -> [arch backend] -> .asm/.s
+.mvs -> [lexer] -> tokens -> [parser] -> AST -> [lower] -> IR -> [opt] -> [arch emitter] -> .asm/.s
     win64 (default): nasm -f win64 -> .obj -> clang -> .exe
     elf64:           nasm -f elf64 -> .o   (link on Linux: gcc file.o -no-pie -lm)
     arm64:           aarch64-linux-gnu-gcc -c -> .o (link with the cross gcc, run under qemu)
+    (--no-ir skips the IR and uses the legacy AST-walk codegen)
 ```
 
 | File | Role |
@@ -53,9 +54,12 @@ make test       # golden output + compile-only + compile-fail suite
 | `src/diag.{h,c}` | Rust-style diagnostics: excerpts, carets, help notes, warnings |
 | `src/codegen.{h,c}` | driver: picks the backend by `TargetArch` |
 | `src/arch/common.{h,c}` | shared backend logic: types, structs, symtab, tree-shaking |
-| `src/arch/x86_64/win.c` | win64 backend (NASM, stack machine) |
-| `src/arch/x86_64/sysv.c` | Linux/ELF backend (SysV ABI) |
-| `src/arch/arm64/linux.c` | AArch64 backend (AAPCS64, GNU as syntax) |
+| `src/ir.{h,c}` | IR data structures, construction, debug dump |
+| `src/lower.{h,c}` | AST-to-IR lowering (three-address code, virtual regs) |
+| `src/opt.c` | IR optimizer: const fold, strength reduce, CSE, copy prop, store forward, DCE |
+| `src/arch/x86_64/win.c` | win64 backend (NASM): IR emitter + legacy AST walk |
+| `src/arch/x86_64/sysv.c` | Linux/ELF backend (SysV ABI): IR emitter + legacy AST walk |
+| `src/arch/arm64/linux.c` | AArch64 backend (AAPCS64, GNU as): IR emitter + legacy AST walk |
 | `src/main.c` | CLI driving the pipeline |
 | `std/*.mvs`, `core/*.mvs` | standard library and freestanding package, written in MVS |
 
@@ -64,6 +68,8 @@ make test       # golden output + compile-only + compile-fail suite
 - token/keyword: `token.h` + `lexer.c` (the `KEYWORDS` table)
 - syntax: `parser.c` (+ `ND_*` in `ast.h`)
 - type checking / trait bound / generic / overload: `generic.c`
+- IR lowering (new expression/statement kinds): `lower.c` (+ `IR_*` in `ir.h`)
+- IR optimization: `opt.c`
 - instruction emission: `arch/x86_64/win.c` (and the sysv/arm64 twins);
   shared logic goes in `arch/common.c`
 - import behavior: `module.c`; stdlib functions: `std/*.mvs`
@@ -90,11 +96,13 @@ check the guide before implementing anything.
 Worth knowing beyond the guide:
 
 - **Performance.** `sh scripts/bench.sh` times the same program built by MVS
-  and by C. Locals are register allocated (busiest scalars whose address is
-  never taken go to rbx/r12/r13/r14, x19-x22 on arm64) and a binary op whose
-  operands are both simple skips the temp stack. That took the benchmark from
-  8.4x gcc -O2 to about 3x; the remaining gap is the stack machine used for
-  everything else.
+  and by C. Since 0.4.0 the IR path is the default: the AST lowers to
+  three-address IR, six optimization passes run (const fold, strength
+  reduce, CSE, copy prop, store forward, DCE), then each backend emits
+  from IR. Locals are register allocated (busiest scalars whose address
+  is never taken go to rbx/r12/r13/r14, x19-x22 on arm64). The benchmark
+  sits at about 3x gcc -O2 (roughly 1.8x gcc -O0); the remaining gap is
+  the lack of full register allocation and instruction selection.
 - **How the audit stays exhaustive.** `scripts/audit.sh` is the one command.
   Its enumerated axes: `matrix.sh` (every type through every context),
   `matrix_features.sh` (every feature through every context),
