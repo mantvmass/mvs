@@ -1539,6 +1539,15 @@ static void gen_call(Gen *g, Node *n, int has_sret) {
         else
             fprintf(g->out, "    fmov x0, d0\n");
     }
+    if (sig->is_extern && !is_float_type(sig->type) && sig->ptr == 0 &&
+        sig->type != TYPE_VOID && sig->type != TYPE_STR && sig->type != TYPE_STRUCT &&
+        sig->type != TYPE_DYN && sig->type != TYPE_BOOL) {
+        int rsz = type_size(g, sig->type, 0, NULL);
+        int rsgn = is_signed_type(sig->type);
+        if (rsz == 1)      fprintf(g->out, rsgn ? "    sxtb x0, w0\n" : "    uxtb w0, w0\n");
+        else if (rsz == 2) fprintf(g->out, rsgn ? "    sxth x0, w0\n" : "    uxth w0, w0\n");
+        else if (rsz == 4) fprintf(g->out, rsgn ? "    sxtw x0, w0\n" : "    mov w0, w0\n");
+    }
 }
 
 /* ---------- statements ---------- */
