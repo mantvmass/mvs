@@ -42,7 +42,6 @@ make test       # golden output + compile-only + compile-fail suite
     win64 (default): nasm -f win64 -> .obj -> clang -> .exe
     elf64:           nasm -f elf64 -> .o   (link on Linux: gcc file.o -no-pie -lm)
     arm64:           aarch64-linux-gnu-gcc -c -> .o (link with the cross gcc, run under qemu)
-    (--no-ir skips the IR and uses the legacy AST-walk codegen)
 ```
 
 | File | Role |
@@ -57,9 +56,9 @@ make test       # golden output + compile-only + compile-fail suite
 | `src/ir.{h,c}` | IR data structures, construction, debug dump |
 | `src/lower.{h,c}` | AST-to-IR lowering (three-address code, virtual regs) |
 | `src/opt.c` | IR optimizer: const fold, strength reduce, CSE, copy prop, store forward, DCE |
-| `src/arch/x86_64/win.c` | win64 backend (NASM): IR emitter + legacy AST walk |
-| `src/arch/x86_64/sysv.c` | Linux/ELF backend (SysV ABI): IR emitter + legacy AST walk |
-| `src/arch/arm64/linux.c` | AArch64 backend (AAPCS64, GNU as): IR emitter + legacy AST walk |
+| `src/arch/x86_64/win.c` | win64 backend (NASM): IR emitter |
+| `src/arch/x86_64/sysv.c` | Linux/ELF backend (SysV ABI): IR emitter |
+| `src/arch/arm64/linux.c` | AArch64 backend (AAPCS64, GNU as): IR emitter |
 | `src/main.c` | CLI driving the pipeline |
 | `std/*.mvs`, `core/*.mvs` | standard library and freestanding package, written in MVS |
 
@@ -96,10 +95,9 @@ check the guide before implementing anything.
 Worth knowing beyond the guide:
 
 - **Performance.** `sh scripts/bench.sh` times the same program built by MVS
-  and by C. Since 0.4.0 the IR path is the default: the AST lowers to
-  three-address IR, six optimization passes run (const fold, strength
-  reduce, CSE, copy prop, store forward, DCE), then each backend emits
-  from IR. Locals are register allocated (busiest scalars whose address
+  and by C. The AST lowers to three-address IR, six optimization passes
+  run (const fold, strength reduce, CSE, copy prop, store forward, DCE),
+  then each backend emits from IR. Locals are register allocated (busiest scalars whose address
   is never taken go to rbx/r12/r13/r14, x19-x22 on arm64). The benchmark
   sits at about 3x gcc -O2 (roughly 1.8x gcc -O0); the remaining gap is
   the lack of full register allocation and instruction selection.

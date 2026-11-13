@@ -23,8 +23,6 @@ IRFunc *ir_func_new(const char *name, Node *fn) {
 
 void ir_func_free(IRFunc *f) {
     if (!f) return;
-    for (int i = 0; i < f->ninsts; i++)
-        free(f->insts[i].vis);
     free(f->name);
     free(f->insts);
     free(f->args);
@@ -125,7 +123,8 @@ const char *ir_op_name(IROp op) {
         case IR_RET:        return "ret";
         case IR_CALL:       return "call";
         case IR_ICALL:      return "icall";
-        case IR_IOOUT:      return "ioout";
+        case IR_ASM:        return "asm";
+        case IR_ATOMIC:     return "atomic";
         case IR_I128_BINOP: return "i128_binop";
         case IR_I128_UNOP:  return "i128_unop";
         case IR_I128_CMP:   return "i128_cmp";

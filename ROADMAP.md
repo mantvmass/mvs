@@ -47,25 +47,16 @@ instructions, and high-level call nodes. The AST lowers to IR once; each
 backend then translates IR to assembly. This eliminates the duplicated
 `gen_expr`/`gen_stmt` logic across three backends.
 
-Since 0.4.0, the IR path is the default (`--no-ir` falls back to the old
-AST walk). Six optimization passes run in two iterations: constant
-folding, strength reduction, CSE on addresses, copy propagation, store
-forwarding, and dead code elimination (`src/opt.c`).
+Six optimization passes run in two iterations: constant folding, strength
+reduction, CSE on addresses, copy propagation, store forwarding, and
+dead code elimination (`src/opt.c`).
 
-Address-as-value types now lower to dedicated IR instructions instead of
-falling back to the legacy AST walk:
-
-- **i128/u128**: `IR_I128_BINOP`, `IR_I128_UNOP`, `IR_I128_CMP`,
-  `IR_I128_FROM`, `IR_I128_STORE`, `IR_I128_LOAD` cover all arithmetic,
-  bitwise, comparison, widening, and memory operations.
-- **dyn Trait stores**: `IR_DYN_STORE` handles both dyn-to-dyn copies
-  (16-byte memcpy) and ptr-to-concrete wrapping ({data, vtable}).
-
-Five operations still use `IR_IOOUT` (the escape hatch to the legacy
-emitter): `asm()`, `__atomic`, dyn method dispatch, variadic MVS calls,
-and dyn argument wrapping. Once these are lowered, the old
-`gen_expr`/`gen_stmt` code (~5700 lines across three backends) can be
-removed.
+Every operation now lowers to typed IR instructions. The legacy
+`gen_expr`/`gen_stmt` AST-walk emitters have been removed (~5700 lines
+across three backends). The remaining intrinsics (`asm()`, `__atomic`,
+dyn dispatch, variadic calls, dyn arg wrapping) lower to `IR_ASM`,
+`IR_ATOMIC`, or decompose into existing IR ops (loads, indirect calls,
+`IR_DYN_STORE`).
 
 What the IR enables next:
 

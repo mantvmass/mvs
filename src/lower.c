@@ -6,9 +6,8 @@
  * duplicated in every backend. Each backend now only translates IR to its
  * assembly syntax.
  *
- * Complex intrinsics (io.out, asm(), variadic MVS calls) are emitted as
- * high-level IR_IOOUT instructions that carry the AST node, so the backend
- * can use its existing handling code. They will be fully lowered later.
+ * All operations, including io.out, asm(), atomics, variadic MVS calls,
+ * dyn dispatch, and i128 ops, are lowered to typed IR instructions.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,17 +29,6 @@ static int  lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr);
 /* ------------------------------------------------------------------ */
 /*  helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-static IRInst *emit_ioout(Gen *g, IRFunc *f, int dst, Node *node) {
-    IRInst *io = ir_emit(f, IR_IOOUT, dst, IR_NONE, IR_NONE);
-    io->node = node;
-    if (g->nvisible > 0) {
-        io->vis = (int *)malloc(g->nvisible * sizeof(int));
-        memcpy(io->vis, g->visible, g->nvisible * sizeof(int));
-        io->nvis = g->nvisible;
-    }
-    return io;
-}
 
 static int is_unsigned_val(DataType base, int ptr) {
     if (ptr > 0) return 1;
@@ -577,16 +565,55 @@ static int lower_power(Gen *g, IRFunc *f, Node *n, int fop) {
 static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
     Node *callee = n->operand;
 
-    /* asm() intrinsic */
+    /* asm() intrinsic: emit each string literal as a line of assembly */
     if (callee->kind == ND_IDENT && strcmp(callee->name, "asm") == 0) {
-        emit_ioout(g, f, IR_NONE, n);
+        for (int ai = 0; ai < n->nitems; ai++) {
+            if (n->items[ai]->kind != ND_STR) {
+                fprintf(stderr, "codegen error: asm(): every argument must be a string literal\n");
+                g->had_error = 1;
+                return IR_NONE;
+            }
+        }
+        IRInst *inst = ir_emit(f, IR_ASM, IR_NONE, IR_NONE, IR_NONE);
+        inst->node = n;
         return IR_NONE;
     }
 
-    /* __atomic intrinsic: pass through to the backend like asm() */
+    /* __atomic("op", ptr [, val [, val2]]) intrinsic */
     if (callee->kind == ND_IDENT && strcmp(callee->name, "__atomic") == 0) {
-        emit_ioout(g, f, IR_NONE, n);
-        return IR_NONE;
+        if (n->nitems < 2 || n->items[0]->kind != ND_STR) {
+            fprintf(stderr, "lower error: __atomic needs a string literal op and a pointer\n");
+            g->had_error = 1;
+            return IR_NONE;
+        }
+        const char *op = n->items[0]->str_val;
+        IRAtomicOp aop;
+        if      (strcmp(op, "load")  == 0) aop = ATOMIC_LOAD;
+        else if (strcmp(op, "store") == 0) aop = ATOMIC_STORE;
+        else if (strcmp(op, "add")   == 0) aop = ATOMIC_ADD;
+        else if (strcmp(op, "sub")   == 0) aop = ATOMIC_SUB;
+        else if (strcmp(op, "cas")   == 0) aop = ATOMIC_CAS;
+        else if (strcmp(op, "xchg")  == 0) aop = ATOMIC_XCHG;
+        else {
+            fprintf(stderr, "lower error: __atomic: unknown op \"%s\"\n", op);
+            g->had_error = 1;
+            return IR_NONE;
+        }
+        int ptr_v = lower_expr(g, f, n->items[1]);
+        int val_v = IR_NONE, exp_v = IR_NONE;
+        if (aop == ATOMIC_CAS) {
+            if (n->nitems < 4) { fprintf(stderr, "lower error: __atomic(\"cas\") needs 4 args\n"); g->had_error = 1; return IR_NONE; }
+            exp_v = lower_expr(g, f, n->items[2]);
+            val_v = lower_expr(g, f, n->items[3]);
+        } else if (aop != ATOMIC_LOAD) {
+            if (n->nitems < 3) { fprintf(stderr, "lower error: __atomic(\"%s\") needs 3 args\n", op); g->had_error = 1; return IR_NONE; }
+            val_v = lower_expr(g, f, n->items[2]);
+        }
+        int dst = (aop == ATOMIC_STORE) ? IR_NONE : ir_vreg(f);
+        IRInst *inst = ir_emit(f, IR_ATOMIC, dst, ptr_v, val_v);
+        inst->atomic_op = aop;
+        inst->label = exp_v;
+        return dst;
     }
 
     /* io.out intrinsic: lower to IR_CALL printf */
@@ -667,13 +694,80 @@ static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
         return IR_NONE;
     }
 
-    /* dyn dispatch: delegate to backend */
+    /* dyn dispatch: lower to IR_LOAD (data, vtable, fptr) + IR_ICALL */
     if (callee->kind == ND_MEMBER) {
         ExprType bt0 = type_of(g, callee->operand);
         if (is_dyn(bt0.base, bt0.ptr) && bt0.sname) {
-            int dst = sret_addr != IR_NONE ? IR_NONE : ir_vreg(f);
-            IRInst *io = emit_ioout(g, f, dst, n);
-            if (sret_addr != IR_NONE) io->a = sret_addr;
+            const char *trait = bt0.sname;
+            Node *tr = NULL;
+            for (int ti = 0; g->program && ti < g->program->nitems; ti++) {
+                Node *d = g->program->items[ti];
+                if (d->kind == ND_TRAIT && d->name && strcmp(d->name, trait) == 0) { tr = d; break; }
+            }
+            if (!tr) {
+                fprintf(stderr, "lower error: unknown trait '%s'\n", trait);
+                g->had_error = 1; return IR_NONE;
+            }
+            int vtidx = -1, mi = 0;
+            Node *msig = NULL;
+            for (int ti = 0; ti < tr->nitems; ti++) {
+                if (tr->items[ti]->kind != ND_FUNC) continue;
+                if (strcmp(tr->items[ti]->name, callee->name) == 0) { vtidx = mi; msig = tr->items[ti]; break; }
+                mi++;
+            }
+            if (vtidx < 0) {
+                fprintf(stderr, "lower error: trait '%s' has no method '%s'\n", trait, callee->name);
+                g->had_error = 1; return IR_NONE;
+            }
+            g->need_vtables = 1;
+
+            int blob_v = lower_expr(g, f, callee->operand);
+            int data_v = ir_vreg(f);
+            IRInst *ld_data = ir_emit(f, IR_LOAD, data_v, blob_v, IR_NONE);
+            ld_data->type = TYPE_USIZE; ld_data->ptr = 1; ld_data->size = 8;
+
+            int vt_addr = ir_vreg(f);
+            ir_emit(f, IR_OFFSET, vt_addr, blob_v, IR_NONE)->imm = 8;
+            int vt_v = ir_vreg(f);
+            IRInst *ld_vt = ir_emit(f, IR_LOAD, vt_v, vt_addr, IR_NONE);
+            ld_vt->type = TYPE_USIZE; ld_vt->ptr = 1; ld_vt->size = 8;
+
+            int slot_addr = ir_vreg(f);
+            ir_emit(f, IR_OFFSET, slot_addr, vt_v, IR_NONE)->imm = vtidx * 8;
+            int fptr_v = ir_vreg(f);
+            IRInst *ld_fp = ir_emit(f, IR_LOAD, fptr_v, slot_addr, IR_NONE);
+            ld_fp->type = TYPE_FUNC; ld_fp->ptr = 0; ld_fp->size = 8;
+
+            int returns_struct = ((msig->type == TYPE_STRUCT || is_blob16(msig->type, msig->ptr)) && msig->ptr == 0);
+
+            struct { int vreg; DataType type; int ptr; char *sname; int size; } pre[128];
+            int npre = 0;
+            if (returns_struct && sret_addr != IR_NONE)
+                pre[npre++] = (typeof(pre[0])){ sret_addr, TYPE_USIZE, 1, NULL, 8 };
+            pre[npre++] = (typeof(pre[0])){ data_v, TYPE_USIZE, 1, NULL, 8 };
+            for (int i = 0; i < n->nitems; i++) {
+                int av = lower_expr(g, f, n->items[i]);
+                ExprType at = type_of(g, n->items[i]);
+                if (i + 1 < msig->nitems) {
+                    Node *pp = msig->items[i + 1];
+                    ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0, 0 };
+                    av = coerce_num(g, f, av, at, pt);
+                }
+                pre[npre++] = (typeof(pre[0])){ av, at.base, at.ptr, at.sname,
+                                                  type_size(g, at.base, at.ptr, at.sname) };
+            }
+
+            int astart = ir_arg_start(f);
+            for (int i = 0; i < npre; i++)
+                ir_arg(f, pre[i].vreg, pre[i].type, pre[i].ptr, pre[i].sname, pre[i].size);
+
+            int dst = (returns_struct && sret_addr != IR_NONE) ? IR_NONE : ir_vreg(f);
+            IRInst *ci = ir_emit(f, IR_ICALL, dst, fptr_v, IR_NONE);
+            ci->sig = msig;
+            ci->arg_start = astart;
+            ci->nargs = npre;
+            ci->type = msig->type;
+            ci->ptr = msig->ptr;
             return dst;
         }
     }
@@ -721,11 +815,103 @@ static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
         sig = target;
     }
 
-    /* variadic MVS calls: delegate to backend (complex packing logic) */
+    /* variadic MVS calls: pack extras into dyn blobs, pass (slice_ptr, count) */
     if (!indirect && target && target->variadic && !target->is_extern && !self_expr) {
+        int va_fixed = target->nitems - 2;
+        int va_extra = n->nitems - va_fixed; if (va_extra < 0) va_extra = 0;
+        long long va_base = n->lhs ? n->lhs->int_val : 0;
+        const char *trait = sig->items[va_fixed]->type_name;
+
+        int returns_struct_v = ((sig->type == TYPE_STRUCT || is_blob16(sig->type, sig->ptr)) && sig->ptr == 0);
+        struct { int vreg; DataType type; int ptr; char *sname; int size; } vpre[128];
+        int vnpre = 0;
+        if (returns_struct_v && sret_addr != IR_NONE)
+            vpre[vnpre++] = (typeof(vpre[0])){ sret_addr, TYPE_USIZE, 1, NULL, 8 };
+
+        for (int i = 0; i < va_fixed; i++) {
+            int av = lower_expr(g, f, n->items[i]);
+            ExprType at = type_of(g, n->items[i]);
+            if (i < sig->nitems) {
+                Node *pp = sig->items[i];
+                ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0, 0 };
+                if (is_dyn(pp->type, pp->ptr) && !is_dyn(at.base, at.ptr) && n->items[i]->int_val) {
+                    g->need_vtables = 1;
+                    int ba = ir_vreg(f);
+                    ir_emit(f, IR_LOCAL_ADDR, ba, IR_NONE, IR_NONE)->imm = (int)n->items[i]->int_val;
+                    IRInst *ds = ir_emit(f, IR_DYN_STORE, IR_NONE, ba, av);
+                    ds->ptr = 1; ds->name = strdup(pp->type_name);
+                    ds->sname = strdup(at.sname ? at.sname : datatype_name(at.base));
+                    av = ba;
+                    at = (ExprType){ TYPE_DYN, 0, pp->type_name, NULL, 0, 0 };
+                } else {
+                    av = coerce_num(g, f, av, at, pt);
+                }
+            }
+            vpre[vnpre++] = (typeof(vpre[0])){ av, at.base, at.ptr, at.sname,
+                                                  type_size(g, at.base, at.ptr, at.sname) };
+        }
+
+        g->need_vtables = 1;
+        for (int k = 0; k < va_extra; k++) {
+            Node *arg = n->items[va_fixed + k];
+            int av = lower_expr(g, f, arg);
+            ExprType at = type_of(g, arg);
+            int boff = (int)va_base - k * 16;
+            int blob_a = ir_vreg(f);
+            ir_emit(f, IR_LOCAL_ADDR, blob_a, IR_NONE, IR_NONE)->imm = boff;
+
+            if (is_dyn(at.base, at.ptr)) {
+                IRInst *ds = ir_emit(f, IR_DYN_STORE, IR_NONE, blob_a, av);
+                ds->type = at.base; ds->ptr = at.ptr;
+                ds->name = strdup(trait);
+            } else if ((at.base == TYPE_STRUCT && at.ptr == 0) || is_i128(at.base, at.ptr)) {
+                IRInst *ds = ir_emit(f, IR_DYN_STORE, IR_NONE, blob_a, av);
+                ds->ptr = 1; ds->name = strdup(trait);
+                ds->sname = strdup(at.sname ? at.sname : datatype_name(at.base));
+            } else if (at.ptr >= 1) {
+                IRInst *ds = ir_emit(f, IR_DYN_STORE, IR_NONE, blob_a, av);
+                ds->ptr = 1; ds->name = strdup(trait);
+                ds->sname = strdup(at.base == TYPE_STRUCT && at.sname ? at.sname : datatype_name(at.base));
+            } else {
+                int voff = (int)va_base - (va_extra + k) * 16;
+                int spill_a = ir_vreg(f);
+                ir_emit(f, IR_LOCAL_ADDR, spill_a, IR_NONE, IR_NONE)->imm = voff;
+                IRInst *st = ir_emit(f, IR_STORE, IR_NONE, spill_a, av);
+                st->type = at.ptr > 0 ? TYPE_USIZE : at.base;
+                st->size = type_size(g, at.base, at.ptr, at.sname);
+                IRInst *ds = ir_emit(f, IR_DYN_STORE, IR_NONE, blob_a, spill_a);
+                ds->ptr = 1; ds->name = strdup(trait);
+                ds->sname = strdup(datatype_name(at.base));
+            }
+        }
+
+        int slice_v;
+        if (va_extra) {
+            slice_v = ir_vreg(f);
+            ir_emit(f, IR_LOCAL_ADDR, slice_v, IR_NONE, IR_NONE)->imm = (int)va_base;
+        } else {
+            slice_v = ir_vreg(f);
+            ir_emit(f, IR_IMM, slice_v, IR_NONE, IR_NONE)->imm = 0;
+        }
+        int count_v = ir_vreg(f);
+        ir_emit(f, IR_IMM, count_v, IR_NONE, IR_NONE)->imm = va_extra;
+        vpre[vnpre++] = (typeof(vpre[0])){ slice_v, TYPE_USIZE, 1, NULL, 8 };
+        vpre[vnpre++] = (typeof(vpre[0])){ count_v, TYPE_I64, 0, NULL, 8 };
+
+        int astart = ir_arg_start(f);
+        for (int i = 0; i < vnpre; i++)
+            ir_arg(f, vpre[i].vreg, vpre[i].type, vpre[i].ptr, vpre[i].sname, vpre[i].size);
+
         int dst = ir_vreg(f);
-        IRInst *io = emit_ioout(g, f, dst, n);
-        if (sret_addr != IR_NONE) io->a = sret_addr;
+        IRInst *ci = ir_emit(f, IR_CALL, dst, IR_NONE, IR_NONE);
+        char lbl[LABEL_MAX];
+        func_label_of(target, lbl);
+        ci->name = strdup(lbl);
+        ci->sig = target;
+        ci->arg_start = astart;
+        ci->nargs = vnpre;
+        ci->type = target->type;
+        ci->ptr = target->ptr;
         return dst;
     }
 
@@ -760,10 +946,16 @@ static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
         if (i + poff < sig->nitems) {
             Node *pp = sig->items[i + poff];
             ExprType pt = { pp->type, pp->ptr, pp->type_name, pp->sig, 0, 0 };
-            if (is_dyn(pp->type, pp->ptr) && !is_dyn(at.base, at.ptr)) {
-                IRInst *io = emit_ioout(g, f, ir_vreg(f), n);
-                if (sret_addr != IR_NONE) io->a = sret_addr;
-                return f->insts[f->ninsts - 1].dst;
+            if (is_dyn(pp->type, pp->ptr) && !is_dyn(at.base, at.ptr) && n->items[i]->int_val) {
+                g->need_vtables = 1;
+                int blob_addr = ir_vreg(f);
+                ir_emit(f, IR_LOCAL_ADDR, blob_addr, IR_NONE, IR_NONE)->imm = (int)n->items[i]->int_val;
+                IRInst *ds = ir_emit(f, IR_DYN_STORE, IR_NONE, blob_addr, av);
+                ds->ptr = 1;
+                ds->name = strdup(pp->type_name);
+                ds->sname = strdup(at.sname ? at.sname : datatype_name(at.base));
+                av = blob_addr;
+                at = (ExprType){ TYPE_DYN, 0, pp->type_name, NULL, 0, 0 };
             }
             av = coerce_num(g, f, av, at, pt);
             if (!indirect && target && (target->is_export || target->is_extern) &&
@@ -1636,7 +1828,7 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
 
     IRFunc *f = ir_func_new(lbl, fn);
 
-    /* per-function state setup (mirrors the top of gen_func in each backend) */
+    /* per-function state setup (mirrors the top of emit_ir_func in each backend) */
     g->cur_ns = fn->mod ? fn->mod : "";
     g->nlocals = 0;
     g->nvisible = 0;
@@ -1749,7 +1941,6 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
 
     /* store metadata the emitter needs */
     f->frame_size = frame;
-    f->nlocals_snap = g->nlocals;
     f->param_start = param_start;
     f->nparams = fn->nitems;
 

@@ -18,7 +18,8 @@
 static int has_side_effect(IROp op) {
     switch (op) {
     case IR_STORE: case IR_COPY:
-    case IR_CALL: case IR_ICALL: case IR_IOOUT:
+    case IR_CALL: case IR_ICALL:
+    case IR_ASM: case IR_ATOMIC:
     case IR_RET: case IR_BR: case IR_JMP:
     case IR_LABEL: case IR_LINE:
     case IR_I128_STORE: case IR_DYN_STORE:
@@ -304,6 +305,9 @@ void ir_opt_copy_prop(IRFunc *f) {
         /* substitute operands a, b */
         if (inst->a >= 0 && inst->a < nv) inst->a = alias[inst->a];
         if (inst->b >= 0 && inst->b < nv) inst->b = alias[inst->b];
+        if (inst->op == IR_ATOMIC && inst->atomic_op == ATOMIC_CAS &&
+            inst->label >= 0 && inst->label < nv)
+            inst->label = alias[inst->label];
 
         /* substitute call arguments */
         for (int k = 0; k < inst->nargs; k++) {
@@ -345,6 +349,9 @@ void ir_opt_dce(IRFunc *f) {
         IRInst *inst = &f->insts[i];
         if (inst->a >= 0 && inst->a < nv) uses[inst->a]++;
         if (inst->b >= 0 && inst->b < nv) uses[inst->b]++;
+        if (inst->op == IR_ATOMIC && inst->atomic_op == ATOMIC_CAS &&
+            inst->label >= 0 && inst->label < nv)
+            uses[inst->label]++;
     }
     for (int i = 0; i < f->nargs; i++)
         if (f->args[i].vreg >= 0 && f->args[i].vreg < nv)
@@ -402,7 +409,7 @@ void ir_opt_store_forward(IRFunc *f) {
         if (inst->op == IR_LABEL || inst->op == IR_BR ||
             inst->op == IR_JMP   || inst->op == IR_RET ||
             inst->op == IR_CALL  || inst->op == IR_ICALL ||
-            inst->op == IR_IOOUT ||
+            inst->op == IR_ASM || inst->op == IR_ATOMIC ||
             inst->op == IR_I128_STORE || inst->op == IR_I128_BINOP ||
             inst->op == IR_I128_UNOP  || inst->op == IR_I128_FROM  ||
             inst->op == IR_DYN_STORE) {

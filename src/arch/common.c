@@ -204,7 +204,7 @@ Field *find_field(StructInfo *s, const char *name) {
 
 /* If the callee expression is a "function pointer value" (variable/field of type TYPE_FUNC), return its signature.
  * If it is a direct function/method call (a function name, not a func-ptr value), return NULL.
- * Used to tell "indirect calls through a function pointer" apart from direct calls in both type_of and gen_call */
+ * Used to tell "indirect calls through a function pointer" apart from direct calls in type_of and lowering */
 Node *expr_func_sig(Gen *g, Node *callee) {
     if (!callee) return NULL;
     if (callee->kind == ND_IDENT) {
@@ -417,7 +417,7 @@ static void expand_struct(Gen *g, Node *base, const char *sname,
     if (!s) { buf_append(out, len, cap, "?"); return; }
     if (depth > 32) { buf_append(out, len, cap, "..."); return; }  /* guard against abnormally deep recursion */
     /* If base is a struct result from a function (ND_CALL), point at the reserved "temp slot" instead
-     * (members read from the same temp); otherwise each field would gen_call again -> repeated calls/wrong values */
+     * (members read from the same temp); otherwise each field access would re-evaluate the call */
     if (base->kind == ND_CALL && base->int_val) {
         Node *fr = node_new(ND_FRAMEREF, base->line);
         fr->int_val = base->int_val;
@@ -500,9 +500,6 @@ int mvs_overflow_checks = 0;
 
 /* debug line information (see common.h); main.c turns it on for -g */
 int mvs_debug_lines = 0;
-
-/* IR lowering path: on by default since 0.4.0; --no-ir falls back to the old AST walk */
-int mvs_use_ir = 1;
 
 /* One line directive per statement. The assembler turns these into a DWARF
  * line table, which is what lets gdb/lldb show .mvs source. Repeats of the
@@ -1046,7 +1043,7 @@ void collect_locals(Gen *g, Node *n, int *frame) {
  * must resolve to the declaration visible AT THAT POINT. (An all-visible
  * shortcut here once made `v` in an early block resolve to a later same-named
  * declaration, so an i128 operation got NO scratch slot and scribbled over
- * the frame at run time.) The visibility rules below mirror gen_stmt exactly:
+ * the frame at run time.) The visibility rules below mirror the IR lowering:
  * blocks open/close scopes, a declaration becomes visible AFTER its
  * initializer, and for-init variables are scoped to the loop. */
 void collect_struct_temps(Gen *g, Node *n, int *frame) {

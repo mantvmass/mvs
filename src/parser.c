@@ -291,7 +291,7 @@ static Node *parse_postfix(Parser *p) {
     for (;;) {
         if (match(p, TK_DOT) || match(p, TK_COLONCOLON)) {
             /* Member access a.b (instance) or associated function Type::func.
-             * Same AST shape (ND_MEMBER); gen_call disambiguates by the base's kind at resolve time:
+             * Same AST shape (ND_MEMBER); lowering disambiguates by the base's kind at resolve time:
              * base is a struct variable -> method (inject self), base is a type/module name -> function in that ns */
             Node *m = node_new(ND_MEMBER, p->cur.line);
             m->operand = node;

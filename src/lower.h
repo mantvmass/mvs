@@ -15,7 +15,7 @@
 /* Lower one function from AST to IR.
  * gen must be fully populated (structs laid out, functions registered,
  * globals collected). The per-function state (locals, visibility, frame)
- * is set up inside this call, matching what gen_func does today.
+ * is set up inside this call, matching what each backend's emit_ir_func expects.
  * program is needed for main's global initializers. */
 IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool);
 

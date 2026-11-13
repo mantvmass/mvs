@@ -8,7 +8,7 @@
  *
  * The lowering pass (lower.c) walks the AST once, producing an IRFunc per
  * function. Each backend then translates that IRFunc to assembly. This
- * replaces the per-backend gen_expr/gen_stmt duplication.
+ * is the only code path (there is no AST-walk fallback).
  */
 #ifndef MVS_IR_H
 #define MVS_IR_H
@@ -28,6 +28,11 @@ typedef enum {
     CMP_FLT, CMP_FGT, CMP_FLE, CMP_FGE,   /* float (unordered compare) */
     CMP_FEQ, CMP_FNE
 } IRCmpOp;
+
+/* Atomic sub-operations for IR_ATOMIC */
+typedef enum {
+    ATOMIC_LOAD, ATOMIC_STORE, ATOMIC_ADD, ATOMIC_SUB, ATOMIC_CAS, ATOMIC_XCHG
+} IRAtomicOp;
 
 /* 128-bit arithmetic sub-operations */
 typedef enum {
@@ -105,10 +110,12 @@ typedef enum {
     IR_CALL,        /* dst = call name(args...) [direct call] */
     IR_ICALL,       /* dst = call a(args...) [indirect through vreg] */
 
-    /* --- io.out intrinsic (stays high-level for now) --- */
-    IR_IOOUT,       /* the io.out compiler intrinsic; carries the AST node
-                     * in the node field so the backend can handle it the
-                     * same way it does today. Lowered to IR_CALLs later. */
+    /* --- intrinsics that stay high-level in the IR --- */
+    IR_ASM,         /* inline assembly: node->items[] are string literals,
+                     * each emitted verbatim as one line of assembly */
+    IR_ATOMIC,      /* atomic operation: atomic_op = sub-op, a = ptr vreg,
+                     * b = val vreg (store/add/sub/xchg/cas:desired),
+                     * label = expected vreg (cas only), dst = old value */
 
     /* --- 128-bit integer (address-as-value, 16-byte blobs) --- */
     IR_I128_BINOP,  /* dst_addr = op(a_addr, b_addr); sub-op in i128_op */
@@ -162,6 +169,7 @@ typedef struct {
 
     IRCmpOp  cmp;       /* comparison sub-op (for IR_CMP/IR_FCMP/IR_I128_CMP) */
     IR128Op  i128_op;   /* 128-bit arithmetic sub-op */
+    IRAtomicOp atomic_op; /* atomic sub-op (for IR_ATOMIC) */
 
     /* control flow */
     int      label;     /* label number (for IR_LABEL, IR_JMP, IR_BR true) */
@@ -178,14 +186,8 @@ typedef struct {
      * return type, parameter types for ABI decisions in the backend) */
     Node    *sig;
 
-    /* for IR_IOOUT: the original AST call node, so the backend can
-     * handle the intrinsic using its existing code path */
+    /* for IR_ASM / IR_ATOMIC: the original AST node */
     Node    *node;
-
-    /* for IR_IOOUT: snapshot of g->visible[] at lowering time, so the
-     * emitter restores exactly the right scope (not all locals) */
-    int     *vis;
-    int      nvis;
 
     /* source location (for IR_LINE and for error reports) */
     int      line;
@@ -214,7 +216,6 @@ typedef struct {
                              * extends this by next_vreg * 8 for the vreg spill area */
     int      n_i128_temps;  /* 16-byte temporary slots for i128 operations; the emitter
                              * adds n_i128_temps * 16 beyond the vreg area */
-    int      nlocals_snap;  /* g->nlocals after lower_func setup (for emitter's visible fixup) */
     int      param_start;   /* index of first parameter in g->locals[] */
     int      nparams;       /* number of parameters */
 } IRFunc;
