@@ -42,7 +42,7 @@ EXEMPT = {
     "panic.default_handler": "internal default; not user-facing",
     "panic.vga_write": "writes to VGA hardware memory",
     "volatile.wait_bits32": "spin-polls a hardware register",
-    "io.read_line": "needs stdin from a terminal",
+    "io.in": "needs stdin from a terminal",
     "string.is_ws": "internal helper, not user-facing",
     "fetch.do_fetch": "internal; called by FetchRequest.send(), needs a network peer",
     "vec.vec_eq": "internal dispatch; called by vec_contains/vec_index_of generics",

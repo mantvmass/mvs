@@ -6,7 +6,7 @@
  *     io.out("hello");                       // print a message (newline appended)
  *     io.out("number = {}", 42);             // Rust-style interpolation with {}
  *     io.print("no newline");                // raw print, no newline
- *     let line: str = io.read_line("prompt> ");  // read a whole line
+ *     let line: str = io.in("prompt> ");          // read a whole line
  *     io.eprint("error message");            // print to stderr
  *
  * io.out is a library function using the Display trait (like fmt.outf).
@@ -19,7 +19,6 @@ use std::string::String;
 
 extern func printf(fmt: str) -> i32;
 extern func fprintf(stream: *u8, fmt: str) -> i32;
-extern func scanf(fmt: str) -> i32;
 extern func fgets(buf: *u8, n: i32, stream: *u8) -> *u8;
 extern func malloc(n: usize) -> *u8;
 extern func strlen(s: str) -> usize;
@@ -67,17 +66,9 @@ func eprintln(s: str) -> void {
     fprintf(get_stderr(), "%s\n", s);
 }
 
-// show a prompt, then read one word from the user (no whitespace); returns it as a string
-func in(prompt: str) -> str {
-    printf("%s", prompt);
-    let buf: *u8 = malloc(256);
-    scanf("%255s", buf);
-    return buf;
-}
-
 // show a prompt, read a whole line (up to ~4095 chars, newline stripped);
 // returns "" on EOF or error
-func read_line(prompt: str) -> str {
+func in(prompt: str) -> str {
     printf("%s", prompt);
     let buf: *u8 = malloc(4096);
     let r: *u8 = fgets(buf, 4096, get_stdin());
