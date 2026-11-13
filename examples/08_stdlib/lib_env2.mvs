@@ -1,0 +1,20 @@
+import { io, env } from "std";
+import { Vec } from "std/vec";
+import { String } from "std/string";
+
+func main() -> i8 {
+    let a: Vec<String> = env.args();
+    io.out("argc: {}", a.len());
+    if (a.len() > 0) {
+        let first: String = a.get(0);
+        io.out("argv[0]: {}", first.as_str());
+    }
+    let i: usize = 0;
+    while (i < a.len()) {
+        let tmp: String = a.get(i);
+        tmp.drop();
+        i = i + 1;
+    }
+    a.drop();
+    return 0;
+}

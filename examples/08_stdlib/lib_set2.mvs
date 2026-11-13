@@ -1,0 +1,28 @@
+import { io } from "std";
+import { HashSet } from "std/set";
+import { Vec } from "std/vec";
+
+func main() -> i8 {
+    let s: HashSet<i64> = HashSet<i64>::new();
+    s.insert(10);
+    s.insert(20);
+    s.insert(30);
+    s.insert(20);
+
+    let v: Vec<i64> = s.to_vec();
+    io.out("set len: {}", s.len());
+    io.out("vec len: {}", v.len());
+
+    // sum to verify all elements are there
+    let sum: i64 = 0;
+    let i: usize = 0;
+    while (i < v.len()) {
+        sum = sum + v.get(i);
+        i = i + 1;
+    }
+    io.out("sum: {}", sum);
+
+    v.drop();
+    s.drop();
+    return 0;
+}

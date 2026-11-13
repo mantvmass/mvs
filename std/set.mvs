@@ -18,6 +18,7 @@
  * add a pair to support another type). Grows by doubling at 70% load.
  * remove() uses tombstone deletion (same as HashMap).
  */
+import { Vec } from "std/vec";
 
 extern func realloc(p: *u8, n: usize) -> *u8;
 extern func free(p: *u8) -> void;
@@ -142,6 +143,17 @@ impl HashSet<T> {
             i = i + 1;
         }
         self.len = 0;
+    }
+
+    // collect all elements into a Vec
+    func to_vec(self: *HashSet<T>) -> Vec<T> {
+        let out: Vec<T> = Vec<T>::new();
+        let i: usize = 0;
+        while (i < self.cap) {
+            if (self.state[i] == 1) { out.push(self.keys[i]); }
+            i = i + 1;
+        }
+        return out;
     }
 
     func drop(self: *HashSet<T>) -> void {

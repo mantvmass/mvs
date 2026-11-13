@@ -21,6 +21,16 @@ extern func free(p: *u8) -> void;
 extern func printf(fmt: str) -> i32;
 extern func exit(code: i32) -> void;
 extern func memmove(dst: *u8, src: *u8, n: usize) -> *u8;
+extern func strcmp(a: str, b: str) -> i32;
+
+func vec_eq(a: i64, b: i64) -> bool { return a == b; }
+func vec_eq(a: u64, b: u64) -> bool { return a == b; }
+func vec_eq(a: i32, b: i32) -> bool { return a == b; }
+func vec_eq(a: u8, b: u8) -> bool { return a == b; }
+func vec_eq(a: f64, b: f64) -> bool { return a == b; }
+func vec_eq(a: bool, b: bool) -> bool { return a == b; }
+func vec_eq(a: str, b: str) -> bool { return strcmp(a, b) == 0; }
+func vec_eq(a: usize, b: usize) -> bool { return a == b; }
 
 struct Vec<T> {
     data: *T;
@@ -207,4 +217,25 @@ impl Vec<T> {
         self.len = 0;
         self.cap = 0;
     }
+}
+
+// does the vec contain a value equal to v? (generic free function,
+// only instantiated when called, so Vec<Struct> without vec_eq is fine)
+func vec_contains<T>(v: *Vec<T>, val: T) -> bool {
+    let i: usize = 0;
+    while (i < v.len) {
+        if (vec_eq(v.data[i], val)) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// index of the first element equal to val, or -1
+func vec_index_of<T>(v: *Vec<T>, val: T) -> i64 {
+    let i: usize = 0;
+    while (i < v.len) {
+        if (vec_eq(v.data[i], val)) { return i as i64; }
+        i = i + 1;
+    }
+    return 0 - 1;
 }

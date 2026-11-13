@@ -1,0 +1,7 @@
+dirname: /home/user
+basename: file.txt
+extension: gz
+stem: archive.tar
+join: /home/user/docs
+is_absolute /usr: 1
+is_absolute rel: 0

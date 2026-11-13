@@ -1,0 +1,7 @@
+split count: 3
+  [0] = apple
+  [1] = banana
+  [2] = cherry
+joined: apple | banana | cherry
+:: split count: 3
+from_bytes(3): HEL

@@ -1,0 +1,25 @@
+import { io, vec } from "std";
+import { Vec } from "std/vec";
+
+func main() -> i8 {
+    let v: Vec<i64> = Vec<i64>::new();
+    v.push(10);
+    v.push(20);
+    v.push(30);
+
+    io.out("contains 20: {}", vec.vec_contains(&v, 20));
+    io.out("contains 99: {}", vec.vec_contains(&v, 99));
+    io.out("index_of 30: {}", vec.vec_index_of(&v, 30));
+    io.out("index_of 99: {}", vec.vec_index_of(&v, 99));
+
+    // str vec
+    let sv: Vec<str> = Vec<str>::new();
+    sv.push("hello");
+    sv.push("world");
+    io.out("contains hello: {}", vec.vec_contains(&sv, "hello"));
+    io.out("contains foo: {}", vec.vec_contains(&sv, "foo"));
+    sv.drop();
+
+    v.drop();
+    return 0;
+}

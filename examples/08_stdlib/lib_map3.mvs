@@ -1,0 +1,28 @@
+import { io } from "std";
+import { HashMap } from "std/map";
+import { Vec } from "std/vec";
+
+func main() -> i8 {
+    let m: HashMap<str, i64> = HashMap<str, i64>::new();
+    m.insert("x", 10);
+    m.insert("y", 20);
+    m.insert("z", 30);
+
+    let ks: Vec<str> = m.keys();
+    io.out("keys count: {}", ks.len());
+    ks.drop();
+
+    let vs: Vec<i64> = m.values();
+    io.out("values count: {}", vs.len());
+    let sum: i64 = 0;
+    let i: usize = 0;
+    while (i < vs.len()) {
+        sum = sum + vs.get(i);
+        i = i + 1;
+    }
+    io.out("values sum: {}", sum);
+    vs.drop();
+
+    m.drop();
+    return 0;
+}

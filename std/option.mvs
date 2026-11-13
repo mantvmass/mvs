@@ -46,6 +46,18 @@ impl Option<T> {
         if (self.__tag == 1) { return self.v1_0; }
         return fallback;
     }
+
+    // if Some, return self; if None, call f and return its result
+    func or_else(self: *Option<T>, f: func() -> Option<T>) -> Option<T> {
+        if (self.__tag == 1) { return *self; }
+        return f();
+    }
+
+    // if Some, return the value; if None, call f and return its result
+    func unwrap_or_else(self: *Option<T>, f: func() -> T) -> T {
+        if (self.__tag == 1) { return self.v1_0; }
+        return f();
+    }
 }
 
 // a present value (T inferred from the argument)

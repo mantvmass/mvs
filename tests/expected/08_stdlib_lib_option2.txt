@@ -1,0 +1,4 @@
+none.unwrap_or_else: 42
+some.unwrap_or_else: 7
+none.or_else: 99
+some.or_else: 5

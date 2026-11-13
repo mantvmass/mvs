@@ -1,0 +1,235 @@
+/*
+ * std/fetch.mvs - HTTP client library
+ *
+ * Usage:
+ *     import { fetch } from "std";
+ *
+ *     let resp: FetchResponse = fetch.get("http://example.com/api");
+ *     if (resp.ok) {
+ *         io.out("status: {}", resp.status);
+ *         io.out("body: {}", resp.body.as_str());
+ *     }
+ *     resp.drop();
+ *
+ *     // POST with body
+ *     let r: FetchResponse = fetch.post("http://api.test/data", "{\"key\":1}");
+ *     r.drop();
+ *
+ *     // Request builder for custom headers
+ *     let r: FetchResponse = FetchRequest::new("POST", "http://api.test/data")
+ *         .header("Authorization", "Bearer token123")
+ *         .header("Content-Type", "application/json")
+ *         .body("{\"name\": \"test\"}")
+ *         .send();
+ *     r.drop();
+ */
+
+import { String } from "std/string";
+import { TcpSocket } from "std/net";
+import { Option, Some, None } from "std/option";
+
+extern func strlen(s: str) -> usize;
+extern func malloc(n: usize) -> *u8;
+extern func free(p: *u8) -> void;
+extern func memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+struct FetchResponse {
+    status: i64;
+    body: String;
+    raw: String;
+    ok: bool;
+}
+
+impl FetchResponse {
+    // look up a response header by name (case insensitive); caller owns the returned str
+    func header(self: *FetchResponse, name: str) -> Option<str> {
+        let raw: str = self.raw.as_str();
+        let rn: usize = self.raw.len();
+        let rp: *u8 = raw as *u8;
+        let kn: usize = strlen(name);
+        let kp: *u8 = name as *u8;
+        let i: usize = 0;
+        while (i < rn) {
+            if (rp[i] == 10 && i + kn + 1 < rn) {
+                let s: usize = i + 1;
+                let k: usize = 0;
+                let hit: bool = true;
+                while (k < kn && hit) {
+                    let a: u8 = rp[s + k];
+                    if (a >= 65 && a <= 90) { a = a + 32; }
+                    let b: u8 = kp[k];
+                    if (b >= 65 && b <= 90) { b = b + 32; }
+                    if (a != b) { hit = false; }
+                    k = k + 1;
+                }
+                if (hit && s + kn < rn && rp[s + kn] == 58) {
+                    let v: usize = s + kn + 1;
+                    while (v < rn && (rp[v] == 32 || rp[v] == 9)) { v = v + 1; }
+                    let e: usize = v;
+                    while (e < rn && rp[e] != 13 && rp[e] != 10) { e = e + 1; }
+                    let buf: *u8 = malloc(e - v + 1);
+                    memcpy(buf, rp + v, e - v);
+                    buf[e - v] = 0;
+                    return Some(buf as str);
+                }
+            }
+            i = i + 1;
+        }
+        return None();
+    }
+
+    func drop(self: *FetchResponse) -> void {
+        self.body.drop();
+        self.raw.drop();
+    }
+}
+
+// request builder for custom headers and body
+struct FetchRequest {
+    method: str;
+    url: str;
+    body_str: str;
+    headers: String;
+}
+
+impl FetchRequest {
+    func new(method: str, url: str) -> FetchRequest {
+        return FetchRequest {
+            method: method,
+            url: url,
+            body_str: "",
+            headers: String::new(),
+        };
+    }
+
+    func header(self: *FetchRequest, name: str, value: str) -> FetchRequest {
+        self.headers.push_str(name);
+        self.headers.push_str(": ");
+        self.headers.push_str(value);
+        self.headers.push_str("\r\n");
+        return *self;
+    }
+
+    func body(self: *FetchRequest, b: str) -> FetchRequest {
+        self.body_str = b;
+        return *self;
+    }
+
+    func send(self: *FetchRequest) -> FetchResponse {
+        return do_fetch(self.method, self.url, self.body_str, self.headers.as_str());
+    }
+}
+
+// internal: parse host, port, path from a URL
+func do_fetch(method: str, url: str, body: str, extra_headers: str) -> FetchResponse {
+    let p: *u8 = url as *u8;
+    let n: usize = strlen(url);
+    let start: usize = 0;
+    if (n > 7 && p[0] == 104 && p[1] == 116 && p[2] == 116 && p[3] == 112 &&
+        p[4] == 58 && p[5] == 47 && p[6] == 47) {
+        start = 7;
+    }
+    let i: usize = start;
+    while (i < n && p[i] != 58 && p[i] != 47) { i = i + 1; }
+    let host: String = String::from_bytes(p + start, i - start);
+    let port: u16 = 80;
+    if (i < n && p[i] == 58) {
+        i = i + 1;
+        let pv: u64 = 0;
+        while (i < n && p[i] >= 48 && p[i] <= 57) {
+            pv = pv * 10 + (p[i] - 48) as u64;
+            i = i + 1;
+        }
+        port = pv as u16;
+    }
+    let path: String = String::from("/");
+    if (i < n && p[i] == 47) {
+        path.drop();
+        path = String::from_bytes(p + i, n - i);
+    }
+
+    let sock: TcpSocket = TcpSocket::connect(host.as_str(), port);
+    let req: String = String::new();
+    req.push_str(method);
+    req.push_str(" ");
+    req.push_str(path.as_str());
+    req.push_str(" HTTP/1.1\r\nHost: ");
+    req.push_str(host.as_str());
+    req.push_str("\r\n");
+    if (strlen(extra_headers) > 0) {
+        req.push_str(extra_headers);
+    }
+    req.push_str("Content-Length: ");
+    let blen: String = String::from_uint(strlen(body) as u64);
+    req.push_str(blen.as_str());
+    blen.drop();
+    req.push_str("\r\nConnection: close\r\n\r\n");
+    req.push_str(body);
+    sock.send(req.as_str());
+    req.drop();
+    host.drop();
+    path.drop();
+
+    let raw_str: str = sock.recv();
+    sock.close();
+    let raw: String = String::from(raw_str);
+    free(raw_str as *u8);
+
+    let rp: *u8 = raw.as_ptr();
+    let rn: usize = raw.len();
+
+    // parse status code
+    let status: i64 = 0 - 1;
+    let si: usize = 0;
+    while (si < rn && rp[si] != 32) { si = si + 1; }
+    if (si < rn) {
+        si = si + 1;
+        let sv: i64 = 0;
+        let any: bool = false;
+        while (si < rn && rp[si] >= 48 && rp[si] <= 57) {
+            sv = sv * 10 + (rp[si] - 48) as i64;
+            any = true;
+            si = si + 1;
+        }
+        if (any) { status = sv; }
+    }
+
+    // parse body (after \r\n\r\n)
+    let body_out: String = String::new();
+    let bi: usize = 0;
+    let found: bool = false;
+    while (bi + 3 < rn && !found) {
+        if (rp[bi] == 13 && rp[bi + 1] == 10 && rp[bi + 2] == 13 && rp[bi + 3] == 10) {
+            found = true;
+            let bstart: usize = bi + 4;
+            if (bstart < rn) {
+                body_out.drop();
+                body_out = String::from_bytes(rp + bstart, rn - bstart);
+            }
+        }
+        bi = bi + 1;
+    }
+
+    return FetchResponse {
+        status: status,
+        body: body_out,
+        raw: raw,
+        ok: status >= 200 && status < 300,
+    };
+}
+
+func get(url: str) -> FetchResponse {
+    return do_fetch("GET", url, "", "");
+}
+
+func post(url: str, body: str) -> FetchResponse {
+    return do_fetch("POST", url, body, "Content-Type: application/json\r\n");
+}
+
+func put(url: str, body: str) -> FetchResponse {
+    return do_fetch("PUT", url, body, "Content-Type: application/json\r\n");
+}
+
+func delete(url: str) -> FetchResponse {
+    return do_fetch("DELETE", url, "", "");
+}

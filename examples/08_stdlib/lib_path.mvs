@@ -1,0 +1,30 @@
+import { io } from "std";
+import { String } from "std/string";
+import { path } from "std";
+
+func show(label: str, s: *String) -> void {
+    io.out("{}: {}", label, s.as_str());
+    s.drop();
+}
+
+func main() -> i8 {
+    let d: String = path.dirname("/home/user/file.txt");
+    show("dirname", &d);
+
+    let b: String = path.basename("/home/user/file.txt");
+    show("basename", &b);
+
+    let e: String = path.extension("archive.tar.gz");
+    show("extension", &e);
+
+    let s: String = path.stem("archive.tar.gz");
+    show("stem", &s);
+
+    let j: String = path.join("/home/user", "docs");
+    show("join", &j);
+
+    io.out("is_absolute /usr: {}", path.is_absolute("/usr"));
+    io.out("is_absolute rel: {}", path.is_absolute("rel/path"));
+
+    return 0;
+}

@@ -19,6 +19,7 @@
  * Grows by doubling at 70% load. remove() uses tombstone deletion.
  */
 import { Option, Some, None } from "std/option";
+import { Vec } from "std/vec";
 
 extern func realloc(p: *u8, n: usize) -> *u8;
 extern func free(p: *u8) -> void;
@@ -164,6 +165,28 @@ impl HashMap<K, V> {
             i = i + 1;
         }
         self.len = 0;
+    }
+
+    // collect all keys into a Vec
+    func keys(self: *HashMap<K, V>) -> Vec<K> {
+        let out: Vec<K> = Vec<K>::new();
+        let i: usize = 0;
+        while (i < self.cap) {
+            if (self.state[i] == 1) { out.push(self.keys[i]); }
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // collect all values into a Vec
+    func values(self: *HashMap<K, V>) -> Vec<V> {
+        let out: Vec<V> = Vec<V>::new();
+        let i: usize = 0;
+        while (i < self.cap) {
+            if (self.state[i] == 1) { out.push(self.vals[i]); }
+            i = i + 1;
+        }
+        return out;
     }
 
     func drop(self: *HashMap<K, V>) -> void {

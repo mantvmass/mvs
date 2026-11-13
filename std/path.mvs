@@ -1,0 +1,94 @@
+/*
+ * std/path.mvs - path manipulation utilities
+ *
+ * Usage:
+ *     import { path } from "std";
+ *     let dir: String = path.dirname("/home/user/file.txt");   // "/home/user"
+ *     let base: String = path.basename("/home/user/file.txt"); // "file.txt"
+ *     let ext: String = path.extension("file.txt");            // "txt"
+ *     let full: String = path.join("/home/user", "file.txt");  // "/home/user/file.txt"
+ */
+
+extern func strlen(s: str) -> usize;
+extern func malloc(n: usize) -> *u8;
+extern func memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+
+import { String } from "std/string";
+
+func is_sep(c: u8) -> bool {
+    return c == 47 || c == 92;
+}
+
+// join two path components with a forward slash
+func join(a: str, b: str) -> String {
+    let out: String = String::from(a);
+    let alen: usize = strlen(a);
+    if (alen > 0 && !is_sep((a as *u8)[alen - 1])) {
+        out.push_char(47 as char);
+    }
+    out.push_str(b);
+    return out;
+}
+
+// the directory part: "/home/user/file.txt" -> "/home/user"
+func dirname(p: str) -> String {
+    let n: usize = strlen(p);
+    if (n == 0) { return String::from("."); }
+    let i: i64 = (n as i64) - 1;
+    while (i >= 0 && !is_sep((p as *u8)[i as usize])) { i = i - 1; }
+    if (i < 0) { return String::from("."); }
+    if (i == 0) { return String::from("/"); }
+    return String::from_bytes(p as *u8, i as usize);
+}
+
+// the file name: "/home/user/file.txt" -> "file.txt"
+func basename(p: str) -> String {
+    let n: usize = strlen(p);
+    if (n == 0) { return String::from(""); }
+    let i: i64 = (n as i64) - 1;
+    while (i >= 0 && !is_sep((p as *u8)[i as usize])) { i = i - 1; }
+    let start: usize = (i + 1) as usize;
+    return String::from(((p as *u8) + start) as str);
+}
+
+// the extension without the dot: "file.txt" -> "txt", "file" -> ""
+func extension(p: str) -> String {
+    let n: usize = strlen(p);
+    let i: i64 = (n as i64) - 1;
+    while (i >= 0) {
+        let c: u8 = (p as *u8)[i as usize];
+        if (c == 46) {
+            return String::from(((p as *u8) + (i as usize) + 1) as str);
+        }
+        if (is_sep(c)) { return String::from(""); }
+        i = i - 1;
+    }
+    return String::from("");
+}
+
+// the file name without extension: "file.txt" -> "file"
+func stem(p: str) -> String {
+    let base: String = basename(p);
+    let n: usize = base.len();
+    let bp: *u8 = base.as_ptr();
+    let i: i64 = (n as i64) - 1;
+    while (i > 0) {
+        if (bp[i as usize] == 46) {
+            let result: String = String::from_bytes(bp, i as usize);
+            base.drop();
+            return result;
+        }
+        i = i - 1;
+    }
+    return base;
+}
+
+// is the path absolute?
+func is_absolute(p: str) -> bool {
+    let n: usize = strlen(p);
+    if (n == 0) { return false; }
+    let pp: *u8 = p as *u8;
+    if (pp[0] == 47) { return true; }
+    if (n >= 3 && pp[1] == 58 && is_sep(pp[2])) { return true; }
+    return false;
+}

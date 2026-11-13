@@ -1,0 +1,51 @@
+import { io, string } from "std";
+import { String } from "std/string";
+import { Vec } from "std/vec";
+
+func main() -> i8 {
+    // split
+    let csv: String = String::from("apple,banana,cherry");
+    let parts: Vec<String> = string.split(&csv, ",");
+    io.out("split count: {}", parts.len());
+    let p0: String = parts.get(0);
+    let p1: String = parts.get(1);
+    let p2: String = parts.get(2);
+    io.out("  [0] = {}", p0.as_str());
+    io.out("  [1] = {}", p1.as_str());
+    io.out("  [2] = {}", p2.as_str());
+
+    // join
+    let joined: String = string.join(&parts, " | ");
+    io.out("joined: {}", joined.as_str());
+    joined.drop();
+
+    // split with multi-char delimiter
+    let line: String = String::from("one::two::three");
+    let segs: Vec<String> = string.split(&line, "::");
+    io.out(":: split count: {}", segs.len());
+
+    // from_bytes
+    let raw: *u8 = "HELLO" as *u8;
+    let s: String = String::from_bytes(raw, 3);
+    io.out("from_bytes(3): {}", s.as_str());
+    s.drop();
+
+    // cleanup
+    let i: usize = 0;
+    while (i < parts.len()) {
+        let tmp: String = parts.get(i);
+        tmp.drop();
+        i = i + 1;
+    }
+    parts.drop();
+    csv.drop();
+    i = 0;
+    while (i < segs.len()) {
+        let tmp: String = segs.get(i);
+        tmp.drop();
+        i = i + 1;
+    }
+    segs.drop();
+    line.drop();
+    return 0;
+}

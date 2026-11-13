@@ -66,7 +66,10 @@ EXAMPLES = examples/demo \
            examples/08_stdlib/lib_map2 examples/08_stdlib/lib_sorted_map \
            examples/08_stdlib/lib_test \
            examples/08_stdlib/atomics examples/08_stdlib/channels \
-           examples/08_stdlib/lib_set examples/08_stdlib/scoped_join \
+           examples/08_stdlib/lib_set examples/08_stdlib/lib_set2 examples/08_stdlib/scoped_join \
+           examples/08_stdlib/lib_string2 examples/08_stdlib/lib_vec3 \
+           examples/08_stdlib/lib_map3 examples/08_stdlib/lib_option2 \
+           examples/08_stdlib/lib_path examples/08_stdlib/lib_env2 \
            examples/08_stdlib/net_client examples/08_stdlib/net_server examples/08_stdlib/net_loop \
            examples/10_json/main examples/11_vm/main examples/12_http/main \
            examples/13_pipeline/main \

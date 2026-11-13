@@ -16,6 +16,8 @@
  *       malloc/free) and is not used in --nostd mode.
  */
 
+import { Vec } from "std/vec";
+
 // foreign functions from the C runtime
 extern func malloc(n: usize) -> *u8;
 extern func realloc(p: *u8, n: usize) -> *u8;
@@ -65,6 +67,13 @@ impl String {
         let buf: *u8 = malloc(32);
         sprintf(buf, "%llu", v);
         return String { data: buf, len: strlen(buf), cap: 32 };
+    }
+
+    func from_bytes(data: *u8, n: usize) -> String {
+        let buf: *u8 = malloc(n + 1);
+        memcpy(buf, data, n);
+        buf[n] = 0;
+        return String { data: buf, len: n, cap: n + 1 };
     }
 
     func from_float(v: f64) -> String {
@@ -329,6 +338,50 @@ impl String {
     }
 
     func drop(self: *String) -> void { free(self.data); }
+}
+
+// split a String by delimiter into a Vec of Strings
+func split(s: *String, delim: str) -> Vec<String> {
+    let out: Vec<String> = Vec<String>::new();
+    let dlen: usize = strlen(delim);
+    if (dlen == 0) {
+        out.push(s.clone());
+        return out;
+    }
+    let dp: *u8 = delim;
+    let start: usize = 0;
+    let i: usize = 0;
+    while (i + dlen <= s.len) {
+        let j: usize = 0;
+        while (j < dlen && s.data[i + j] == dp[j]) { j = j + 1; }
+        if (j == dlen) {
+            out.push(s.substring(start, i - start));
+            i = i + dlen;
+            start = i;
+        } else {
+            i = i + 1;
+        }
+    }
+    out.push(s.substring(start, s.len - start));
+    return out;
+}
+
+// join a Vec of Strings with a separator
+func join(parts: *Vec<String>, sep: str) -> String {
+    let out: String = String::new();
+    let i: usize = 0;
+    while (i < parts.len()) {
+        if (i > 0) { out.push_str(sep); }
+        let part: String = parts.get(i);
+        out.push_str(part.as_str());
+        i = i + 1;
+    }
+    return out;
+}
+
+// vec_eq overload for String (needed when Vec<String>.contains/index_of is instantiated)
+func vec_eq(a: String, b: String) -> bool {
+    return strcmp(a.as_str(), b.as_str()) == 0;
 }
 
 // helper: is the byte ASCII whitespace?

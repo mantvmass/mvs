@@ -1,0 +1,2 @@
+argc: 1
+argv[0]: examples\08_stdlib\lib_env2.exe

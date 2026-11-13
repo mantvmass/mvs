@@ -7,7 +7,11 @@
  *     fs.write("out.txt", "hello");
  *     let s: str = fs.read("out.txt");
  *     if (fs.exists("out.txt")) { fs.remove("out.txt"); }
+ *
+ *     let entries: Vec<String> = fs.read_dir(".");
  */
+import { Vec } from "std/vec";
+import { String } from "std/string";
 
 extern func fopen(path: str, mode: str) -> *u8;
 extern func fputs(s: str, stream: *u8) -> i32;
@@ -178,3 +182,63 @@ func read_line(path: str) -> str {
 }
 
 extern func fgets(buf: *u8, n: i32, stream: *u8) -> *u8;
+
+// --- read_dir: list file names in a directory ---
+
+@compile(target_os = "linux")
+extern func opendir(name: str) -> *u8;
+@compile(target_os = "linux")
+extern func readdir(dir: *u8) -> *u8;
+@compile(target_os = "linux")
+extern func closedir(dir: *u8) -> i32;
+
+@compile(target_os = "linux")
+func read_dir(path: str) -> Vec<String> {
+    let out: Vec<String> = Vec<String>::new();
+    let d: *u8 = opendir(path);
+    if (d == 0) { return out; }
+    let ent: *u8 = readdir(d);
+    while (ent != 0) {
+        let name: str = (ent + 19) as str;
+        let np: *u8 = name as *u8;
+        let skip: bool = np[0] == 46 && (np[1] == 0 || (np[1] == 46 && np[2] == 0));
+        if (!skip) {
+            out.push(String::from(name));
+        }
+        ent = readdir(d);
+    }
+    closedir(d);
+    return out;
+}
+
+@compile(target_os = "windows")
+extern func FindFirstFileA(pattern: str, data: *u8) -> *u8;
+@compile(target_os = "windows")
+extern func FindNextFileA(handle: *u8, data: *u8) -> i32;
+@compile(target_os = "windows")
+extern func FindClose(handle: *u8) -> i32;
+
+@compile(target_os = "windows")
+func read_dir(path: str) -> Vec<String> {
+    let out: Vec<String> = Vec<String>::new();
+    let pattern: String = String::from(path);
+    pattern.push_str("\\*");
+    let buf: *u8 = malloc(320);
+    let h: *u8 = FindFirstFileA(pattern.as_str(), buf);
+    pattern.drop();
+    let invalid: *u8 = (0 - 1) as *u8;
+    if (h == invalid) { free(buf); return out; }
+    let more: bool = true;
+    while (more) {
+        let name: str = (buf + 44) as str;
+        let np: *u8 = name as *u8;
+        let skip: bool = np[0] == 46 && (np[1] == 0 || (np[1] == 46 && np[2] == 0));
+        if (!skip) {
+            out.push(String::from(name));
+        }
+        if (FindNextFileA(h, buf) == 0) { more = false; }
+    }
+    FindClose(h);
+    free(buf);
+    return out;
+}

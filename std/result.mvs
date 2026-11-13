@@ -53,6 +53,18 @@ impl Result<T, E> {
         if (self.__tag == 0) { return self.v0_0; }
         return fallback;
     }
+
+    // if Ok, return self; if Err, call f with the error and return its result
+    func or_else(self: *Result<T, E>, f: func(E) -> Result<T, E>) -> Result<T, E> {
+        if (self.__tag == 0) { return *self; }
+        return f(self.v1_0);
+    }
+
+    // if Ok, return the value; if Err, call f with the error
+    func unwrap_or_else(self: *Result<T, E>, f: func(E) -> T) -> T {
+        if (self.__tag == 0) { return self.v0_0; }
+        return f(self.v1_0);
+    }
 }
 
 // a success (both types explicit: Ok<i64, str>(v))
