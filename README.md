@@ -26,13 +26,13 @@ struct Point { x: f64; y: f64; }
 
 impl Point {
     func len(self: *Point) -> f64 {
-        return math.sqrt(self.x * self.x + self.y * self.y);
+        return math::sqrt(self.x * self.x + self.y * self.y);
     }
 }
 
 func main() -> i8 {
     let p: Point = Point { x: 3.0, y: 4.0 };
-    io.out("len = {}", p.len());   // len = 5.000000
+    io::out("len = {}", p.len());   // len = 5.000000
     return 0;
 }
 ```

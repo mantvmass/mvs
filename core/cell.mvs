@@ -1,9 +1,9 @@
 /*
  * core/cell.mvs - interior mutability for i64 values (--nostd safe)
  *
- *     use core::cell;
+ *     use core::cell::Cell;
  *
- *     let c: cell.Cell = cell.Cell::new(42);
+ *     let c: Cell = Cell::new(42);
  *     c.set(99);
  *     let v: i64 = c.get();          // 99
  *     let old: i64 = c.replace(0);   // old = 99, c now holds 0

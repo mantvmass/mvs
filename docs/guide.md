@@ -139,7 +139,7 @@ when stored (mid-computation it's still 64-bit).
 | Mutable? | no, read-only | yes (`push_str`, `from_int`) |
 | Memory | in `.data`, nothing to manage | malloc'd; you must `drop()` it (no GC) |
 | Create | `let s: str = "hi";` | `let s: String = String::from("hi");` |
-| With io.out | `io.out("{}", s)` directly | `s.as_str()` → returns `str` |
+| With io::out | `io::out("{}", s)` directly | `s.as_str()` → returns `str` |
 
 ```txt
 use std::io;
@@ -147,7 +147,7 @@ use std::string::String;
 let lit: str = "hello";                 // fixed, read-only
 let owned: String = String::from("hi"); // on the heap
 owned.push_str(", world");              // can append
-io.out("{} / {}", lit, owned.as_str()); // hello / hi, world
+io::out("{} / {}", lit, owned.as_str()); // hello / hi, world
 owned.drop();                           // free it yourself
 ```
 
@@ -158,8 +158,8 @@ Rule of thumb: `str` for fixed text and read-only parameters; `String` when you 
 ```txt
 let a: [i32; 5] = [10, 20, 30, 40, 50];  // literal must have exactly N elements
 a[0] = 99;  a[1] += 5;                   // element read/write (any expression as index)
-io.out("{}", a);                         // [99, 25, 30, 40, 50]  (expands like Rust's {:?})
-io.out("{}", a.len);                     // 5 (compile-time constant)
+io::out("{}", a);                         // [99, 25, 30, 40, 50]  (expands like Rust's {:?})
+io::out("{}", a.len);                     // 5 (compile-time constant)
 
 struct Grid { cells: [i32; 4]; }         // arrays work as struct fields (and print inline)
 let pts: [Point; 2] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];  // arrays of structs
@@ -227,7 +227,7 @@ tokens with the same 64-bit value:
 ```txt
 let color: u32 = 0xFF8800;    // hex
 let mask: u8 = 0b10100101;    // binary
-io.out("{:x}", color);        // prints back as hex: ff8800
+io::out("{:x}", color);        // prints back as hex: ff8800
 ```
 
 A literal that does not fit in 64 bits is a compile error (128-bit values are built
@@ -356,9 +356,9 @@ The compiler infers the real type from arguments and emits a per-type copy (like
 #### Function overloading
 
 ```txt
-func show(n: i32) -> void { io.out("int: {}", n); }
-func show(s: str) -> void { io.out("str: {}", s); }
-func show(p: Point) -> void { io.out("point: ({}, {})", p.x, p.y); }
+func show(n: i32) -> void { io::out("int: {}", n); }
+func show(s: str) -> void { io::out("str: {}", s); }
+func show(p: Point) -> void { io::out("point: ({}, {})", p.x, p.y); }
 
 show(42);       // picks show(i32)
 show("hi");     // picks show(str)
@@ -414,7 +414,7 @@ describe(c);                         // 75, Circle::area
 
 ```txt
 let s: dyn Shape = &rect;            // fat pointer {data, vtable}; &circle works too
-io.out("{}", s.area());              // dispatches through the vtable at run time
+io::out("{}", s.area());              // dispatches through the vtable at run time
 s = &circle;                          // same variable, different concrete type
 let all: [dyn Shape; 2] = [&rect, &circle];   // heterogeneous lists work
 
@@ -428,7 +428,7 @@ used as conditions, or passed to extern C.
 
 A trait object is written `&value` everywhere: in a `let`, in a parameter, in a
 return. A **variadic** trait slice (`items: ...dyn Shape`) additionally accepts
-a plain value, which it copies into the slice: that is what lets `fmt.outf`
+a plain value, which it copies into the slice: that is what lets `fmt::outf`
 take literals and temporaries. Both spellings mean the same thing there.
 
 ```txt
@@ -485,16 +485,16 @@ func add(a: i32, b: i32) -> i32 { return a + b; }
 func mul(a: i32, b: i32) -> i32 { return a * b; }
 
 let f: func(i32, i32) -> i32 = add;   // value = the bare function name (no &)
-io.out("{}", f(3, 4));        // 7
+io::out("{}", f(3, 4));        // 7
 f = mul;
-io.out("{}", f(3, 4));        // 12
+io::out("{}", f(3, 4));        // 12
 
 func apply(op: func(i32, i32) -> i32, a: i32, b: i32) -> i32 { return op(a, b); }
-io.out("{}", apply(add, 10, 20));   // 30   (higher-order function)
+io::out("{}", apply(add, 10, 20));   // 30   (higher-order function)
 
 struct Op { name: str; fn: func(i32, i32) -> i32; }   // store as a field (dispatch table / callback)
 let plus: Op = Op { name: "plus", fn: add };
-io.out("{}", plus.fn(5, 6));        // 11
+io::out("{}", plus.fn(5, 6));        // 11
 ```
 
 A function value can live anywhere a value can, and any expression that
@@ -502,7 +502,7 @@ evaluates to one can be called directly:
 
 ```txt
 let table: [func(i64, i64) -> i64; 2] = [add, mul];
-io.out("{}", table[i](3, 4));            // element of an array
+io::out("{}", table[i](3, 4));            // element of an array
 
 let g_op: func(i64, i64) -> i64 = add;   // a global holds one too
 
@@ -510,8 +510,8 @@ func chooser(plus: bool) -> func(i64, i64) -> i64 {   // returned from a functio
     if (plus) { return add; }
     return mul;
 }
-io.out("{}", chooser(true)(4, 5));       // called on the spot
-io.out("{}", ops.get(0).op(8, 9));       // through a container and a field
+io::out("{}", chooser(true)(4, 5));       // called on the spot
+io::out("{}", ops.get(0).op(8, 9));       // through a container and a field
 ```
 
 A function-pointer type cannot be a generic argument (`Vec<func(i64) -> i64>`);
@@ -526,34 +526,34 @@ code is `lea rax, [rel <label>]` for the value and `call rax` for the call (see 
 let pi: f64 = 3.14159;
 let avogadro: f64 = 6.02e23;      // scientific notation: 1e9, 2.5e-3, 6.02E23
 let area: f64 = pi * 2.0 * 2.0;
-io.out("{}", 1.5 + 2);     // int -> float automatically -> 3.500000
+io::out("{}", 1.5 + 2);     // int -> float automatically -> 3.500000
 ```
 
-### 4.10 Printing with io.out (Rust-style)
+### 4.10 Printing with io::out (Rust-style)
 
 ```txt
 use std::io;
-io.out("hello");                  // hello
-io.out("x = {}", 42);             // x = 42      ({} = a value, newline appended)
-io.out("{} + {} = {}", a, b, a+b);// several values
-io.out("hex = {:x}", 255);        // hex = ff
-io.out("pct {{}}");               // pct {}      ({{ }} = literal braces)
-io.out("{}", p);                  // p is a struct -> Point { x: 3, y: 4 }  (like Rust's {:?})
+io::out("hello");                  // hello
+io::out("x = {}", 42);             // x = 42      ({} = a value, newline appended)
+io::out("{} + {} = {}", a, b, a+b);// several values
+io::out("hex = {:x}", 255);        // hex = ff
+io::out("pct {{}}");               // pct {}      ({{ }} = literal braces)
+io::out("{}", p);                  // p is a struct -> Point { x: 3, y: 4 }  (like Rust's {:?})
 
 // width / precision (the "0W.P" part goes to printf verbatim, so C semantics)
-io.out("[{:8.2}]", 3.14159);      // [    3.14]
-io.out("[{:08}]", 42);            // [00000042]
-io.out("[{:.3}]", 2.71828);       // [2.718]
-io.out("[{:04x}]", 255);          // [00ff]
+io::out("[{:8.2}]", 3.14159);      // [    3.14]
+io::out("[{:08}]", 42);            // [00000042]
+io::out("[{:.3}]", 2.71828);       // [2.718]
+io::out("[{:04x}]", 255);          // [00ff]
 ```
 
-`io.out` is a **compiler intrinsic** (like Rust's `println!`): it parses `{}` at compile time and picks the
+`io::out` is a **compiler intrinsic** (like Rust's `println!`): it parses `{}` at compile time and picks the
 print format per argument. It needs `use std::io`, and it handles structs (expanded to
 `Name { field: value, ... }`, including nested) and any number of arguments.
 
 Why keep it an intrinsic at all? Printing an arbitrary STRUCT with `{}` uses compile-time
 reflection (the compiler expands the fields), which a library cannot express. For everything
-else the library route exists: `fmt.outf(f, args...)` is io.out written in pure MVS. It takes a
+else the library route exists: `fmt::outf(f, args...)` is io::out written in pure MVS. It takes a
 variadic `...dyn Display` slice, walks the `{}` placeholders at run time, and dispatches each
 value through its `Display` impl (every primitive ships one; user structs join by writing
 `impl Display for T`). See `examples/08_stdlib/lib_out.mvs`.
@@ -574,8 +574,8 @@ directory), or `super` (parent directory).
 
 ```txt
 // A) namespace: last path segment becomes the namespace
-use std::io;                              // io.out(...)
-use std::fs;                              // fs.write(...)
+use std::io;                              // io::out(...)
+use std::fs;                              // fs::write(...)
 use std::net;                             // net.TcpServer::bind(...)
 
 // B) symbol: braced names or trailing name are pulled in directly
@@ -592,10 +592,10 @@ use std::{io, fs, net};                   // shorthand for three namespace uses
 
 | Form | Example | Access |
 |------|---------|--------|
-| namespace | `use std::io;` | `io.out(...)` |
+| namespace | `use std::io;` | `io::out(...)` |
 | symbol | `use std::string::String;` | `String::from(...)` |
 | braced symbols | `use std::option::{Option, Some, None};` | `Option`, `Some`, `None` |
-| braced submodules | `use std::{io, fs};` | `io.out(...)`, `fs.write(...)` |
+| braced submodules | `use std::{io, fs};` | `io::out(...)`, `fs::write(...)` |
 | glob | `use std::io::*;` | all names from `io` |
 
 Resolution: the compiler walks segments left to right, trying each as
@@ -623,11 +623,11 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 
 | Module | Main functions |
 |--------|----------------|
-| `io` | `io.out(fmt, ...)`, `io.print(s)`, `io.in(prompt) -> str` |
-| `fs` | `fs.write(path, content)`, `fs.read(path) -> str` |
+| `io` | `io::out(fmt, ...)`, `io::print(s)`, `io::in(prompt) -> str` |
+| `fs` | `fs::write(path, content)`, `fs::read(path) -> str` |
 | `net` | `TcpSocket::connect(ip, port)`, `TcpServer::bind(ip, port)` + `accept`/`send`/`recv`/`close`; cross-platform (Winsock on Windows, POSIX sockets on Linux, selected with `@compile`) |
 | `string` | `String` (heap string): `String::from(s)`, `from_int`/`from_uint`/`from_float`/`from_char`, `.push_str(s)` (chain), `.as_str() -> str`, `.len()`, `.drop()` |
-| `fmt` | trait `Display { fmt(self) -> String }` (impl'd for every primitive) + `fmt.println(x)` / `fmt.print(x)` (static dispatch) + `fmt.outf(f, args...)`, a pure-MVS io.out with run-time `{}` handling |
+| `fmt` | trait `Display { fmt(self) -> String }` (impl'd for every primitive) + `fmt::println(x)` / `fmt::print(x)` (static dispatch) + `fmt::outf(f, args...)`, a pure-MVS io::out with run-time `{}` handling |
 | `math` | `sqrt`/`pow`/`floor`/`ceil`/`round`/`fmod` (libm), `pi()`/`e()`, and overloaded `abs`/`min`/`max`/`clamp` (i64 + f64) plus `sign`/`gcd`/`lcm`/`ipow` |
 | `mem` | `alloc`/`alloc_zeroed`/`grow`/`dealloc`, `copy` (overlap-safe), `set`/`zero`, `eq`, `swap` |
 | `time` | `now()` (epoch seconds), `millis()` (duration measurement), `sleep_ms(ms)`; per-OS via `@compile` |
@@ -703,18 +703,18 @@ let s: Slice<u8> = Slice<u8>::new(p, n);
 
 Two resolution rules make modules pleasant to use:
 
-- `ns.func(...)` also reaches a foreign function the module DECLARED: `math.fmod(x, y)`
+- `ns.func(...)` also reaches a foreign function the module DECLARED: `math::fmod(x, y)`
   calls libm's `fmod` because `std/math.mvs` declares `extern func fmod(...)`. Externs keep
   their raw C symbol name; the namespace only scopes the lookup.
-- Function overloading works through namespaces: `math.abs(-4)` picks `abs(i64)` while
-  `math.abs(-2.5)` picks `abs(f64)`. Each module has its own overload sets, so a user
-  function named `abs` never collides with `math.abs`.
+- Function overloading works through namespaces: `math::abs(-4)` picks `abs(i64)` while
+  `math::abs(-2.5)` picks `abs(f64)`. Each module has its own overload sets, so a user
+  function named `abs` never collides with `math::abs`.
 
 ```txt
 use std::{io, string};
 let s: String = String::from("hello");
 s.push_str(", world");                       // append on the heap (reallocates)
-io.out("{} (len {})", s.as_str(), s.len());  // hello, world (len 12)
+io::out("{} (len {})", s.as_str(), s.len());  // hello, world (len 12)
 let n: String = String::from_int(42);        // "42"
 s.drop(); n.drop();                          // free it yourself (no GC)
 ```
@@ -787,11 +787,11 @@ use std::{test, math};
 
 @test
 func gcd_of_common_factors() -> void {
-    test.eq(math.gcd(48, 18), 6);
+    test::eq(math::gcd(48, 18), 6);
 }
 
 func test_sqrt() -> void {              // the naming convention works too
-    test.near(math.sqrt(2.0), 1.4142135, 0.0001);
+    test::near(math::sqrt(2.0), 1.4142135, 0.0001);
 }
 ```
 
@@ -814,9 +814,9 @@ tests in that file are skipped and the file counts as failed (a per-test restart
 needs unwinding, which waits for `Result`; see ROADMAP). A test file that defines
 its own `main` is run as is.
 
-Assertions: `test.ok(cond)` · `test.eq(got, want)` (overloaded for i64/f64/str;
-str compares CONTENT via strcmp) · `test.near(got, want, eps)` for floats ·
-`test.fail(msg)`. In the MVS repository itself, `mvs test` additionally runs the
+Assertions: `test::ok(cond)` · `test::eq(got, want)` (overloaded for i64/f64/str;
+str compares CONTENT via strcmp) · `test::near(got, want, eps)` for floats ·
+`test::fail(msg)`. In the MVS repository itself, `mvs test` additionally runs the
 golden example suite when it finds `tests/expected/`.
 
 ### 4.15 Generic structs + Option/Result
@@ -833,7 +833,7 @@ impl Pair<T, U> {
 }
 
 let p: Pair<i64, str> = Pair<i64, str> { a: 42, b: "hi" };
-io.out("{}", p.first());          // 42
+io::out("{}", p.first());          // 42
 let n: Boxed<Pair<i64, i64>>;     // generics nest ('>>' is handled)
 ```
 
@@ -851,7 +851,7 @@ func find(...) -> Option<i64> {
     return None<i64>();                // nothing to infer: explicit
 }
 let r: Result<i64, str> = Ok<i64, str>(42);   // two params: both explicit
-if (r.is_ok()) { io.out("{}", r.unwrap()); }  // unwrap aborts on the wrong side
+if (r.is_ok()) { io::out("{}", r.unwrap()); }  // unwrap aborts on the wrong side
 ```
 
 Methods: `is_some`/`is_none`/`unwrap`/`unwrap_or` on Option;
@@ -866,8 +866,8 @@ func unwrap_or<T>(o: Option<T>, dflt: T) -> T { ... }
 
 let vs: Vec<str> = Vec<str>::new();
 vs.push("hi");
-io.out("{}", head(vs));                  // T = str, from the argument's type
-io.out("{}", unwrap_or(None(), "b"));    // T = str, from the OTHER argument
+io::out("{}", head(vs));                  // T = str, from the argument's type
+io::out("{}", unwrap_or(None(), "b"));    // T = str, from the OTHER argument
 let o: Option<u16> = Some(400);          // T = u16, from the declared type
 ```
 
@@ -897,8 +897,8 @@ func worker(arg: *u8) -> *u8 {
     return 0;
 }
 
-let h: usize = thread.spawn(worker, 0);   // any func(*u8) -> *u8
-thread.join(h);
+let h: usize = thread::spawn(worker, 0);   // any func(*u8) -> *u8
+thread::join(h);
 ```
 
 Under the hood: CreateThread/WaitForSingleObject + SRWLOCK on Windows,
@@ -910,7 +910,7 @@ OS concurrency on every target, including under qemu-aarch64.
 releases the mutex and sleeps; `cv.signal()` wakes one waiter,
 `cv.broadcast()` wakes all. Windows CONDITION_VARIABLE, pthreads on Linux.
 
-**join_all and Scope.** `thread.join_all(handles_ptr, n)` blocks until n threads
+**join_all and Scope.** `thread::join_all(handles_ptr, n)` blocks until n threads
 complete. `Scope` manages a dynamic set of thread handles with automatic join:
 
 ```txt
@@ -930,11 +930,11 @@ whether or not you lock; the discipline is yours, exactly like C.
 ```txt
 use core::atomic;
 let counter: i64 = 0;
-atomic.store(&counter, 10);
-let old: i64 = atomic.add(&counter, 5);   // old = 10, counter = 15
-let val: i64 = atomic.load(&counter);      // val = 15
-let prev: i64 = atomic.cas(&counter, 15, 99);   // CAS: swap if == 15
-let swapped: i64 = atomic.exchange(&counter, 0); // unconditional swap
+atomic::store(&counter, 10);
+let old: i64 = atomic::add(&counter, 5);   // old = 10, counter = 15
+let val: i64 = atomic::load(&counter);      // val = 15
+let prev: i64 = atomic::cas(&counter, 15, 99);   // CAS: swap if == 15
+let swapped: i64 = atomic::exchange(&counter, 0); // unconditional swap
 ```
 
 `__atomic("op", ptr, ...)` is a compiler intrinsic emitting hardware atomics
@@ -957,9 +957,9 @@ func producer(arg: *u8) -> *u8 {
     return 0;
 }
 
-let t: usize = thread.spawn(producer, &ch as *u8);
+let t: usize = thread::spawn(producer, &ch as *u8);
 let v: i64 = ch.recv();
-thread.join(t);
+thread::join(t);
 ch.drop();
 ```
 
@@ -981,9 +981,9 @@ let c: Shape = Shape::Circle(2.0);
 let n: Shape = Shape::Nothing;         // unit variants work bare, like Rust
 
 match (s) {
-    Shape::Circle(r) => { io.out("circle {}", r); }
-    Shape::Rect(w, h) => { io.out("rect {} x {}", w, h); }
-    _ => { io.out("something else"); } // catch-all
+    Shape::Circle(r) => { io::out("circle {}", r); }
+    Shape::Rect(w, h) => { io::out("rect {} x {}", w, h); }
+    _ => { io::out("something else"); } // catch-all
 }
 ```
 
@@ -1035,9 +1035,9 @@ match (a) { Just(v) => { ... } Nothing => { ... } }
 ```txt
 // nested patterns
 match (opt_result) {
-    Some(Ok(v)) => { io.out("ok: {}\n", v); }
-    Some(Err(e)) => { io.out("err: {}\n", e); }
-    None => { io.out("none\n"); }
+    Some(Ok(v)) => { io::out("ok: {}\n", v); }
+    Some(Err(e)) => { io::out("err: {}\n", e); }
+    None => { io::out("none\n"); }
 }
 // literal patterns in payloads
 match (opt) { Some(42) => { ... } Some(_) => { ... } None => { ... } }
@@ -1052,7 +1052,7 @@ match (n) { 1..=10 => { ... } 11..=20 => { ... } _ => { ... } }
 - Guards run after bindings (the bound variable is in scope inside the guard).
 - `..` is exclusive range, `..=` is inclusive.
 - Each variant's payload fields exist side by side in the struct (a sum of
-  sizes, not a union). Printing an enum with io.out shows its raw desugared
+  sizes, not a union). Printing an enum with io::out shows its raw desugared
   struct (a `__tag` field plus every payload slot).
 
 ### 4.18 The HTTP framework (std/http)
@@ -1176,7 +1176,7 @@ func main() -> i8 {
 Heap rules (same as C): every `malloc` needs one matching `free` (else a leak); no use-after-free; no
 double-free; no bounds checking (writing past your allocation is undefined behavior).
 
-Some std functions (`io.in`, `fs.read`, `net.*recv`) malloc internally and don't free yet (leaking for
+Some std functions (`io::in`, `fs::read`, `net.*recv`) malloc internally and don't free yet (leaking for
 simplicity in this subset); real programs should wrap and free.
 
 ### 5.3 Heap under `--nostd`
@@ -1383,9 +1383,9 @@ The double's bit-pattern lives in rax like an integer, moving into xmm only for 
 
 If a side is an int it's converted first with `cvtsi2sd`.
 
-### 6.6 io.out (compiler intrinsic)
+### 6.6 io::out (compiler intrinsic)
 
-Compiling `io.out("x = {}", n)`, the compiler: (1) scans the format string for `{}` and counts placeholders;
+Compiling `io::out("x = {}", n)`, the compiler: (1) scans the format string for `{}` and counts placeholders;
 (2) picks a specifier per arg (`{}` + int → `%lld`, str → `%s`, char → `%c`, float → `%f`, `{:x}` → `%llx`);
 (3) builds the C format `"x = %lld\n"` and calls `printf`.
 
@@ -1442,7 +1442,7 @@ free(buf);                       // always free yourself
 ```txt
 let a: [i32; 10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];   // fixed size: a real array, no malloc
 for (let i: i32 = 0; i < 10; i++) { a[i] = i * i; }
-io.out("a[3] = {}", a[3]);           // 9
+io::out("a[3] = {}", a[3]);           // 9
 
 extern func malloc(n: usize) -> *u8;
 let arr: *i32 = malloc(40);          // dynamic size: 10 i32 slots (10 * 4 bytes)
@@ -1451,7 +1451,7 @@ while (i < 10) {
     arr[i] = i * i;                  // pointer indexing scales by sizeof(i32) automatically
     i++;
 }
-io.out("arr[3] = {}", arr[3]);       // 9
+io::out("arr[3] = {}", arr[3]);       // 9
 ```
 
 ### Command-line arguments (argc/argv)
@@ -1479,7 +1479,7 @@ while (i < 10) {
     (*(pts + i)).y = i * 10;
     i++;
 }
-io.out("pts[3] = ({}, {})", (*(pts + 3)).x, (*(pts + 3)).y);   // 3 30
+io::out("pts[3] = ({}, {})", (*(pts + 3)).x, (*(pts + 3)).y);   // 3 30
 ```
 
 ### Linked list / tree via a self-referential struct
@@ -1488,7 +1488,7 @@ io.out("pts[3] = ({}, {})", (*(pts + 3)).x, (*(pts + 3)).y);   // 3 30
 struct Node { val: i32; next: *Node; }   // points to itself through a pointer
 let n2: Node;  n2.val = 20;  n2.next = 0;     // 0 = NULL
 let n1: Node;  n1.val = 10;  n1.next = &n2;
-io.out("{} -> {}", n1.val, (*n1.next).val);   // 10 -> 20
+io::out("{} -> {}", n1.val, (*n1.next).val);   // 10 -> 20
 ```
 
 Structs can reference each other freely (layout is computed by fixpoint); declaration order doesn't matter.
@@ -1498,7 +1498,7 @@ Structs can reference each other freely (layout is computed by fixpoint); declar
 ```txt
 extern func strcmp(a: str, b: str) -> i32;
 // s == "x" compares addresses, not contents! use strcmp.
-if (strcmp(name, "admin") == 0) { io.out("welcome admin"); }
+if (strcmp(name, "admin") == 0) { io::out("welcome admin"); }
 ```
 
 ### Call C math functions
@@ -1506,7 +1506,7 @@ if (strcmp(name, "admin") == 0) { io.out("welcome admin"); }
 ```txt
 extern func sqrt(x: f64) -> f64;
 extern func pow(b: f64, e: f64) -> f64;
-io.out("sqrt(2)={}", sqrt(2.0));
+io::out("sqrt(2)={}", sqrt(2.0));
 ```
 
 ### Let C call MVS code (produce a .obj)
@@ -1524,7 +1524,7 @@ clang main.c lib.obj -o app # link into a C program
 ### Freestanding code (no OS: kernel/bare-metal)
 
 ```txt
-// no use std / no io.out in this mode
+// no use std / no io::out in this mode
 export func poke(addr: *u8, value: u8) -> void { *addr = value; }  // write VGA buffer, etc.
 ```
 
@@ -1536,9 +1536,9 @@ mvs.exe kernel.mvs --nostd  # kernel.obj with no CRT dependency (link/embed your
 
 ```txt
 use std::{io, fs};
-fs.write("out.txt", "hello");
-let text: str = fs.read("out.txt");
-let name: str = io.in("your name: ");   // reads one word
+fs::write("out.txt", "hello");
+let text: str = fs::read("out.txt");
+let name: str = io::in("your name: ");   // reads one word
 ```
 
 ### TCP echo server
@@ -1557,11 +1557,11 @@ conn.close(); server.close();
 ```txt
 let READ: u32 = 1;  let WRITE: u32 = 2;
 let perm: u32 = READ | WRITE;
-if ((perm & WRITE) != 0) { io.out("writable"); }
+if ((perm & WRITE) != 0) { io::out("writable"); }
 perm = perm & ~WRITE;            // clear the WRITE bit
 
 let a: u32 = 12;  let b: u32 = 10;
-io.out("xor = {}", a ^ b);       // 6   (^ = XOR; power is **)
+io::out("xor = {}", a ^ b);       // 6   (^ = XOR; power is **)
 ```
 
 ### Walk a buffer with a pointer (like C)
@@ -1572,7 +1572,7 @@ let buf: *i32 = malloc(40);
 let p: *i32 = buf;
 let i: i32 = 0;
 while (i < 10) { *p = i * i; p++; i++; }   // p++ advances by sizeof(i32) = 4
-io.out("count = {}", p - buf);   // 10   (ptr - ptr divides by sizeof automatically)
+io::out("count = {}", p - buf);   // 10   (ptr - ptr divides by sizeof automatically)
 ```
 
 ### Return multiple values via out-pointers (no tuples)
@@ -1584,7 +1584,7 @@ func divmod(a: i32, b: i32, q: *i32, r: *i32) -> void {
 }
 let q: i32 = 0;  let r: i32 = 0;
 divmod(17, 5, &q, &r);
-io.out("17/5 = {} rem {}", q, r);   // 3 rem 2
+io::out("17/5 = {} rem {}", q, r);   // 3 rem 2
 ```
 
 ### Inspect the generated assembly
@@ -1602,14 +1602,14 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 ### Numbers
 
 - **Math always runs in 64-bit registers**: width is respected at load/store (correct truncate/extend, real
-  unsigned div/setb, real wrap), but mid-expression overflow is 64-bit. (`let a: u8 = 200; io.out("{}", a + 100)`
+  unsigned div/setb, real wrap), but mid-expression overflow is 64-bit. (`let a: u8 = 200; io::out("{}", a + 100)`
   prints 300, but `let c: u8 = a + 100` stores 44; `~` masks to width, e.g. `~(u8)0 = 255`.) The **result type**
   of integer arithmetic is the wider operand (`i32 + i64` → i64).
 - `i128`/`u128` compute with full 128-bit precision (`+ - * / % << >> & | ^ ~` and comparisons; division
   is a software shift-subtract routine). Known edges: no compound assignment or `++`/`--` (write
   `x = x + y`), no direct float casts (go through `i64`), not usable in `switch` or as a bare condition
   (compare `!= 0`), not supported across the extern C boundary, `{:x}` prints decimal like `{}`, and one
-  `io.out` call can print at most 4 separate 128-bit values (conversion buffer ring).
+  `io::out` call can print at most 4 separate 128-bit values (conversion buffer ring).
 - **No divide-by-zero check** (crashes at runtime).
 - `u64`↔`f64` conversion of values ≥ 2^63 uses the unsigned path (correct); dereferencing a non-pointer is a
   compile error.
@@ -1631,9 +1631,9 @@ Know the boundaries before relying on it (the roadmap for fixing these is in sec
 ### Common gotchas (not bugs, but worth knowing)
 
 - **`==` on strings compares addresses, not contents**; use `extern strcmp`.
-- **`char + int` yields `char`** (inherits from the left operand); io.out prints it as a character; cast to i32
+- **`char + int` yields `char`** (inherits from the left operand); io::out prints it as a character; cast to i32
   for a number.
-- io.out: `%` in text prints literally (no escaping); use `{{` `}}` for literal braces.
+- io::out: `%` in text prints literally (no escaping); use `{{` `}}` for literal braces.
 
 ### Memory
 
@@ -1686,9 +1686,9 @@ fixed:
   taking or returning `f32` won't narrow double to single (function pointers
   are meant for MVS functions).
 
-A note on io.out: the library path is complete. `fmt.outf(f, args...)` is a
+A note on io::out: the library path is complete. `fmt::outf(f, args...)` is a
 pure-MVS formatted print built on Display impls and variadic `...dyn Display`
-slices. `io.out` itself stays an intrinsic because printing an arbitrary
+slices. `io::out` itself stays an intrinsic because printing an arbitrary
 struct uses compile-time reflection, which a library cannot express.
 
 For where to edit when adding a feature, see the table in
@@ -1703,8 +1703,8 @@ The compiler-internal rules (ABI, label naming, pass order) live in
 
 - Globals are initialized at the start of `main`, not baked into `.data`.
   An object with no `main` never runs global initializers.
-- `io.out` needs `use std::io;` first, or you get
-  "undefined function 'io.out'".
+- `io::out` needs `use std::io;` first, or you get
+  "undefined function 'io::out'".
 - The std folder is found via `MVS_STD` or `<dir of mvs.exe>/std`; set
   `MVS_STD` when running mvs.exe from somewhere else.
 - Codegen does not check argument count against an `extern` signature, so you

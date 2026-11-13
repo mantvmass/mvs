@@ -124,7 +124,7 @@ Worth knowing beyond the guide:
 - Linking needs `-llegacy_stdio_definitions -lws2_32`; extern/export names
   must not clash with NASM reserved words (`abs`, etc.).
 - Floats are stored as a bit-pattern in rax, entering xmm only for math;
-  `io.out` is a compiler intrinsic.
+  `io::out` is a compiler intrinsic.
 
 ## Documentation map
 

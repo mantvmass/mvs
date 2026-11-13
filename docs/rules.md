@@ -17,7 +17,7 @@ you write an OS, a bootloader, or bare-metal code with it.
 - Nothing in the compiler core emits I/O or pulls in an OS dependency. Anything
   that touches the OS or CRT (printing, files, sockets, input) lives in
   `std/*.mvs` and must be brought into scope with `use`.
-- `io.out` is an intrinsic, but it is gated behind `use std::io`.
+- `io::out` is an intrinsic, but it is gated behind `use std::io`.
 - Codegen uses the win64 calling convention by default. That is the ABI of
   calling a function, not an OS API; an OS for the same architecture can use
   the same convention.
@@ -136,7 +136,7 @@ owning scope.
 - Every analysis pass (`typecheck`/`scan_ov`/`scan_calls`) must call
   `seed_globals()` before adding params, or globals get inferred as i64, and it
   must scan global initializers, not just function bodies.
-- `io.out` printing a struct returned from a function must materialize it once
+- `io::out` printing a struct returned from a function must materialize it once
   via `ND_FRAMEREF` (the temp slot from `collect_struct_temps`), or each field
   re-runs `gen_call`: duplicated side effects, wrong values.
 
@@ -179,7 +179,7 @@ Build, assemble, link:
 |-------|-------|------|
 | `main` | `main` | exported for the CRT |
 | user function (no ns) | `mvs_<name>` | avoids clashing with libc |
-| function in a module | `mvs_<ns>_<name>` | io.out becomes `mvs_io_out` |
+| function in a module | `mvs_<ns>_<name>` | io::out becomes `mvs_io_out` |
 | extern | `<name>` (raw) | must match C |
 | global variable | `mvs_gv_<name>` | |
 | string constant | `mvs_str_<idx>` | in `.data` |
@@ -257,7 +257,7 @@ Build, assemble, link:
 - Module resolution lives in `src/module.c`; the parser still works one file
   at a time.
 - Rust-style paths resolved by `handle_use`:
-  - `use std::io`: namespace import, the last segment becomes a namespace (`io.xxx`).
+  - `use std::io`: namespace import, the last segment becomes a namespace (`io::xxx`).
   - `use std::string::String`: symbol import, trailing segments after the module
     file are pulled in directly.
   - `use std::vec::{Vec, VecIter}`: braced symbol import from one module.
@@ -277,7 +277,7 @@ Build, assemble, link:
   `core` is the pure-MVS subset usable under `--nostd`.
 - structs/traits are not namespaced yet (always global); bring a type into
   scope with `use`. Namespace affects free functions only.
-- `io.out` parses `{}` at compile time and picks a format per argument
+- `io::out` parses `{}` at compile time and picks a format per argument
   (`build_c_format()` in `arch/common.c`); gated on `use std::io`.
 - Tree-shaking: only functions reachable from main (and exports) are emitted.
 

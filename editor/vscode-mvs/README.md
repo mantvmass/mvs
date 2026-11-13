@@ -6,7 +6,7 @@ tree-sitter, so this extension carries its own grammar
 (`syntaxes/mvs.tmLanguage.json`) covering the same construct set as
 [../tree-sitter-mvs](../tree-sitter-mvs): declarations, traits, enums + match,
 generics, attributes, `asm`, all the literal forms, and the `{}` placeholders
-inside io.out format strings.
+inside io::out format strings.
 
 ## Install
 

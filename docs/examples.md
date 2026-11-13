@@ -14,7 +14,7 @@ You need `clang` and `nasm` on PATH; mvs.exe warns if either is missing.
 
 ## demo.mvs
 
-A grab-bag showcase: io.out, variables, functions, arithmetic, control flow.
+A grab-bag showcase: io::out, variables, functions, arithmetic, control flow.
 
 ## 01_language: language core
 
@@ -48,7 +48,7 @@ A grab-bag showcase: io.out, variables, functions, arithmetic, control flow.
 
 | File | Contents |
 |------|----------|
-| `structs.mvs` | structs, members, struct return, io.out on a struct |
+| `structs.mvs` | structs, members, struct return, io::out on a struct |
 | `methods.mvs` | methods, `Type::new`, chaining |
 | `pointers.mvs` | `&`/`*`/`**`, pointer arithmetic, malloc'd arrays |
 | `compound.mvs` | compound assignment evaluates its lvalue exactly once |
@@ -60,7 +60,7 @@ A grab-bag showcase: io.out, variables, functions, arithmetic, control flow.
 | File | Contents |
 |------|----------|
 | `traits.mvs` | trait, `impl Trait for`, `<T: Trait>` static dispatch |
-| `display.mvs` | trait `Display` + `fmt.println` |
+| `display.mvs` | trait `Display` + `fmt::println` |
 | `dynamic.mvs` | `dyn Trait`: vtable dispatch, dyn arrays/params, dyn-to-dyn copy, `where` |
 
 ## 05_strings
@@ -90,17 +90,17 @@ A grab-bag showcase: io.out, variables, functions, arithmetic, control flow.
 
 | File | Contents |
 |------|----------|
-| `io_demo.mvs` | io.out in every form |
+| `io_demo.mvs` | io::out in every form |
 | `floats.mvs` | floating point + C math |
-| `files.mvs` | `fs.write`/`fs.read` + `io.in` |
+| `files.mvs` | `fs::write`/`fs::read` + `io::in` |
 | `net_client.mvs` / `net_server.mvs` | TCP client/server skeletons |
 | `net_loop.mvs` | TCP loopback round trip in one process |
-| `lib_out.mvs` | `fmt.outf`: io.out as a pure-MVS library |
+| `lib_out.mvs` | `fmt::outf`: io::out as a pure-MVS library |
 | `lib_math.mvs` | `std/math`: libm wrappers + overloaded helpers |
 | `lib_mem.mvs` | `std/mem`: alloc/copy/set/eq/swap/grow |
 | `lib_rand.mvs` | `std/rand`: xorshift64, platform-identical sequences |
 | `lib_sys.mvs` | `std/time` + `std/env` + `std/process` |
-| `out_width.mvs` | io.out width/precision: `{:8.2}` `{:08}` `{:04x}` |
+| `out_width.mvs` | io::out width/precision: `{:8.2}` `{:08}` `{:04x}` |
 | `option_result.mvs` | `Option` / `Result`: unwrap and fallbacks |
 | `lib_vec.mvs` | `Vec<T>`: push/get/set/pop over several element types |
 | `lib_map.mvs` | `HashMap<K, V>`: i64 and str keys, growth, overwrite |
