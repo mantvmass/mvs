@@ -94,6 +94,20 @@ static void emit_store(Gen *g, IRFunc *f, int addr, int val,
     st->sname = (char *)sname;
 }
 
+/* Truncate a 64-bit register value to the width of a sub-64-bit integer type.
+   All arithmetic in the IR operates on 64-bit registers; without truncation,
+   results like -1u32 (which is 0xFFFFFFFF) leak as 0xFFFFFFFFFFFFFFFF. */
+static int ir_trunc(Gen *g, IRFunc *f, int val, DataType base, int ptr, const char *sn) {
+    if (ptr != 0 || is_float_type(base)) return val;
+    int sz = type_size(g, base, 0, sn);
+    if (sz < 1 || sz >= 8) return val;
+    int d = ir_vreg(f);
+    IRInst *tr = ir_emit(f, is_signed_type(base) ? IR_SEXT : IR_ZEXT, d, val, IR_NONE);
+    tr->size = sz;
+    tr->imm = 8;
+    return d;
+}
+
 /* Load a variable's value (scalar -> value, struct/i128/dyn -> address) */
 static int load_var(Gen *g, IRFunc *f, Sym *s) {
     int addr;
@@ -112,6 +126,7 @@ static int load_var(Gen *g, IRFunc *f, Sym *s) {
 
 /* Store a scalar value into a variable */
 static void store_var(Gen *g, IRFunc *f, Sym *s, int val) {
+    val = ir_trunc(g, f, val, s->type, s->ptr, s->sname);
     int addr;
     if (s->is_global)
         addr = emit_global_addr(f, s->name);
@@ -555,6 +570,10 @@ static int lower_power(Gen *g, IRFunc *f, Node *n, int fop) {
         ir_emit(f, IR_SDIV, result, one_val, result);
 
     ir_emit(f, IR_LABEL, IR_NONE, IR_NONE, IR_NONE)->label = ldone;
+    if (!fop) {
+        ExprType pt = type_of(g, n);
+        result = ir_trunc(g, f, result, pt.base, pt.ptr, pt.sname);
+    }
     return result;
 }
 
@@ -1174,9 +1193,25 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                 uns = is_unsigned_val(lt.base, lt.ptr) || is_unsigned_val(rt.base, rt.ptr);
 
             if (is_cmp_op(n->op)) {
+                int cmp_uns = uns;
+                int l_uns = is_unsigned_val(lt.base, lt.ptr);
+                int r_uns = is_unsigned_val(rt.base, rt.ptr);
+                if (l_uns != r_uns && lt.ptr == 0 && rt.ptr == 0) {
+                    int u_w = l_uns ? type_size(g, lt.base, 0, NULL)
+                                    : type_size(g, rt.base, 0, NULL);
+                    int s_w = l_uns ? type_size(g, rt.base, 0, NULL)
+                                    : type_size(g, lt.base, 0, NULL);
+                    if (u_w < 4 || s_w > u_w) {
+                        cmp_uns = 0;
+                    } else if (u_w < 8) {
+                        DataType u_type = l_uns ? lt.base : rt.base;
+                        lhs = ir_trunc(g, f, lhs, u_type, 0, NULL);
+                        rhs = ir_trunc(g, f, rhs, u_type, 0, NULL);
+                    }
+                }
                 int dst = ir_vreg(f);
                 IRInst *ci = ir_emit(f, IR_CMP, dst, lhs, rhs);
-                ci->cmp = cmp_op_for(n->op, uns);
+                ci->cmp = cmp_op_for(n->op, cmp_uns);
                 return dst;
             }
 
@@ -1215,7 +1250,7 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                     ir_emit(f, IR_FNEG, dst, val, IR_NONE);
                 else
                     ir_emit(f, IR_NEG, dst, val, IR_NONE);
-                return dst;
+                return ir_trunc(g, f, dst, ot.base, ot.ptr, ot.sname);
             }
             if (n->op == TK_NOT) {
                 int val = lower_expr(g, f, n->operand);
@@ -1361,7 +1396,7 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                         IRInst *tr = ir_emit(f, is_signed_type(st.base) ? IR_SEXT : IR_ZEXT,
                                              d, val, IR_NONE);
                         tr->size = src_sz;
-                        return d;
+                        val = d;
                     }
                 }
                 /* narrowing or sub-register masking */
@@ -1412,6 +1447,7 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
                 int val = lower_expr(g, f, n->rhs);
                 ExprType rvt = type_of(g, n->rhs);
                 val = coerce_num(g, f, val, rvt, tt);
+                val = ir_trunc(g, f, val, tt.base, tt.ptr, tt.sname);
                 int addr = lower_addr(g, f, target);
                 emit_store(g, f, addr, val, tt.base, tt.ptr, tt.sname);
                 return val;
@@ -1459,6 +1495,7 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
             IRInst *ci = ir_emit(f, iop, res, old, rhs);
             ci->is_signed = !uns;
             ci->size = type_size(g, tt.base, 0, NULL);
+            res = ir_trunc(g, f, res, tt.base, tt.ptr, tt.sname);
             emit_store(g, f, addr, res, tt.base, tt.ptr, tt.sname);
             return res;
         }
