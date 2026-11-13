@@ -196,7 +196,7 @@ def gen_pair(mvs_l, c_l, mvs_r, c_r, tag):
         if not skip_div:
             m.append('        io.out("{}", a / b);')
             if is_flt:
-                c.append('        printf("%%f\\n", (double)(a / b));')
+                c.append('        printf("%f\\n", (double)(a / b));')
             elif left_unsigned_div:
                 c.append('        %s' % c_print_expr(res_type, '(uint64_t)la / (uint64_t)lb'))
             else:
