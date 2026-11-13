@@ -140,7 +140,7 @@ emit u64   "9"    "11"   "9 11 20"                  int
 emit usize "9"    "11"   "9 11 20"                  int
 emit f32   "1.5"  "2.5"  "1.500000 2.500000 4.000000" float
 emit f64   "1.25" "2.75" "1.250000 2.750000 4.000000" float
-emit bool  "true" "false" "1 0 0"                   other
+emit bool  "true" "false" "true false false"          other
 emit char  "'A'"  "'B'"  "A B B"                    other
 emit str   "\"aa\"" "\"bb\"" "aa bb bb"             other
 # 16-byte types: the address-as-value kinds, the most fragile in the compiler
