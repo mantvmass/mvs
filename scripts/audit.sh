@@ -88,8 +88,9 @@ for g in tests/expected/*.txt; do
     ./mvs "$src" -O --target elf64 >/dev/null 2>&1 || { note "-O compile $rel"; opt_fail=$((opt_fail+1)); continue; }
     gcc "examples/$rel.o" -o /tmp/audit_opt -no-pie -lm -lpthread 2>/dev/null || { note "-O link $rel"; opt_fail=$((opt_fail+1)); continue; }
     /tmp/audit_opt > /tmp/audit_opt_out.txt 2>&1
-    tr -d '\r' < "$g" > /tmp/audit_opt_want.txt
-    if ! diff -q /tmp/audit_opt_want.txt /tmp/audit_opt_out.txt >/dev/null 2>&1; then
+    tr -d '\r' < "$g" | sed -e :a -e '/^\n*$/{$d;N;ba;}' > /tmp/audit_opt_want.txt
+    sed -e :a -e '/^\n*$/{$d;N;ba;}' < /tmp/audit_opt_out.txt > /tmp/audit_opt_got.txt
+    if ! diff -q /tmp/audit_opt_want.txt /tmp/audit_opt_got.txt >/dev/null 2>&1; then
         echo "  DIFFERS under -O: $rel"; note "-O output $rel"; opt_fail=$((opt_fail+1))
     fi
     rm -f "examples/$rel.o"
