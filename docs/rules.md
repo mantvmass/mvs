@@ -262,8 +262,6 @@ Build, assemble, link:
     file are pulled in directly.
   - `use std::vec::{Vec, VecIter}`: braced symbol import from one module.
   - `use path::*`: glob import, all exported symbols pulled in.
-  - `use "../../path"::items`: string path fallback for edge cases (numeric
-    directory names, deep relative paths that `::` identifiers cannot express).
   - `pub use self::greet::{hello, goodbye}`: re-export from a submodule.
   - `mod name;` / `pub mod name;`: declare a submodule (`name.mvs` or `name/mod.mvs`).
   - First segment determines root: `std` -> std dir, `core` -> core dir,

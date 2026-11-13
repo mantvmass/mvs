@@ -597,7 +597,6 @@ use std::{io, fs, net};                   // shorthand for three namespace uses
 | braced symbols | `use std::option::{Option, Some, None};` | `Option`, `Some`, `None` |
 | braced submodules | `use std::{io, fs};` | `io.out(...)`, `fs.write(...)` |
 | glob | `use std::io::*;` | all names from `io` |
-| string path | `use "../../path/to/mod"::symbol;` | edge cases (numeric dirs, deep relatives) |
 
 Resolution: the compiler walks segments left to right, trying each as
 `segment.mvs` then `segment/mod.mvs`. The first file match is the module;

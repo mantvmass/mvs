@@ -1,0 +1,4 @@
+//~ ERROR: expected path after 'use'
+// string path form is no longer supported; use Rust-style :: paths
+use "../../std/io"::out;
+func main() -> i8 { return 0; }
