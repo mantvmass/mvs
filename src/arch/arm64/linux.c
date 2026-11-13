@@ -744,6 +744,16 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
         }
 
         case IR_LINE:
+            if (inst->line > 0 && inst->file) {
+                static const char *arm64_last_file = NULL;
+                static int arm64_file_idx = 0;
+                if (inst->file != arm64_last_file) {
+                    arm64_file_idx++;
+                    fprintf(g->out, "    .file %d \"%s\"\n", arm64_file_idx, inst->file);
+                    arm64_last_file = inst->file;
+                }
+                fprintf(g->out, "    .loc %d %d 0\n", arm64_file_idx, inst->line);
+            }
             break;
 
         case IR_TRUNC:

@@ -92,20 +92,20 @@ static void gen_epilogue(Gen *g) {
 }
 
 /* Emit the 128-bit helper routines (once per output file, only when used):
- *   mvs_u128_divmod(rcx=&dividend, rdx=&divisor, r8=&quotient, r9=&remainder)
+ *   mvs_u128_divmod(rdi=&dividend, rsi=&divisor, rdx=&quotient, rcx=&remainder)
  *       classic shift-subtract long division, 128 iterations
  *   mvs_s128_divmod  signed wrapper (C truncation: rem sign = dividend sign)
- *   mvs_u128_str / mvs_i128_str(rcx=&value) -> rax = decimal C string
+ *   mvs_u128_str / mvs_i128_str(rdi=&value) -> rax = decimal C string
  *       written backwards into a 4-slot ring of static buffers (io.out uses %s) */
 static void emit_i128_helpers(Gen *g) {
     fputs(
         "\nmvs_u128_divmod:\n"
         "    push rbp\n    mov rbp, rsp\n    sub rsp, 80\n"
-        "    mov rax, [rcx]\n    mov [rbp - 16], rax\n"        /* dividend lo/hi */
-        "    mov rax, [rcx + 8]\n    mov [rbp - 8], rax\n"
-        "    mov rax, [rdx]\n    mov [rbp - 32], rax\n"        /* divisor lo/hi */
-        "    mov rax, [rdx + 8]\n    mov [rbp - 24], rax\n"
-        "    mov [rbp - 72], r8\n    mov [rbp - 80], r9\n"     /* output pointers */
+        "    mov rax, [rdi]\n    mov [rbp - 16], rax\n"        /* dividend lo/hi */
+        "    mov rax, [rdi + 8]\n    mov [rbp - 8], rax\n"
+        "    mov rax, [rsi]\n    mov [rbp - 32], rax\n"        /* divisor lo/hi */
+        "    mov rax, [rsi + 8]\n    mov [rbp - 24], rax\n"
+        "    mov [rbp - 72], rdx\n    mov [rbp - 80], rcx\n"   /* output pointers */
         "    xor eax, eax\n"
         "    mov [rbp - 48], rax\n    mov [rbp - 40], rax\n"   /* remainder = 0 */
         "    mov [rbp - 64], rax\n    mov [rbp - 56], rax\n"   /* quotient = 0 */
@@ -137,11 +137,11 @@ static void emit_i128_helpers(Gen *g) {
         "    leave\n    ret\n"
         "\nmvs_s128_divmod:\n"
         "    push rbp\n    mov rbp, rsp\n    sub rsp, 96\n"
-        "    mov [rbp - 72], r8\n    mov [rbp - 80], r9\n"
-        "    mov r11, rdx\n"
-        "    mov rax, [rcx + 8]\n    mov r10, rax\n    sar r10, 63\n"  /* sa = sign mask of a */
+        "    mov [rbp - 72], rdx\n    mov [rbp - 80], rcx\n"
+        "    mov r11, rsi\n"
+        "    mov rax, [rdi + 8]\n    mov r10, rax\n    sar r10, 63\n"  /* sa = sign mask of a */
         "    mov [rbp - 96], r10\n"
-        "    mov rax, [rcx]\n    mov rdx, [rcx + 8]\n"                 /* |a| */
+        "    mov rax, [rdi]\n    mov rdx, [rdi + 8]\n"                 /* |a| */
         "    xor rax, r10\n    xor rdx, r10\n    sub rax, r10\n    sbb rdx, r10\n"
         "    mov [rbp - 16], rax\n    mov [rbp - 8], rdx\n"
         "    mov rax, [r11 + 8]\n    mov rcx, rax\n    sar rcx, 63\n"  /* sb */
@@ -149,9 +149,9 @@ static void emit_i128_helpers(Gen *g) {
         "    mov rax, [r11]\n    mov rdx, [r11 + 8]\n"                 /* |b| */
         "    xor rax, rcx\n    xor rdx, rcx\n    sub rax, rcx\n    sbb rdx, rcx\n"
         "    mov [rbp - 32], rax\n    mov [rbp - 24], rdx\n"
-        "    lea rcx, [rbp - 16]\n    lea rdx, [rbp - 32]\n"
-        "    lea r8, [rbp - 64]\n    lea r9, [rbp - 48]\n"
-        "    sub rsp, 32\n    call mvs_u128_divmod\n    add rsp, 32\n"
+        "    lea rdi, [rbp - 16]\n    lea rsi, [rbp - 32]\n"
+        "    lea rdx, [rbp - 64]\n    lea rcx, [rbp - 48]\n"
+        "    call mvs_u128_divmod\n"
         "    mov r10, [rbp - 96]\n    mov rcx, [rbp - 88]\n"
         "    mov r11, r10\n    xor r11, rcx\n"                         /* quotient sign = sa ^ sb */
         "    mov rax, [rbp - 64]\n    mov rdx, [rbp - 56]\n"
@@ -163,8 +163,8 @@ static void emit_i128_helpers(Gen *g) {
         "    leave\n    ret\n"
         "\nmvs_u128_str:\n"
         "    push rbp\n    mov rbp, rsp\n    sub rsp, 80\n"
-        "    mov rax, [rcx]\n    mov [rbp - 16], rax\n"
-        "    mov rax, [rcx + 8]\n    mov [rbp - 8], rax\n"
+        "    mov rax, [rdi]\n    mov [rbp - 16], rax\n"
+        "    mov rax, [rdi + 8]\n    mov [rbp - 8], rax\n"
         "    mov qword [rbp - 32], 10\n    mov qword [rbp - 24], 0\n"
         "    mov eax, [rel mvs_i128_bufidx]\n"                         /* next ring slot */
         "    inc eax\n    and eax, 3\n    mov [rel mvs_i128_bufidx], eax\n"
@@ -173,9 +173,9 @@ static void emit_i128_helpers(Gen *g) {
         "    add r10, 47\n    mov byte [r10], 0\n"                     /* build backwards */
         ".Lu128s_loop:\n"
         "    mov [rbp - 72], r10\n"
-        "    lea rcx, [rbp - 16]\n    lea rdx, [rbp - 32]\n"
-        "    lea r8, [rbp - 48]\n    lea r9, [rbp - 64]\n"
-        "    sub rsp, 32\n    call mvs_u128_divmod\n    add rsp, 32\n"
+        "    lea rdi, [rbp - 16]\n    lea rsi, [rbp - 32]\n"
+        "    lea rdx, [rbp - 48]\n    lea rcx, [rbp - 64]\n"
+        "    call mvs_u128_divmod\n"
         "    mov r10, [rbp - 72]\n"
         "    mov rax, [rbp - 64]\n    add rax, 48\n"                   /* digit -> ASCII */
         "    dec r10\n    mov [r10], al\n"
@@ -186,15 +186,17 @@ static void emit_i128_helpers(Gen *g) {
         "    leave\n    ret\n"
         "\nmvs_i128_str:\n"
         "    push rbp\n    mov rbp, rsp\n    sub rsp, 48\n"
-        "    mov rax, [rcx + 8]\n    test rax, rax\n    js .Li128s_neg\n"
-        "    sub rsp, 32\n    call mvs_u128_str\n    add rsp, 32\n"
+        "    mov [rbp - 48], rdi\n"                                    /* save rdi across calls */
+        "    mov rax, [rdi + 8]\n    test rax, rax\n    js .Li128s_neg\n"
+        "    call mvs_u128_str\n"
         "    leave\n    ret\n"
         ".Li128s_neg:\n"
-        "    mov rax, [rcx]\n    mov rdx, [rcx + 8]\n"                 /* |v| then prepend '-' */
+        "    mov rdi, [rbp - 48]\n"
+        "    mov rax, [rdi]\n    mov rdx, [rdi + 8]\n"                 /* |v| then prepend '-' */
         "    not rax\n    not rdx\n    add rax, 1\n    adc rdx, 0\n"
         "    mov [rbp - 16], rax\n    mov [rbp - 8], rdx\n"
-        "    lea rcx, [rbp - 16]\n"
-        "    sub rsp, 32\n    call mvs_u128_str\n    add rsp, 32\n"
+        "    lea rdi, [rbp - 16]\n"
+        "    call mvs_u128_str\n"
         "    dec rax\n    mov byte [rax], 45\n"
         "    leave\n    ret\n",
         g->out);
@@ -764,9 +766,9 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
                     int is_mod = (inst->i128_op == I128_SMOD || inst->i128_op == I128_UMOD);
                     int qoff = is_mod ? ao : ro;
                     int roff = is_mod ? ro : ao;
-                    fprintf(g->out, "    lea rcx, [rbp - %d]\n    lea rdx, [rbp - %d]\n", ao, bo);
-                    fprintf(g->out, "    lea r8, [rbp - %d]\n    lea r9, [rbp - %d]\n", qoff, roff);
-                    fprintf(g->out, "    sub rsp, 32\n    call %s\n    add rsp, 32\n", fn);
+                    fprintf(g->out, "    lea rdi, [rbp - %d]\n    lea rsi, [rbp - %d]\n", ao, bo);
+                    fprintf(g->out, "    lea rdx, [rbp - %d]\n    lea rcx, [rbp - %d]\n", qoff, roff);
+                    fprintf(g->out, "    call %s\n", fn);
                     break;
                 }
                 default: break;
