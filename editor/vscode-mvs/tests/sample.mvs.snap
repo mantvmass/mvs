@@ -9,42 +9,69 @@
 >
 >use std::{io, math};
 #^^^ source.mvs keyword.control.use.mvs
-#   ^^^^ source.mvs
+#   ^ source.mvs
+#    ^^^ source.mvs keyword.control.use.mvs
 #       ^^ source.mvs punctuation.separator.path.mvs
 #         ^ source.mvs punctuation.bracket.mvs
-#          ^^ source.mvs
-#            ^ source.mvs punctuation.separator.mvs
-#             ^^^^^ source.mvs
+#          ^^ source.mvs entity.name.type.module.mvs
+#            ^ source.mvs punctuation.separator.comma.mvs
+#             ^ source.mvs
+#              ^^^^ source.mvs entity.name.type.module.mvs
 #                  ^ source.mvs punctuation.bracket.mvs
-#                   ^ source.mvs punctuation.separator.mvs
+#                   ^ source.mvs punctuation.terminator.mvs
 >use std::string::String;
 #^^^ source.mvs keyword.control.use.mvs
-#   ^^^^ source.mvs
+#   ^ source.mvs
+#    ^^^ source.mvs keyword.control.use.mvs
 #       ^^ source.mvs punctuation.separator.path.mvs
-#         ^^^^^^ source.mvs
+#         ^^^^^^ source.mvs entity.name.type.module.mvs
 #               ^^ source.mvs punctuation.separator.path.mvs
 #                 ^^^^^^ source.mvs entity.name.type.mvs
-#                       ^ source.mvs punctuation.separator.mvs
+#                       ^ source.mvs punctuation.terminator.mvs
 >use self::mathlib;
 #^^^ source.mvs keyword.control.use.mvs
 #   ^ source.mvs
-#    ^^^^ source.mvs variable.language.self.mvs
+#    ^^^^ source.mvs keyword.control.use.mvs
 #        ^^ source.mvs punctuation.separator.path.mvs
-#          ^^^^^^^ source.mvs
-#                 ^ source.mvs punctuation.separator.mvs
+#          ^^^^^^^ source.mvs entity.name.type.module.mvs
+#                 ^ source.mvs punctuation.terminator.mvs
+>pub use core::mem;
+#^^^ source.mvs storage.modifier.mvs
+#   ^ source.mvs
+#    ^^^ source.mvs keyword.control.use.mvs
+#       ^ source.mvs
+#        ^^^^ source.mvs keyword.control.use.mvs
+#            ^^ source.mvs punctuation.separator.path.mvs
+#              ^^^ source.mvs entity.name.type.module.mvs
+#                 ^ source.mvs punctuation.terminator.mvs
+>pub mod network;
+#^^^ source.mvs storage.modifier.mvs
+#   ^ source.mvs
+#    ^^^ source.mvs keyword.control.use.mvs
+#       ^ source.mvs
+#        ^^^^^^^ source.mvs entity.name.type.module.mvs
+#               ^ source.mvs
+>mod utils;
+#^^^ source.mvs keyword.control.use.mvs
+#   ^ source.mvs
+#    ^^^^^ source.mvs entity.name.type.module.mvs
+#         ^ source.mvs
 >
 >@compile(target_os = "linux", target_arch = "aarch64")
 #^ source.mvs punctuation.definition.annotation.mvs
 # ^^^^^^^ source.mvs entity.name.function.decorator.mvs
 #        ^ source.mvs punctuation.bracket.mvs
-#         ^^^^^^^^^^ source.mvs
+#         ^^^^^^^^^ source.mvs variable.other.mvs
+#                  ^ source.mvs
 #                   ^ source.mvs keyword.operator.mvs
 #                    ^ source.mvs
 #                     ^ source.mvs string.quoted.double.mvs
 #                      ^^^^^ source.mvs string.quoted.double.mvs
 #                           ^ source.mvs string.quoted.double.mvs
 #                            ^ source.mvs punctuation.separator.mvs
-#                             ^^^^^^^^^^^^^ source.mvs
+#                             ^ source.mvs
+#                              ^^^^^^^^^^^ source.mvs variable.other.mvs
+#                                         ^ source.mvs
 #                                          ^ source.mvs keyword.operator.mvs
 #                                           ^ source.mvs
 #                                            ^ source.mvs string.quoted.double.mvs
@@ -58,7 +85,7 @@
 #           ^ source.mvs
 #            ^^^^^ source.mvs entity.name.function.mvs
 #                 ^ source.mvs punctuation.bracket.mvs
-#                  ^ source.mvs
+#                  ^ source.mvs variable.parameter.mvs
 #                   ^ source.mvs punctuation.separator.mvs
 #                    ^ source.mvs
 #                     ^^^^^ source.mvs entity.name.type.primitive.mvs
@@ -72,7 +99,7 @@
 >const LIB_BASE: i64 = 0xFF8800;
 #^^^^^ source.mvs storage.type.mvs
 #     ^ source.mvs
-#      ^^^^^^^^ source.mvs constant.other.caps.mvs
+#      ^^^^^^^^ source.mvs variable.other.mvs
 #              ^ source.mvs punctuation.separator.mvs
 #               ^ source.mvs
 #                ^^^ source.mvs entity.name.type.primitive.mvs
@@ -82,24 +109,28 @@
 #                      ^^^^^^^^ source.mvs constant.numeric.hex.mvs
 #                              ^ source.mvs punctuation.separator.mvs
 >
->struct Rect { w: i32; h: i32; }
-#^^^^^^ source.mvs storage.type.mvs
-#      ^ source.mvs
-#       ^^^^ source.mvs entity.name.type.mvs
-#           ^ source.mvs
-#            ^ source.mvs punctuation.bracket.mvs
-#             ^^ source.mvs
-#               ^ source.mvs punctuation.separator.mvs
-#                ^ source.mvs
-#                 ^^^ source.mvs entity.name.type.primitive.mvs
-#                    ^ source.mvs punctuation.separator.mvs
-#                     ^^ source.mvs
-#                       ^ source.mvs punctuation.separator.mvs
-#                        ^ source.mvs
-#                         ^^^ source.mvs entity.name.type.primitive.mvs
-#                            ^ source.mvs punctuation.separator.mvs
-#                             ^ source.mvs
-#                              ^ source.mvs punctuation.bracket.mvs
+>pub struct Rect { w: i32; h: i32; }
+#^^^ source.mvs storage.modifier.mvs
+#   ^ source.mvs
+#    ^^^^^^ source.mvs storage.type.mvs
+#          ^ source.mvs
+#           ^^^^ source.mvs entity.name.type.mvs
+#               ^ source.mvs
+#                ^ source.mvs punctuation.bracket.mvs
+#                 ^ source.mvs
+#                  ^ source.mvs variable.parameter.mvs
+#                   ^ source.mvs punctuation.separator.mvs
+#                    ^ source.mvs
+#                     ^^^ source.mvs entity.name.type.primitive.mvs
+#                        ^ source.mvs punctuation.separator.mvs
+#                         ^ source.mvs
+#                          ^ source.mvs variable.parameter.mvs
+#                           ^ source.mvs punctuation.separator.mvs
+#                            ^ source.mvs
+#                             ^^^ source.mvs entity.name.type.primitive.mvs
+#                                ^ source.mvs punctuation.separator.mvs
+#                                 ^ source.mvs
+#                                  ^ source.mvs punctuation.bracket.mvs
 >
 >enum Shape {
 #^^^^ source.mvs storage.type.mvs
@@ -190,12 +221,13 @@
 #                                          ^ source.mvs
 #                                           ^^^^ source.mvs variable.language.self.mvs
 #                                               ^ source.mvs punctuation.separator.mvs
-#                                                ^^ source.mvs
+#                                                ^ source.mvs variable.other.mvs
+#                                                 ^ source.mvs
 #                                                  ^ source.mvs keyword.operator.mvs
 #                                                   ^ source.mvs
 #                                                    ^^^^ source.mvs variable.language.self.mvs
 #                                                        ^ source.mvs punctuation.separator.mvs
-#                                                         ^ source.mvs
+#                                                         ^ source.mvs variable.other.mvs
 #                                                          ^ source.mvs punctuation.separator.mvs
 #                                                           ^ source.mvs
 #                                                            ^ source.mvs punctuation.bracket.mvs
@@ -217,7 +249,7 @@
 #                        ^^^^^ source.mvs entity.name.type.mvs
 #                             ^ source.mvs keyword.operator.mvs
 #                              ^ source.mvs punctuation.bracket.mvs
-#                               ^ source.mvs
+#                               ^ source.mvs variable.parameter.mvs
 #                                ^ source.mvs punctuation.separator.mvs
 #                                 ^ source.mvs
 #                                  ^ source.mvs entity.name.type.mvs
@@ -237,7 +269,8 @@
 #                                                          ^ source.mvs punctuation.bracket.mvs
 #                                                           ^ source.mvs
 #                                                            ^^^^^^ source.mvs keyword.control.mvs
-#                                                                  ^^ source.mvs
+#                                                                  ^ source.mvs
+#                                                                   ^ source.mvs variable.other.mvs
 #                                                                    ^ source.mvs punctuation.separator.mvs
 #                                                                     ^^^^ source.mvs entity.name.function.call.mvs
 #                                                                         ^ source.mvs punctuation.bracket.mvs
@@ -251,7 +284,7 @@
 #    ^ source.mvs
 #     ^^^^^ source.mvs entity.name.function.mvs
 #          ^ source.mvs punctuation.bracket.mvs
-#           ^^^^^ source.mvs
+#           ^^^^^ source.mvs variable.parameter.mvs
 #                ^ source.mvs punctuation.separator.mvs
 #                 ^ source.mvs
 #                  ^^^ source.mvs keyword.operator.variadic.mvs
@@ -291,7 +324,8 @@
 >    let v: Vec<i64> = Vec<i64>::new();
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^ source.mvs
+#       ^ source.mvs
+#        ^ source.mvs variable.other.mvs
 #         ^ source.mvs punctuation.separator.mvs
 #          ^ source.mvs
 #           ^^^ source.mvs entity.name.type.mvs
@@ -313,7 +347,8 @@
 >    let n: Option<i64> = none<i64>();
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^ source.mvs
+#       ^ source.mvs
+#        ^ source.mvs variable.other.mvs
 #         ^ source.mvs punctuation.separator.mvs
 #          ^ source.mvs
 #           ^^^^^^ source.mvs entity.name.type.mvs
@@ -323,7 +358,7 @@
 #                      ^ source.mvs
 #                       ^ source.mvs keyword.operator.mvs
 #                        ^ source.mvs
-#                         ^^^^ source.mvs entity.name.function.call.mvs
+#                         ^^^^ source.mvs constant.language.boolean.mvs
 #                             ^ source.mvs keyword.operator.mvs
 #                              ^^^ source.mvs entity.name.type.primitive.mvs
 #                                 ^ source.mvs keyword.operator.mvs
@@ -333,7 +368,8 @@
 >    let mask: u8 = 0b10100101;
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^^^^ source.mvs
+#       ^ source.mvs
+#        ^^^^ source.mvs variable.other.mvs
 #            ^ source.mvs punctuation.separator.mvs
 #             ^ source.mvs
 #              ^^ source.mvs entity.name.type.primitive.mvs
@@ -345,7 +381,8 @@
 >    let big: f64 = 6.02e23;
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^^^ source.mvs
+#       ^ source.mvs
+#        ^^^ source.mvs variable.other.mvs
 #           ^ source.mvs punctuation.separator.mvs
 #            ^ source.mvs
 #             ^^^ source.mvs entity.name.type.primitive.mvs
@@ -357,7 +394,8 @@
 >    let small: f64 = 2.5e-3;
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^^^^^ source.mvs
+#       ^ source.mvs
+#        ^^^^^ source.mvs variable.other.mvs
 #             ^ source.mvs punctuation.separator.mvs
 #              ^ source.mvs
 #               ^^^ source.mvs entity.name.type.primitive.mvs
@@ -369,7 +407,8 @@
 >    let c: char = '\n';
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^ source.mvs
+#       ^ source.mvs
+#        ^ source.mvs variable.other.mvs
 #         ^ source.mvs punctuation.separator.mvs
 #          ^ source.mvs
 #           ^^^^ source.mvs entity.name.type.primitive.mvs
@@ -381,7 +420,8 @@
 >    let s: str = "x = {} hex = {:04x} lit {{}} \"q\" \\";
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^ source.mvs
+#       ^ source.mvs
+#        ^ source.mvs variable.other.mvs
 #         ^ source.mvs punctuation.separator.mvs
 #          ^ source.mvs
 #           ^^^ source.mvs entity.name.type.primitive.mvs
@@ -407,7 +447,8 @@
 >    let f: func(i32, i32) -> i32 = add;
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^ source.mvs
+#       ^ source.mvs
+#        ^ source.mvs variable.other.mvs
 #         ^ source.mvs punctuation.separator.mvs
 #          ^ source.mvs
 #           ^^^^ source.mvs storage.type.mvs
@@ -423,12 +464,14 @@
 #                             ^^^ source.mvs entity.name.type.primitive.mvs
 #                                ^ source.mvs
 #                                 ^ source.mvs keyword.operator.mvs
-#                                  ^^^^ source.mvs
+#                                  ^ source.mvs
+#                                   ^^^ source.mvs variable.other.mvs
 #                                      ^ source.mvs punctuation.separator.mvs
 >    let x: i64 = -2 ** 2;
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^ source.mvs
+#       ^ source.mvs
+#        ^ source.mvs variable.other.mvs
 #         ^ source.mvs punctuation.separator.mvs
 #          ^ source.mvs
 #           ^^^ source.mvs entity.name.type.primitive.mvs
@@ -445,19 +488,27 @@
 >    let ok: bool = a < b && c > d;
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^^ source.mvs
+#       ^ source.mvs
+#        ^^ source.mvs variable.other.mvs
 #          ^ source.mvs punctuation.separator.mvs
 #           ^ source.mvs
 #            ^^^^ source.mvs entity.name.type.primitive.mvs
 #                ^ source.mvs
 #                 ^ source.mvs keyword.operator.mvs
-#                  ^^^ source.mvs
+#                  ^ source.mvs
+#                   ^ source.mvs variable.other.mvs
+#                    ^ source.mvs
 #                     ^ source.mvs keyword.operator.mvs
-#                      ^^^ source.mvs
+#                      ^ source.mvs
+#                       ^ source.mvs variable.other.mvs
+#                        ^ source.mvs
 #                         ^^ source.mvs keyword.operator.mvs
-#                           ^^^ source.mvs
+#                           ^ source.mvs
+#                            ^ source.mvs variable.other.mvs
+#                             ^ source.mvs
 #                              ^ source.mvs keyword.operator.mvs
-#                               ^^ source.mvs
+#                               ^ source.mvs
+#                                ^ source.mvs variable.other.mvs
 #                                 ^ source.mvs punctuation.separator.mvs
 >
 >    for (let i: i32 = 0; i < 10; i++) {
@@ -466,7 +517,8 @@
 #       ^ source.mvs
 #        ^ source.mvs punctuation.bracket.mvs
 #         ^^^ source.mvs storage.type.mvs
-#            ^^ source.mvs
+#            ^ source.mvs
+#             ^ source.mvs variable.other.mvs
 #              ^ source.mvs punctuation.separator.mvs
 #               ^ source.mvs
 #                ^^^ source.mvs entity.name.type.primitive.mvs
@@ -475,12 +527,15 @@
 #                     ^ source.mvs
 #                      ^ source.mvs constant.numeric.integer.mvs
 #                       ^ source.mvs punctuation.separator.mvs
-#                        ^^^ source.mvs
+#                        ^ source.mvs
+#                         ^ source.mvs variable.other.mvs
+#                          ^ source.mvs
 #                           ^ source.mvs keyword.operator.mvs
 #                            ^ source.mvs
 #                             ^^ source.mvs constant.numeric.integer.mvs
 #                               ^ source.mvs punctuation.separator.mvs
-#                                ^^ source.mvs
+#                                ^ source.mvs
+#                                 ^ source.mvs variable.other.mvs
 #                                  ^^ source.mvs keyword.operator.mvs
 #                                    ^ source.mvs punctuation.bracket.mvs
 #                                     ^ source.mvs
@@ -490,7 +545,8 @@
 #        ^^ source.mvs keyword.control.mvs
 #          ^ source.mvs
 #           ^ source.mvs punctuation.bracket.mvs
-#            ^^ source.mvs
+#            ^ source.mvs variable.other.mvs
+#             ^ source.mvs
 #              ^ source.mvs keyword.operator.mvs
 #               ^ source.mvs
 #                ^ source.mvs constant.numeric.integer.mvs
@@ -511,7 +567,8 @@
 #        ^^^^^^ source.mvs keyword.control.mvs
 #              ^ source.mvs
 #               ^ source.mvs punctuation.bracket.mvs
-#                ^^ source.mvs
+#                ^ source.mvs variable.other.mvs
+#                 ^ source.mvs
 #                  ^ source.mvs keyword.operator.mvs
 #                   ^ source.mvs
 #                    ^ source.mvs constant.numeric.integer.mvs
@@ -528,9 +585,13 @@
 #        ^^^^ source.mvs keyword.control.mvs
 #            ^ source.mvs
 #             ^ source.mvs punctuation.bracket.mvs
-#              ^^^ source.mvs
+#              ^ source.mvs
+#               ^ source.mvs variable.other.mvs
+#                ^ source.mvs
 #                 ^^ source.mvs keyword.operator.mvs
-#                   ^^^ source.mvs
+#                   ^ source.mvs
+#                    ^ source.mvs variable.other.mvs
+#                     ^ source.mvs
 #                      ^^ source.mvs keyword.operator.cast.mvs
 #                        ^ source.mvs
 #                         ^^^ source.mvs entity.name.type.primitive.mvs
@@ -545,7 +606,8 @@
 #    ^^ source.mvs keyword.control.mvs
 #      ^ source.mvs
 #       ^ source.mvs punctuation.bracket.mvs
-#        ^^ source.mvs
+#        ^ source.mvs
+#         ^ source.mvs variable.other.mvs
 #          ^^ source.mvs keyword.operator.mvs
 #            ^ source.mvs punctuation.separator.mvs
 #             ^ source.mvs
@@ -554,7 +616,8 @@
 #                ^^^^^ source.mvs keyword.control.mvs
 #                     ^ source.mvs
 #                      ^ source.mvs punctuation.bracket.mvs
-#                       ^^ source.mvs
+#                       ^ source.mvs variable.other.mvs
+#                        ^ source.mvs
 #                         ^ source.mvs keyword.operator.mvs
 #                          ^ source.mvs
 #                           ^ source.mvs constant.numeric.integer.mvs
@@ -565,7 +628,7 @@
 #    ^^^^^^ source.mvs keyword.control.mvs
 #          ^ source.mvs
 #           ^ source.mvs punctuation.bracket.mvs
-#            ^ source.mvs
+#            ^ source.mvs variable.other.mvs
 #             ^ source.mvs punctuation.bracket.mvs
 #              ^ source.mvs
 #               ^ source.mvs punctuation.bracket.mvs
@@ -582,7 +645,9 @@
 #^^^^^^^^ source.mvs
 #        ^^^^^^^ source.mvs keyword.control.mvs
 #               ^ source.mvs punctuation.separator.mvs
-#                ^^^ source.mvs
+#                ^ source.mvs
+#                 ^ source.mvs variable.other.mvs
+#                  ^ source.mvs
 #                   ^ source.mvs keyword.operator.mvs
 #                    ^ source.mvs
 #                     ^ source.mvs constant.numeric.integer.mvs
@@ -594,7 +659,8 @@
 >    let label: str = match (find(v, 30)) {
 #^^^^ source.mvs
 #    ^^^ source.mvs storage.type.mvs
-#       ^^^^^^ source.mvs
+#       ^ source.mvs
+#        ^^^^^ source.mvs variable.other.mvs
 #             ^ source.mvs punctuation.separator.mvs
 #              ^ source.mvs
 #               ^^^ source.mvs entity.name.type.primitive.mvs
@@ -606,7 +672,7 @@
 #                           ^ source.mvs punctuation.bracket.mvs
 #                            ^^^^ source.mvs entity.name.function.call.mvs
 #                                ^ source.mvs punctuation.bracket.mvs
-#                                 ^ source.mvs
+#                                 ^ source.mvs variable.other.mvs
 #                                  ^ source.mvs punctuation.separator.mvs
 #                                   ^ source.mvs
 #                                    ^^ source.mvs constant.numeric.integer.mvs
@@ -618,7 +684,7 @@
 #^^^^^^^^ source.mvs
 #        ^^^^ source.mvs entity.name.function.constructor.mvs
 #            ^ source.mvs punctuation.bracket.mvs
-#             ^ source.mvs
+#             ^ source.mvs variable.other.mvs
 #              ^ source.mvs punctuation.bracket.mvs
 #               ^ source.mvs
 #                ^^ source.mvs keyword.operator.arrow.mvs
@@ -633,7 +699,7 @@
 #             ^^ source.mvs punctuation.separator.path.mvs
 #               ^^^^^^ source.mvs entity.name.function.constructor.mvs
 #                     ^ source.mvs punctuation.bracket.mvs
-#                      ^ source.mvs
+#                      ^ source.mvs variable.other.mvs
 #                       ^ source.mvs punctuation.bracket.mvs
 #                        ^ source.mvs
 #                         ^^ source.mvs keyword.operator.arrow.mvs
@@ -657,8 +723,79 @@
 #    ^ source.mvs punctuation.bracket.mvs
 #     ^ source.mvs punctuation.separator.mvs
 >
+>    let slice: *i64 = arr[1..3];
+#^^^^ source.mvs
+#    ^^^ source.mvs storage.type.mvs
+#       ^ source.mvs
+#        ^^^^^ source.mvs variable.other.mvs
+#             ^ source.mvs punctuation.separator.mvs
+#              ^ source.mvs
+#               ^ source.mvs keyword.operator.mvs
+#                ^^^ source.mvs entity.name.type.primitive.mvs
+#                   ^ source.mvs
+#                    ^ source.mvs keyword.operator.mvs
+#                     ^ source.mvs
+#                      ^^^ source.mvs variable.other.mvs
+#                         ^ source.mvs punctuation.bracket.mvs
+#                          ^ source.mvs constant.numeric.integer.mvs
+#                           ^^ source.mvs keyword.operator.range.mvs
+#                             ^ source.mvs constant.numeric.integer.mvs
+#                              ^ source.mvs punctuation.bracket.mvs
+#                               ^ source.mvs punctuation.separator.mvs
+>    let range: bool = match (x) {
+#^^^^ source.mvs
+#    ^^^ source.mvs storage.type.mvs
+#       ^ source.mvs
+#        ^^^^^ source.mvs variable.other.mvs
+#             ^ source.mvs punctuation.separator.mvs
+#              ^ source.mvs
+#               ^^^^ source.mvs entity.name.type.primitive.mvs
+#                   ^ source.mvs
+#                    ^ source.mvs keyword.operator.mvs
+#                     ^ source.mvs
+#                      ^^^^^ source.mvs keyword.control.mvs
+#                           ^ source.mvs
+#                            ^ source.mvs punctuation.bracket.mvs
+#                             ^ source.mvs variable.other.mvs
+#                              ^ source.mvs punctuation.bracket.mvs
+#                               ^ source.mvs
+#                                ^ source.mvs punctuation.bracket.mvs
+>        1..5 => true,
+#^^^^^^^^ source.mvs
+#        ^ source.mvs constant.numeric.integer.mvs
+#         ^^ source.mvs keyword.operator.range.mvs
+#           ^ source.mvs constant.numeric.integer.mvs
+#            ^ source.mvs
+#             ^^ source.mvs keyword.operator.arrow.mvs
+#               ^ source.mvs
+#                ^^^^ source.mvs constant.language.boolean.mvs
+#                    ^ source.mvs punctuation.separator.mvs
+>        10..=20 => true,
+#^^^^^^^^ source.mvs
+#        ^^ source.mvs constant.numeric.integer.mvs
+#          ^^^ source.mvs keyword.operator.range.mvs
+#             ^^ source.mvs constant.numeric.integer.mvs
+#               ^ source.mvs
+#                ^^ source.mvs keyword.operator.arrow.mvs
+#                  ^ source.mvs
+#                   ^^^^ source.mvs constant.language.boolean.mvs
+#                       ^ source.mvs punctuation.separator.mvs
+>        _ => false,
+#^^^^^^^^ source.mvs
+#        ^ source.mvs constant.language.wildcard.mvs
+#         ^ source.mvs
+#          ^^ source.mvs keyword.operator.arrow.mvs
+#            ^ source.mvs
+#             ^^^^^ source.mvs constant.language.boolean.mvs
+#                  ^ source.mvs punctuation.separator.mvs
+>    };
+#^^^^ source.mvs
+#    ^ source.mvs punctuation.bracket.mvs
+#     ^ source.mvs punctuation.separator.mvs
+>
 >    io.out("sum = {}", math.abs(-4) + LIB_BASE);
-#^^^^^^ source.mvs
+#^^^^ source.mvs
+#    ^^ source.mvs variable.other.mvs
 #      ^ source.mvs punctuation.separator.mvs
 #       ^^^ source.mvs entity.name.function.call.mvs
 #          ^ source.mvs punctuation.bracket.mvs
@@ -667,7 +804,8 @@
 #                  ^^ source.mvs string.quoted.double.mvs constant.other.placeholder.mvs
 #                    ^ source.mvs string.quoted.double.mvs
 #                     ^ source.mvs punctuation.separator.mvs
-#                      ^^^^^ source.mvs
+#                      ^ source.mvs
+#                       ^^^^ source.mvs variable.other.mvs
 #                           ^ source.mvs punctuation.separator.mvs
 #                            ^^^ source.mvs entity.name.function.call.mvs
 #                               ^ source.mvs punctuation.bracket.mvs
