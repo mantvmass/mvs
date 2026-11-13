@@ -640,7 +640,7 @@ static int lower_call_inner(Gen *g, IRFunc *f, Node *n, int sret_addr) {
         strcmp(callee->operand->name, "io") == 0 &&
         strcmp(callee->name, "out") == 0) {
         if (!g->io_imported) {
-            fprintf(stderr, "codegen error: io is not imported (use: import { io } from \"std\";)\n");
+            fprintf(stderr, "codegen error: io is not imported (add: use std::io;)\n");
             g->had_error = 1;
             return IR_NONE;
         }

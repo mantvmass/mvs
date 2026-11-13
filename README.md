@@ -20,7 +20,7 @@ no reference counting, no destructors. You allocate, you free, exactly like C
 (the reasoning is in [docs/rules.md](docs/rules.md) section 0.2).
 
 ```txt
-import { io, math } from "std";
+use std::{io, math};
 
 struct Point { x: f64; y: f64; }
 

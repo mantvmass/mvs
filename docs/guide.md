@@ -29,14 +29,14 @@ MVS is a low-level language, roughly C's level but with a friendlier (Rust-ish) 
 - **Compiles straight to x86-64 assembly** (no LLVM), assembled by `nasm`, linked by `clang`.
 
 The guiding rule: anything that touches the OS (printing, files, networking, heap allocation) lives
-in the standard library (`std/*.mvs`) and must be imported. None of it is baked into the compiler.
+in the standard library (`std/*.mvs`) and must be brought into scope with `use`. None of it is baked into the compiler.
 
 ## 2. Source to executable
 
 ```
 lexer   (src/lexer.c)       characters -> tokens
 parser  (src/parser.c)      tokens     -> AST
-module  (src/module.c)      merge imported files into one AST
+module  (src/module.c)      resolve use/mod, merge files into one AST
 lower   (src/lower.c)       AST -> three-address IR (virtual regs)
 opt     (src/opt.c)         optimize IR (const fold, CSE, copy prop, store fwd, DCE)
 emit    (src/arch/...)      IR -> NASM/GNU as assembly (.asm/.s)
@@ -74,7 +74,7 @@ src/
   lexer.{h,c}        tokenizer (hand-written, no flex)
   ast.{h,c}          AST node (one Node tagged by kind)
   parser.{h,c}       recursive-descent parser (no bison)
-  module.{h,c}       module system: imports across files + the std and core packages
+  module.{h,c}       module system: resolves use/mod across files + the std and core packages
   generic.c          post-parse passes: enum/match desugar, monomorphization
                      (functions AND structs), overload resolution, type checking
   diag.{h,c}         Rust-style diagnostics: source excerpts, carets, help notes
@@ -142,8 +142,8 @@ when stored (mid-computation it's still 64-bit).
 | With io.out | `io.out("{}", s)` directly | `s.as_str()` → returns `str` |
 
 ```txt
-import { io } from "std";
-import { String } from "std/string";
+use std::io;
+use std::string::String;
 let lit: str = "hello";                 // fixed, read-only
 let owned: String = String::from("hi"); // on the heap
 owned.push_str(", world");              // can append
@@ -532,7 +532,7 @@ io.out("{}", 1.5 + 2);     // int -> float automatically -> 3.500000
 ### 4.10 Printing with io.out (Rust-style)
 
 ```txt
-import { io } from "std";
+use std::io;
 io.out("hello");                  // hello
 io.out("x = {}", 42);             // x = 42      ({} = a value, newline appended)
 io.out("{} + {} = {}", a, b, a+b);// several values
@@ -548,7 +548,7 @@ io.out("[{:04x}]", 255);          // [00ff]
 ```
 
 `io.out` is a **compiler intrinsic** (like Rust's `println!`): it parses `{}` at compile time and picks the
-print format per argument. It needs `import { io }`, and it handles structs (expanded to
+print format per argument. It needs `use std::io`, and it handles structs (expanded to
 `Name { field: value, ... }`, including nested) and any number of arguments.
 
 Why keep it an intrinsic at all? Printing an arbitrary STRUCT with `{}` uses compile-time
@@ -566,41 +566,52 @@ types (`String::from`, `Vec<i64>::new`), and associated functions in general.
 either in both positions, but the convention is Rust's: paths use `::`, values
 use `.`.
 
-### 4.11 Module system: three forms (the path decides)
+### 4.11 Module system (Rust-style `use` paths)
+
+Paths use `::` to separate segments. The first segment determines the root:
+`std` (standard library), `core` (freestanding package), `self` (current
+directory), or `super` (parent directory).
 
 ```txt
-// A) submodule namespace: path is a bare package -> names in {} are submodules -> call as io.xxx
-import { io, fs, net } from "std";        // io.out(...), TcpServer::bind(...)
+// A) namespace: last path segment becomes the namespace
+use std::io;                              // io.out(...)
+use std::fs;                              // fs.write(...)
+use std::net;                             // net.TcpServer::bind(...)
 
-// B) symbol import: path is a specific module -> names in {} are symbols -> pulled in directly
-import { String } from "std/string";      // String::from(...)
-import { factorial } from "./mathlib.mvs"; // factorial(...)
+// B) symbol: braced names or trailing name are pulled in directly
+use std::string::String;                  // String::from(...)
+use self::mathlib::factorial;             // factorial(...)
+use std::option::{Option, Some, None};    // Option, Some, None
 
-// C) whole-module alias as a namespace: no {} -> use the alias prefix
-import math from "./mathlib.mvs";          // math.factorial(...)
-import str  from "std/string";             // str.<freefunc>(...)
+// C) glob: all exported symbols
+use std::io::*;                           // everything from io
+
+// D) braced submodules on a package root
+use std::{io, fs, net};                   // shorthand for three namespace uses
 ```
 
-| Path form | Meaning of `{ }` | Access |
-|-----------|------------------|--------|
-| `"std"` (bare package) | submodule → namespace | `io.out` |
-| `"std/x"` or `"./f.mvs"` + `{...}` | symbol → pulled in directly | `String::from` |
-| `"std/x"` or `"./f.mvs"` + alias | whole module → namespace alias | `math.factorial` |
+| Form | Example | Access |
+|------|---------|--------|
+| namespace | `use std::io;` | `io.out(...)` |
+| symbol | `use std::string::String;` | `String::from(...)` |
+| braced symbols | `use std::option::{Option, Some, None};` | `Option`, `Some`, `None` |
+| braced submodules | `use std::{io, fs};` | `io.out(...)`, `fs.write(...)` |
+| glob | `use std::io::*;` | all names from `io` |
+| string path | `use "../../path/to/mod"::symbol;` | edge cases (numeric dirs, deep relatives) |
 
-Rule: referring to a whole package/module → use a namespace; naming a specific symbol → pull it in directly
-(a relative file must end in `.mvs`).
+Resolution: the compiler walks segments left to right, trying each as
+`segment.mvs` then `segment/mod.mvs`. The first file match is the module;
+remaining segments are symbols.
 
-Import checks (immediate errors):
+Checks (immediate errors):
 
-- a symbol imported with form B must exist → otherwise `module 'x' has no exported symbol 'name'`.
-- duplicate name (same ns+name+type for struct/trait/func) → `duplicate ...` (different-type overloads don't count).
-- a namespace/alias bound to two different modules → `namespace 'x' is already bound to a different module`.
-- one module imported under two different namespaces → error.
-- mixing a namespace import with a symbol import of the SAME module is fine: its free functions are
-  reachable under both spellings (`import { io, string } from "std"` next to
-  `import { String } from "std/string"` is the normal way to write it).
-- a global is a symbol like any other: `import { LIB_BASE } from "./lib.mvs"` works.
-- a cycle (A→B→A) → `circular import detected`.
+- a named symbol must exist, otherwise `module has no exported symbol 'name'`.
+- duplicate name (same ns+name+type for struct/trait/func) is an error (different-type overloads are fine).
+- a namespace bound to two different modules is an error.
+- mixing namespace and symbol use of the same module is fine: `use std::string;`
+  next to `use std::string::String;` is the normal way to write it.
+- a global is a symbol like any other: `use self::lib::LIB_BASE;` works.
+- a cycle (A uses B, B uses A) is detected and reported.
 
 ```txt
 extern func printf(fmt: str) -> i32;          // call C (MVS -> C)
@@ -631,13 +642,13 @@ export func mvs_add(a: i32, b: i32) -> i32 {  // let C call MVS (raw symbol name
 | `map` | `HashMap<K, V>` (open addressing, linear probing): `HashMap<str, i64>::new()` + `insert`/`get` (returns `Option<V>`)/`contains`/`len`/`is_empty`/`drop`; keys `i64` and `str` |
 | `set` | `HashSet<T>` (open addressing, linear probing): `HashSet<i64>::new()` + `insert`/`contains`/`remove`/`len`/`is_empty`/`clear`/`drop`; element types `i64` and `str` |
 | `sorted_map` | `SortedMap<K, V>` ordered map (sorted arrays, binary search): `SortedMap<i64, str>::new()` + `insert`/`get`/`contains`/`remove`/`min_key`/`max_key`/`key_at`/`val_at`/`len`/`drop`; keys always in sorted order |
-| `thread` | OS threads: `spawn(f, arg)` / `join(h)` / `join_all(handles, n)` with `func(*u8) -> *u8` workers; `Scope` for scoped thread lifetime (`import { Scope } from "std/thread"`); see section 4.16 |
+| `thread` | OS threads: `spawn(f, arg)` / `join(h)` / `join_all(handles, n)` with `func(*u8) -> *u8` workers; `Scope` for scoped thread lifetime (`use std::thread::Scope;`); see section 4.16 |
 | `sync` | `Mutex` (`lock`/`unlock`), `RwLock` (`read_lock`/`write_lock`), `CondVar` (`wait`/`signal`/`broadcast`); all zero-init safe |
 | `channel` | `Channel`: bounded MPMC channel for i64 values (`new(cap)`/`send`/`recv`/`close`/`drop`) |
 | `http` | the HTTP/1.1 server framework, in axum's shape: `Router::new().route("/users/:id", get(show).post(create))`, `Listener::bind("0.0.0.0:8080")` + `serve(&l, &app)`, handlers that return `Text`/`Html`/`Json`/`Status`/`Redirect`, `Request` (`param`/`query`/`header`/`body`), plus a small client (`fetch`, `send_request`, `read_response`); see section 4.18 |
 
 There is also a second package, **`core`**: pure MVS with no CRT/OS dependency, so
-it stays importable under `--nostd` (freestanding):
+it stays usable under `--nostd` (freestanding):
 
 | Module | Contents |
 |--------|----------|
@@ -686,8 +697,8 @@ value(s). Emits `lock xadd` / `lock cmpxchg` / `xchg` on x86-64,
 `ldaxr`/`stlxr` loops on AArch64. `__atomic` is reserved like `asm`.
 
 ```txt
-import { mem, cmp, ptr, cstr, bits } from "core";   // works even with --nostd
-import { Slice } from "core/slice";
+use core::{mem, cmp, ptr, cstr, bits};               // works even with --nostd
+use core::slice::Slice;
 let s: Slice<u8> = Slice<u8>::new(p, n);
 ```
 
@@ -701,7 +712,7 @@ Two resolution rules make modules pleasant to use:
   function named `abs` never collides with `math.abs`.
 
 ```txt
-import { io, string } from "std";
+use std::{io, string};
 let s: String = String::from("hello");
 s.push_str(", world");                       // append on the heap (reallocates)
 io.out("{} (len {})", s.as_str(), s.len());  // hello, world (len 12)
@@ -712,7 +723,7 @@ s.drop(); n.drop();                          // free it yourself (no GC)
 ### 4.13 Conditional compilation (@compile)
 
 An `@compile(...)` attribute before any top-level item (function, extern, struct, global,
-impl block, even an import) keeps that item only when the current target matches. This is
+impl block, even a `use`) keeps that item only when the current target matches. This is
 how one source file supports several platforms:
 
 ```txt
@@ -773,7 +784,7 @@ the `@test` decorator (any name) or simply named `test_*`:
 
 ```txt
 // math.test.mvs
-import { test, math } from "std";
+use std::{test, math};
 
 @test
 func gcd_of_common_factors() -> void {
@@ -833,8 +844,8 @@ type arguments when there is nothing to infer from: `none<i64>()`. That powers
 `Option`/`Result` in std:
 
 ```txt
-import { Option, Some, None } from "std/option";
-import { Result, Ok, Err } from "std/result";
+use std::option::{Option, Some, None};
+use std::result::{Result, Ok, Err};
 
 func find(...) -> Option<i64> {
     if (found) { return Some(i); }     // T inferred from the argument
@@ -875,7 +886,7 @@ own: `None` alone is an error, write `None()` or `None<i64>()`.
 ### 4.16 Threads + Mutex + CondVar (std/thread, std/sync)
 
 ```txt
-import { io, thread, sync } from "std";
+use std::{io, thread, sync};
 
 let m: Mutex;                  // a zeroed global Mutex is valid and unlocked
 let counter: i64 = 0;
@@ -904,7 +915,7 @@ releases the mutex and sleeps; `cv.signal()` wakes one waiter,
 complete. `Scope` manages a dynamic set of thread handles with automatic join:
 
 ```txt
-import { Scope } from "std/thread";
+use std::thread::Scope;
 let s: Scope = Scope::new();
 s.spawn(worker, &data as *u8);    // spawns grow an internal handle array
 s.spawn(worker2, &data2 as *u8);
@@ -918,7 +929,7 @@ whether or not you lock; the discipline is yours, exactly like C.
 ### 4.16.1 Atomics (core/atomic)
 
 ```txt
-import { atomic } from "core";
+use core::atomic;
 let counter: i64 = 0;
 atomic.store(&counter, 10);
 let old: i64 = atomic.add(&counter, 5);   // old = 10, counter = 15
@@ -936,8 +947,8 @@ naturally aligned values are supported. Available under `--nostd`.
 ### 4.16.2 Channels (std/channel)
 
 ```txt
-import { io, thread } from "std";
-import { Channel } from "std/channel";
+use std::{io, thread};
+use std::channel::Channel;
 
 let ch: Channel = Channel::new(8);  // bounded buffer for 8 values
 
@@ -1053,8 +1064,8 @@ that take the request and return a `Response`, and a listener the server loop
 runs on.
 
 ```txt
-import { Router, Listener, Request, Response } from "std/http";
-import { get, post, Text, Html, Json, Status, Redirect, serve } from "std/http";
+use std::http::{Router, Listener, Request, Response};
+use std::http::{get, post, Text, Html, Json, Status, Redirect, serve};
 
 func home(_req: *Request) -> Response {
     return Html("<h1>Home</h1>");
@@ -1514,7 +1525,7 @@ clang main.c lib.obj -o app # link into a C program
 ### Freestanding code (no OS: kernel/bare-metal)
 
 ```txt
-// no std import / no io.out in this mode
+// no use std / no io.out in this mode
 export func poke(addr: *u8, value: u8) -> void { *addr = value; }  // write VGA buffer, etc.
 ```
 
@@ -1525,7 +1536,7 @@ mvs.exe kernel.mvs --nostd  # kernel.obj with no CRT dependency (link/embed your
 ### Files and input
 
 ```txt
-import { io, fs } from "std";
+use std::{io, fs};
 fs.write("out.txt", "hello");
 let text: str = fs.read("out.txt");
 let name: str = io.in("your name: ");   // reads one word
@@ -1534,7 +1545,7 @@ let name: str = io.in("your name: ");   // reads one word
 ### TCP echo server
 
 ```txt
-import { io, net } from "std";
+use std::{io, net};
 let server: TcpServer = TcpServer::bind("0.0.0.0", 8080);
 let conn: TcpSocket = server.accept();
 let req: str = conn.recv();
@@ -1693,7 +1704,7 @@ The compiler-internal rules (ABI, label naming, pass order) live in
 
 - Globals are initialized at the start of `main`, not baked into `.data`.
   An object with no `main` never runs global initializers.
-- `io.out` needs `import { io } from "std";` first, or you get
+- `io.out` needs `use std::io;` first, or you get
   "undefined function 'io.out'".
 - The std folder is found via `MVS_STD` or `<dir of mvs.exe>/std`; set
   `MVS_STD` when running mvs.exe from somewhere else.

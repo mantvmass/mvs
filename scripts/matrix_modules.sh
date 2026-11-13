@@ -1,5 +1,5 @@
 #!/bin/sh
-# Module axis: every import form crossed with every kind of exported thing, and
+# Module axis: every use form crossed with every kind of exported thing, and
 # the conditional-compilation filter on top of it.
 #
 # The module loader is the one pass that rewrites what the rest of the compiler
@@ -66,10 +66,10 @@ func pick<T>(a: T, b: T, first: bool) -> T { if (first) { return a; } return b; 
 let LIB_BASE: i64 = 100;
 EOF
 
-# --- form B: symbol import of a local module, one symbol of each kind --------
+# --- form B: symbol use of a local module, one symbol of each kind -----------
 cat > "$TMP/form_b.mvs" <<'EOF'
-import { io } from "std";
-import { Point, Named, Color, twice, pick, LIB_BASE } from "./lib.mvs";
+use std::io;
+use self::lib::{Point, Named, Color, twice, pick, LIB_BASE};
 
 func main() -> i8 {
     let p: Point = Point::new(3, 4);          // struct + associated function
@@ -93,9 +93,9 @@ run form_b "form_b ok"
 
 # --- form C: whole-module alias ---------------------------------------------
 cat > "$TMP/form_c.mvs" <<'EOF'
-import { io } from "std";
-import lib from "./lib.mvs";
-import { Point } from "./lib.mvs";       // structs are global either way
+use std::io;
+use self::lib;
+use self::lib::Point;                    // structs are global either way
 
 func main() -> i8 {
     if (lib.twice(4) != 8) { return 1; }         // free function under the alias
@@ -110,7 +110,7 @@ run form_c "form_c ok"
 
 # --- form A: package namespace, several submodules ---------------------------
 cat > "$TMP/form_a.mvs" <<'EOF'
-import { io, math, mem } from "std";
+use std::{io, math, mem};
 
 func main() -> i8 {
     if (math.abs(0 - 5) != 5) { return 1; }
@@ -127,11 +127,11 @@ run form_a "form_a ok"
 
 # --- forms mixed in one file, plus a std module reached three ways ------------
 cat > "$TMP/mixed.mvs" <<'EOF'
-import { io } from "std";                 // A
-import { String } from "std/string";      // B
-import { Vec } from "std/vec";            // B
-import { cstr } from "core";              // B
-import lib from "./lib.mvs";              // C
+use std::io;                              // A
+use std::string::String;                  // B
+use std::vec::Vec;                        // B
+use core::cstr;                           // B
+use self::lib;                            // C
 
 func main() -> i8 {
     let s: String = String::from("ab");
@@ -149,15 +149,15 @@ func main() -> i8 {
 EOF
 run mixed "mixed ok"
 
-# --- transitive imports: a module that imports another module ----------------
+# --- transitive use: a module that uses another module ----------------------
 cat > "$TMP/mid.mvs" <<'EOF'
-import { twice } from "./lib.mvs";
+use self::lib::twice;
 func quad(x: i64) -> i64 { return twice(twice(x)); }
 EOF
 cat > "$TMP/transitive.mvs" <<'EOF'
-import { io } from "std";
-import { quad } from "./mid.mvs";
-import { twice } from "./lib.mvs";        // the same module again, one level up
+use std::io;
+use self::mid::quad;
+use self::lib::twice;                     // the same module again, one level up
 
 func main() -> i8 {
     if (quad(3) != 12) { return 1; }
@@ -170,7 +170,7 @@ run transitive "transitive ok"
 
 # --- @compile: the filter must leave exactly one definition standing ---------
 cat > "$TMP/cond.mvs" <<'EOF'
-import { io } from "std";
+use std::io;
 
 @compile(target_os = "windows")
 func plat() -> str { return "windows"; }
@@ -200,7 +200,7 @@ case "$MODE" in
     *)     run cond "linux x86_64 1" ;;
 esac
 
-# --- @compile inside an imported module (filtered by the loader, not codegen) -
+# --- @compile inside a used module (filtered by the loader, not codegen) ------
 cat > "$TMP/platlib.mvs" <<'EOF'
 @compile(target_os = "windows")
 func tag() -> str { return "win"; }
@@ -208,12 +208,12 @@ func tag() -> str { return "win"; }
 func tag() -> str { return "nix"; }
 EOF
 cat > "$TMP/cond_import.mvs" <<'EOF'
-import { io } from "std";
-import { tag } from "./platlib.mvs";
-import plat from "./platlib.mvs";
+use std::io;
+use self::platlib::tag;
+use self::platlib;
 
 func main() -> i8 {
-    io.out("{} {}", tag(), plat.tag());
+    io.out("{} {}", tag(), platlib.tag());
     return 0;
 }
 EOF
@@ -222,32 +222,33 @@ case "$MODE" in
     *)     run cond_import "nix nix" ;;
 esac
 
-# --- the import errors the guide promises ------------------------------------
+# --- the use errors the guide promises ---------------------------------------
 cat > "$TMP/err_missing.mvs" <<'EOF'
-import { nosuchthing } from "./lib.mvs";
+use self::lib::nosuchthing;
 func main() -> i8 { return 0; }
 EOF
 expect_error err_missing "no exported symbol"
 
 cat > "$TMP/err_cycle_a.mvs" <<'EOF'
-import { b_fn } from "./err_cycle_b.mvs";
+use self::err_cycle_b::b_fn;
 func a_fn() -> i64 { return b_fn(); }
 func main() -> i8 { return a_fn() as i8; }
 EOF
 cat > "$TMP/err_cycle_b.mvs" <<'EOF'
-import { a_fn } from "./err_cycle_a.mvs";
+use self::err_cycle_a::a_fn;
 func b_fn() -> i64 { return 0; }
 EOF
-expect_error err_cycle_a "circular import"
+expect_error err_cycle_a "circular use"
 
-cat > "$TMP/err_two_ns.mvs" <<'EOF'
-import one from "./lib.mvs";
-import two from "./lib.mvs";
-func main() -> i8 { return one.twice(1) as i8; }
+cat > "$TMP/dup_use.mvs" <<'EOF'
+use std::io;
+use self::lib;
+use self::lib;
+func main() -> i8 { io.out("dup ok"); return 0; }
 EOF
-expect_error err_two_ns "namespace"
+run dup_use "dup ok"
 
 echo
 if [ "$fail" -gt 0 ]; then echo "MODULE MATRIX FAILED: $fail case(s), $pass passed"; rm -rf "$TMP"; exit 1; fi
-echo "MODULE MATRIX OK: $pass module/import combination(s) verified"
+echo "MODULE MATRIX OK: $pass module/use combination(s) verified"
 rm -rf "$TMP"

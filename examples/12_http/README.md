@@ -6,8 +6,8 @@ routers, handlers that take the request and return a `Response`, and a listener
 the server loop runs on.
 
 ```txt
-import { Router, Listener, Request, Response } from "std/http";
-import { get, post, Text, Html, Json, Status, serve } from "std/http";
+use std::http::{Router, Listener, Request, Response};
+use std::http::{get, post, Text, Html, Json, Status, serve};
 
 func home(_req: *Request) -> Response {
     return Html("<h1>Home</h1>");

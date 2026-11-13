@@ -69,7 +69,7 @@ longer maps line by line back to the source.
 
 ## Core library
 
-`core` is the pure-MVS package that stays importable under `--nostd`. Shipped:
+`core` is the pure-MVS package that stays usable under `--nostd`. Shipped:
 `mem`, `cmp`, `ptr`, `cstr`, `slice`, `bits`, `arch` (CPU instructions through
 the `asm()` intrinsic), `panic` (freestanding abort with replaceable handler),
 `fmt` (number-to-string formatting without CRT), `volatile` (MMIO access),

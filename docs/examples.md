@@ -73,8 +73,8 @@ A grab-bag showcase: io.out, variables, functions, arithmetic, control flow.
 
 | File | Contents |
 |------|----------|
-| `use_import.mvs` | the three import forms |
-| `mathlib.mvs` | a user-written module, imported by the above |
+| `use_import.mvs` | the use forms: namespace, symbol, braced |
+| `mathlib.mvs` | a user-written module, used by the above |
 | `shadow_std.mvs` | user functions sharing names with std resolve per namespace |
 
 ## 07_c_interop

@@ -5,7 +5,7 @@
  *   1. Reads the entry file and parses it
  *   2. On use/mod, loads the referenced module (a loaded set prevents reloading)
  *   3. Merges all definitions into a single ND_PROGRAM,
- *      tagging a namespace on modules imported as a package (e.g. io.out)
+ *      tagging a namespace on modules used as a package (e.g. io.out)
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +32,7 @@ typedef struct {
     int         nloading;
     const char *stddir;              /* standard library folder ("std" package) */
     const char *coredir;             /* core library folder ("core" package: pure MVS, --nostd safe) */
-    int         nostd;               /* 1 = freestanding mode ("std" imports forbidden; "core" allowed) */
+    int         nostd;               /* 1 = freestanding mode ("use std::*" forbidden; "core" allowed) */
     const char *target_os;           /* current target OS, matched against @compile(target_os = ...) */
     const char *target_arch;         /* current target arch, matched against @compile(target_arch = ...) */
     int         had_error;
@@ -494,36 +494,36 @@ static void load_module(Loader *L, const char *path, const char *ns) {
     canonicalize(path, canon, sizeof(canon));
 
     int prev = find_loaded(L, canon);
-    if (prev >= 0) {                            /* already loaded; skip reload (supports diamond imports) */
+    if (prev >= 0) {                            /* already loaded; skip reload (supports diamond use) */
         /* If bound under two different namespaces (alias clash), symbols would live under
-         * different names, so report a clear error. (An empty ns = symbol/direct import does not
+         * different names, so report a clear error. (An empty ns = symbol/direct use does not
          * clash because struct/trait symbols are global anyway.) */
         const char *prev_ns = L->loaded_ns[prev] ? L->loaded_ns[prev] : "";
         const char *now_ns = ns ? ns : "";
         if (strcmp(prev_ns, now_ns) != 0) {
-            /* Mixing import forms for one module used to dedup silently; the second import's
+            /* Mixing use forms for one module used to dedup silently; the second form's
              * free functions then live under the first form's namespace and are unreachable
              * under the requested one. Structs/traits/methods are global either way, so this
              * is a warning, not an error; two DIFFERENT namespaces stay a hard error. */
             if (prev_ns[0] && now_ns[0]) {
-                fprintf(stderr, "error: module '%s' is already imported as namespace '%s'; cannot also import it as '%s'\n",
+                fprintf(stderr, "error: module '%s' is already used as namespace '%s'; cannot also use it as '%s'\n",
                         path, prev_ns, now_ns);
                 L->had_error = 1;
             } else {
                 /* One namespace form and one symbol form of the SAME module. Both
-                 * spellings are legitimate (import { io, string } from "std" next
-                 * to import { String } from "std/string" is the normal way to
-                 * write it), so the module's free functions are made reachable
-                 * under both instead of one of them silently not working. */
+                 * spellings are legitimate (use std::{io, string} next to
+                 * use std::string::String is the normal way to write it), so the
+                 * module's free functions are made reachable under both instead
+                 * of one of them silently not working. */
                 alias_module_functions(L, prev, prev_ns, now_ns);
             }
         }
         return;
     }
-    /* Circular import check: this module is already being loaded in the current call chain (A -> B -> A) */
+    /* Circular use check: this module is already being loaded in the current call chain (A -> B -> A) */
     for (int i = 0; i < L->nloading; i++)
         if (strcmp(L->loading[i], canon) == 0) {
-            fprintf(stderr, "error: circular import detected involving module '%s'\n", path);
+            fprintf(stderr, "error: circular use detected involving module '%s'\n", path);
             L->had_error = 1;
             return;
         }

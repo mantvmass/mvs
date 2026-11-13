@@ -48,7 +48,7 @@ make test       # golden output + compile-only + compile-fail suite
 |------|------|
 | `src/token.h`, `src/lexer.{h,c}` | token kinds, hand-written tokenizer |
 | `src/ast.{h,c}`, `src/parser.{h,c}` | AST (one `Node` tagged by `kind`), recursive descent |
-| `src/module.{h,c}` | resolve `import` across files + the std and core packages |
+| `src/module.{h,c}` | resolve `use`/`mod` across files + the std and core packages |
 | `src/generic.c` | passes after parse: enum desugar, monomorphize, resolve_overloads, typecheck |
 | `src/diag.{h,c}` | Rust-style diagnostics: excerpts, carets, help notes, warnings |
 | `src/codegen.{h,c}` | driver: picks the backend by `TargetArch` |
@@ -71,7 +71,7 @@ make test       # golden output + compile-only + compile-fail suite
 - IR optimization: `opt.c`
 - instruction emission: `arch/x86_64/win.c` (and the sysv/arm64 twins);
   shared logic goes in `arch/common.c`
-- import behavior: `module.c`; stdlib functions: `std/*.mvs`
+- module behavior: `module.c`; stdlib functions: `std/*.mvs`
 - a new arch: `arch/<arch>/<os>.c` (reuse `common.c`) + `TargetArch`
   (`codegen.h`) + a case in `codegen.c`
 
@@ -104,7 +104,7 @@ Worth knowing beyond the guide:
 - **How the audit stays exhaustive.** `scripts/audit.sh` is the one command.
   Its enumerated axes: `matrix.sh` (every type through every context),
   `matrix_features.sh` (every feature through every context),
-  `matrix_modules.sh` (every import form crossed with every kind of exported
+  `matrix_modules.sh` (every use/mod form crossed with every kind of exported
   thing), `api_coverage.py` (every std/core function must be called by a test
   or example), and `tests/diff/ops_*` from `gen_ops_diff.py` (every operator on
   every numeric type with C as the oracle, 1924 checks). When a bug turns up,

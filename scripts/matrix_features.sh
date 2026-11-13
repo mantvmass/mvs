@@ -42,8 +42,8 @@ check() {   # $1 = name, the program is already at $TMP/$1.mvs, $2 = expected st
 
 # --- 1. trait objects through every context -----------------------------
 cat > "$TMP/dyn.mvs" <<'EOF'
-import { io } from "std";
-import { Vec } from "std/vec";
+use std::io;
+use std::vec::Vec;
 
 trait Shape {
     func area(self: *Self) -> i64;
@@ -111,8 +111,8 @@ check dyn "dyn ok"
 
 # --- 2. function pointers through every context --------------------------
 cat > "$TMP/funcptr.mvs" <<'EOF'
-import { io } from "std";
-import { Vec } from "std/vec";
+use std::io;
+use std::vec::Vec;
 
 func add(a: i64, b: i64) -> i64 { return a + b; }
 func mul(a: i64, b: i64) -> i64 { return a * b; }
@@ -157,8 +157,8 @@ check funcptr "funcptr ok"
 
 # --- 3. generic functions with trait bounds over several types ------------
 cat > "$TMP/bounds.mvs" <<'EOF'
-import { io } from "std";
-import { String } from "std/string";
+use std::io;
+use std::string::String;
 
 trait Label { func label(self: *Self) -> str; }
 struct A { v: i64; }
@@ -192,10 +192,10 @@ check bounds "bounds ok"
 
 # --- 4. a STRUCT used as the generic argument everywhere ------------------
 cat > "$TMP/structarg.mvs" <<'EOF'
-import { io } from "std";
-import { Vec } from "std/vec";
-import { HashMap } from "std/map";
-import { Option, Some, None } from "std/option";
+use std::io;
+use std::vec::Vec;
+use std::map::HashMap;
+use std::option::{Option, Some, None};
 
 struct P { x: i64; y: i64; }
 struct Wrap<T> { inner: T; }
@@ -245,7 +245,7 @@ check structarg "structarg ok"
 
 # --- 5. pointers through every context ------------------------------------
 cat > "$TMP/pointers.mvs" <<'EOF'
-import { io, mem } from "std";
+use std::{io, mem};
 
 struct Node { value: i64; next: *Node; }
 struct Pair { a: *i64; b: **i64; }
@@ -304,7 +304,7 @@ check pointers "pointers ok"
 
 # --- 6. control flow crossing match, loops and functions ------------------
 cat > "$TMP/flow.mvs" <<'EOF'
-import { io } from "std";
+use std::io;
 
 enum Step { Go(i64), Skip, Stop }
 
@@ -381,10 +381,10 @@ check flow "flow ok"
 
 # --- 7. pointers as generic arguments -------------------------------------
 cat > "$TMP/ptrgen.mvs" <<'EOF'
-import { io, mem } from "std";
-import { Vec } from "std/vec";
-import { HashMap } from "std/map";
-import { Option, Some, None } from "std/option";
+use std::{io, mem};
+use std::vec::Vec;
+use std::map::HashMap;
+use std::option::{Option, Some, None};
 
 struct Node { value: i64; }
 struct Wrap<T> { inner: T; }
@@ -450,10 +450,10 @@ check ptrgen "ptrgen ok"
 
 # --- 8. inferring a generic parameter THROUGH a composite parameter --------
 cat > "$TMP/infer.mvs" <<'EOF'
-import { io } from "std";
-import { Vec } from "std/vec";
-import { HashMap } from "std/map";
-import { Option, Some, None } from "std/option";
+use std::io;
+use std::vec::Vec;
+use std::map::HashMap;
+use std::option::{Option, Some, None};
 
 struct Node { value: i64; }
 struct Wrap<T> { inner: T; }
@@ -517,7 +517,7 @@ check infer "infer ok"
 
 # --- 9. i128 through every context ------------------------------------------
 cat > "$TMP/i128ctx.mvs" <<'EOF'
-import { io } from "std";
+use std::io;
 
 struct Big { val: i128; tag: i64; }
 

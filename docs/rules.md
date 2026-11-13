@@ -16,12 +16,12 @@ you write an OS, a bootloader, or bare-metal code with it.
 
 - Nothing in the compiler core emits I/O or pulls in an OS dependency. Anything
   that touches the OS or CRT (printing, files, sockets, input) lives in
-  `std/*.mvs` and must be imported explicitly.
-- `io.out` is an intrinsic, but it is gated behind `import { io }`.
+  `std/*.mvs` and must be brought into scope with `use`.
+- `io.out` is an intrinsic, but it is gated behind `use std::io`.
 - Codegen uses the win64 calling convention by default. That is the ABI of
   calling a function, not an OS API; an OS for the same architecture can use
   the same convention.
-- `--nostd` is the real freestanding mode: no package imports, no CRT linkage,
+- `--nostd` is the real freestanding mode: no `use std::*` allowed, no CRT linkage,
   emits an object you link or embed yourself.
 - When adding a feature, never bake an OS/CRT dependency into the core. If you
   genuinely need the OS, reach it through `extern` from inside `std/*.mvs`.
@@ -254,29 +254,33 @@ Build, assemble, link:
 
 ## 6.5 Module system
 
-- Import resolution lives in `src/module.c`; the parser still works one file
+- Module resolution lives in `src/module.c`; the parser still works one file
   at a time.
-- Three forms, the path decides (`handle_import`):
-  - `import { io } from "std"`: bare package, names are submodules, used as a
-    namespace (`io.xxx`).
-  - `import { S } from "std/x"` or `"./f.mvs"`: specific module, names are
-    symbols, pulled in directly.
-  - `import alias from "std/x"`: no braces, the whole module becomes namespace
-    `alias`.
-  - A path ending in `.mvs` is a relative file; otherwise `<stddir>/<sub>.mvs`.
-- Immediate errors: a symbol import that doesn't exist; duplicate
+- Rust-style paths resolved by `handle_use`:
+  - `use std::io`: namespace import, the last segment becomes a namespace (`io.xxx`).
+  - `use std::string::String`: symbol import, trailing segments after the module
+    file are pulled in directly.
+  - `use std::vec::{Vec, VecIter}`: braced symbol import from one module.
+  - `use path::*`: glob import, all exported symbols pulled in.
+  - `use "../../path"::items`: string path fallback for edge cases (numeric
+    directory names, deep relative paths that `::` identifiers cannot express).
+  - `pub use self::greet::{hello, goodbye}`: re-export from a submodule.
+  - `mod name;` / `pub mod name;`: declare a submodule (`name.mvs` or `name/mod.mvs`).
+  - First segment determines root: `std` -> std dir, `core` -> core dir,
+    `self` -> current dir, `super` -> parent dir.
+- Immediate errors: a symbol that does not exist in the target module; duplicate
   struct/trait/func (same ns+name+sig, checked in `check_duplicates` before
   monomorphize; overloads and duplicate externs are fine); one namespace bound
-  to two modules (`register_ns`); circular import (`Loader.loading[]` is the
+  to two modules (`register_ns`); circular use (`Loader.loading[]` is the
   in-flight stack, `loaded[]` registers on completion so diamonds work).
 - The std folder is found via `MVS_STD`, else `<dir of mvs.exe>/std`. std is
   real MVS (the table in [guide.md](guide.md) section 4.12 is the authority),
   reaching the OS through `extern`, with per-OS halves selected by `@compile`.
-  `core` is the pure-MVS subset importable under `--nostd`.
-- structs/traits are not namespaced yet (always global); import a type with a
-  symbol import. Alias/namespace affects free functions only.
+  `core` is the pure-MVS subset usable under `--nostd`.
+- structs/traits are not namespaced yet (always global); bring a type into
+  scope with `use`. Namespace affects free functions only.
 - `io.out` parses `{}` at compile time and picks a format per argument
-  (`build_c_format()` in `arch/common.c`); gated on io being imported.
+  (`build_c_format()` in `arch/common.c`); gated on `use std::io`.
 - Tree-shaking: only functions reachable from main (and exports) are emitted.
 
 ## 7. Multi-architecture structure (don't break this)
@@ -316,5 +320,5 @@ src/arch/
 - Backend state lives in one `Gen` struct; the compiler works one file at a time.
 - Front-end errors go through `diag_print()` (file:line:col, quoted source line
   with a caret, `diag_help()` when there is an obvious fix). Warnings are gated
-  on `diag_is_primary()` so imported modules stay quiet. Codegen-internal
+  on `diag_is_primary()` so modules loaded via `use` stay quiet. Codegen-internal
   errors may use plain `fprintf(stderr, ...)`. All messages in English.
