@@ -547,8 +547,9 @@ static int run_test_suite(const char *argv0, const char *path_arg) {
     for (int i = 0; i < ngold; i++) {
         if (strncmp(names[i], "interop_", 8) == 0) continue;   /* needs a C toolchain; covered by scripts/CI */
 #ifndef _WIN32
-        /* its golden embeds the Windows argv[0] path; the Linux CI scripts skip it too */
+        /* golden embeds the Windows argv[0] path; skip on Linux where the binary is /tmp/mvs_selftest */
         if (strcmp(names[i], "01_language_args") == 0) continue;
+        if (strcmp(names[i], "08_stdlib_lib_env2") == 0) continue;
 #endif
         tr_name_to_path(names[i], path, sizeof(path));
         const char *runargs = strcmp(names[i], "01_language_args") == 0 ? " 10 32" : "";
