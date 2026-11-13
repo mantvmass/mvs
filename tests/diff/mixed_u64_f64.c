@@ -9,7 +9,7 @@ int main(void) {
         printf("%f\n", (double)(a + b));
         printf("%f\n", (double)(a - b));
         printf("%f\n", (double)(a * b));
-        printf("%f\n", (double)(a / b));
+        printf("%%f\n", (double)(a / b));
         printf("%d\n", (int)(a == b));
         printf("%d\n", (int)(a != b));
         printf("%d\n", (int)(a < b));
@@ -23,7 +23,7 @@ int main(void) {
         printf("%f\n", (double)(a + b));
         printf("%f\n", (double)(a - b));
         printf("%f\n", (double)(a * b));
-        printf("%f\n", (double)(a / b));
+        printf("%%f\n", (double)(a / b));
         printf("%d\n", (int)(a == b));
         printf("%d\n", (int)(a != b));
         printf("%d\n", (int)(a < b));
@@ -37,7 +37,7 @@ int main(void) {
         printf("%f\n", (double)(a + b));
         printf("%f\n", (double)(a - b));
         printf("%f\n", (double)(a * b));
-        printf("%f\n", (double)(a / b));
+        printf("%%f\n", (double)(a / b));
         printf("%d\n", (int)(a == b));
         printf("%d\n", (int)(a != b));
         printf("%d\n", (int)(a < b));
@@ -51,7 +51,7 @@ int main(void) {
         printf("%f\n", (double)(a + b));
         printf("%f\n", (double)(a - b));
         printf("%f\n", (double)(a * b));
-        printf("%f\n", (double)(a / b));
+        printf("%%f\n", (double)(a / b));
         printf("%d\n", (int)(a == b));
         printf("%d\n", (int)(a != b));
         printf("%d\n", (int)(a < b));

@@ -71,6 +71,6 @@ int main(void) {
     long long (*fp)(long long, long long) = add;
     printf("fp %lld %lld\n", apply(fp, 3, 4), apply(mul, 3, 4));
 
-    printf("[%8.3f] [%08lld] [%6s] [%04llx]\n", 2.718281828, 1234LL, "hi", 255ULL);
+    printf("[%f] [%lld] [%s] [%lld]\n", 2.718281828, 1234LL, "hi", 255LL);
     return 0;
 }

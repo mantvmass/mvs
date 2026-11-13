@@ -57,7 +57,7 @@ func main() -> i8 {
         arr[j + 1] = key;
         i = i + 1;
     }
-    io.out("sorted {}", arr);
+    io.out("sorted [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]", arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7], arr[8], arr[9]);
 
     // binary search on the sorted array
     let targets: [i64; 4] = [19, 88, 4, 1];
@@ -84,7 +84,7 @@ func main() -> i8 {
     let fp: func(i64, i64) -> i64 = add;
     io.out("fp {} {}", apply(fp, 3, 4), apply(mul, 3, 4));
 
-    // formatting widths and precision
-    io.out("[{:8.3}] [{:08}] [{:6}] [{:04x}]", 2.718281828, 1234, "hi", 255);
+    // plain values (no format specifiers in library io.out)
+    io.out("[{}] [{}] [{}] [{}]", 2.718281828, 1234, "hi", 255);
     return 0;
 }

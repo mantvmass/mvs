@@ -38,7 +38,7 @@ func main() -> i8 {
     // comparisons and searching
     io.out("cmp {} {} {}", cstr.cmp("abc", "abd"), cstr.cmp("b", "a"), cstr.cmp("x", "x"));
     io.out("find {} {} {}", cstr.find("kernel", 'e'), cstr.find("kernel", 'l'), cstr.find("kernel", 'z'));
-    io.out("prefix {} {}", cstr.starts_with("multiboot", "multi"), cstr.starts_with("multi", "multiboot"));
+    io.out("prefix {} {}", cstr.starts_with("multiboot", "multi") as i32, cstr.starts_with("multi", "multiboot") as i32);
 
     // buffer manipulation
     let buf: *u8 = malloc(64);
@@ -46,9 +46,9 @@ func main() -> i8 {
     io.out("reversed {}", buf as str);
     let copy: *u8 = malloc(64);
     mem.copy(copy, buf, cstr.len(buf as str) + 1);
-    io.out("copy eq {}", mem.eq(buf, copy, 13));
+    io.out("copy eq {}", mem.eq(buf, copy, 13) as i32);
     mem.set(copy, 65, 4);
-    io.out("after set {} eq {}", copy as str, mem.eq(buf, copy, 13));
+    io.out("after set {} eq {}", copy as str, mem.eq(buf, copy, 13) as i32);
 
     // bit twiddling on the hash values
     let h: u64 = fnv1a("mvs");
