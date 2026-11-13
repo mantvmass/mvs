@@ -278,50 +278,6 @@ static void handle_use(Loader *L, Node *imp, const char *base_dir, const char *p
     if (!path) return;
     int is_glob = (imp->name && strcmp(imp->name, "*") == 0);
 
-    /* String path form: use "../../path/to/module"::{items}; */
-    if (imp->is_extern) {
-        char file[1024];
-        snprintf(file, sizeof(file), "%s/%s.mvs", base_dir, path);
-        if (!read_file_exists(file)) {
-            char dir_mod[1024];
-            snprintf(dir_mod, sizeof(dir_mod), "%s/%s/mod.mvs", base_dir, path);
-            if (read_file_exists(dir_mod))
-                strncpy(file, dir_mod, sizeof(file));
-        }
-        if (!read_file_exists(file)) {
-            fprintf(stderr, "error: cannot find module '%s' (from %s)\n", path, base_dir);
-            L->had_error = 1; return;
-        }
-        const char *sub_ns = "";
-        if (imp->is_export && parent_ns && parent_ns[0])
-            sub_ns = parent_ns;
-        if (imp->nitems > 0) {
-            load_module(L, file, sub_ns);
-            char canon[1024]; canonicalize(file, canon, sizeof(canon));
-            int idx = find_loaded(L, canon);
-            if (idx >= 0 && L->defs[idx]) {
-                for (int i = 0; i < imp->nitems; i++) {
-                    const char *nm = imp->items[i]->name;
-                    if (!defs_has(L->defs[idx], nm)) {
-                        fprintf(stderr, "error: module has no exported symbol '%s' (use \"%s\")\n", nm, path);
-                        L->had_error = 1;
-                    }
-                }
-            }
-        } else if (is_glob) {
-            load_module(L, file, sub_ns);
-        } else {
-            const char *last = strrchr(path, '/');
-            const char *ns_name = last ? last + 1 : path;
-            char ns_copy[256];
-            strncpy(ns_copy, ns_name, sizeof(ns_copy) - 1); ns_copy[sizeof(ns_copy) - 1] = '\0';
-            char canon[1024]; canonicalize(file, canon, sizeof(canon));
-            register_ns(L, ns_copy, canon);
-            load_module(L, file, ns_copy);
-        }
-        return;
-    }
-
     char buf[1024];
     strncpy(buf, path, sizeof(buf) - 1); buf[sizeof(buf) - 1] = '\0';
     char *segs[16]; int nseg = 0;

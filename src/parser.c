@@ -1120,41 +1120,6 @@ static Node *parse_use(Parser *p) {
     Node *n = node_new(ND_IMPORT, p->cur.line);
     advance(p); /* consume use */
     char path[1024]; path[0] = '\0';
-    if (check(p, TK_STRING)) {
-        /* String path for edge cases (paths with numbers, deep relatives, etc.)
-         * is_extern flags it so module.c uses file-based resolution */
-        n->is_extern = 1;
-        strncat(path, p->cur.lexeme, sizeof(path) - 1);
-        advance(p);
-        if (match(p, TK_COLONCOLON)) {
-            if (check(p, TK_LBRACE)) {
-                advance(p);
-                if (!check(p, TK_RBRACE)) {
-                    do {
-                        if (!check(p, TK_IDENT)) { error(p, "expected name in use list"); break; }
-                        Node *id = node_new(ND_IDENT, p->cur.line);
-                        id->name = strdup(p->cur.lexeme);
-                        node_add_item(n, id);
-                        advance(p);
-                    } while (match(p, TK_COMMA));
-                }
-                expect(p, TK_RBRACE, "expected '}' to close use list");
-            } else if (check(p, TK_STAR)) {
-                n->name = strdup("*");
-                advance(p);
-            } else if (check(p, TK_IDENT)) {
-                Node *id = node_new(ND_IDENT, p->cur.line);
-                id->name = strdup(p->cur.lexeme);
-                node_add_item(n, id);
-                advance(p);
-            } else {
-                error(p, "expected identifier, '{', or '*' after '::'");
-            }
-        }
-        n->str_val = strdup(path);
-        expect(p, TK_SEMICOLON, "expected ';' after use statement");
-        return n;
-    }
     if (!check(p, TK_IDENT)) { error(p, "expected path after 'use'"); return n; }
     strncat(path, p->cur.lexeme, sizeof(path) - 1);
     advance(p);

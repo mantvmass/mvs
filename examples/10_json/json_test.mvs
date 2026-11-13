@@ -1,9 +1,8 @@
-// unit tests for the JSON example (examples/10_json), the largest MVS program
-// in the repository: parsing, paths, serialization, and error handling
+// unit tests for the JSON library: parsing, paths, serialization, and error handling
 use std::test;
-use "../../examples/10_json/value"::{Doc, Json};
-use "../../examples/10_json/parser"::parse_into;
-use "../../examples/10_json/writer"::{to_string, to_pretty};
+use self::value::{Doc, Json};
+use self::parser::parse_into;
+use self::writer::{to_string, to_pretty};
 use std::result::{Result, Ok, Err};
 use std::option::{Option, Some, None};
 use std::string::String;
