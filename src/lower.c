@@ -1349,12 +1349,27 @@ static int lower_expr(Gen *g, IRFunc *f, Node *n) {
             /* integer width adjustment */
             if (n->ptr == 0 && !dst_f &&
                 n->type != TYPE_STR && n->type != TYPE_VOID && n->type != TYPE_STRUCT) {
-                int sz = type_size(g, n->type, 0, NULL);
-                if (sz < 8) {
+                int dst_sz = type_size(g, n->type, 0, NULL);
+                /* widening: narrow source integer -> wider destination (e.g. i32 -> i64).
+                 * On x86-64 a 32-bit op zero-extends to rax, so a signed negative
+                 * value in eax (like strcmp's -1) becomes a large positive in rax
+                 * unless we sign-extend explicitly. */
+                if (!src_f && st.ptr == 0) {
+                    int src_sz = type_size(g, st.base, 0, NULL);
+                    if (src_sz < dst_sz && src_sz < 8) {
+                        int d = ir_vreg(f);
+                        IRInst *tr = ir_emit(f, is_signed_type(st.base) ? IR_SEXT : IR_ZEXT,
+                                             d, val, IR_NONE);
+                        tr->size = src_sz;
+                        return d;
+                    }
+                }
+                /* narrowing or sub-register masking */
+                if (dst_sz < 8) {
                     int dst = ir_vreg(f);
                     IRInst *tr = ir_emit(f, is_signed_type(n->type) ? IR_SEXT : IR_ZEXT,
                                          dst, val, IR_NONE);
-                    tr->size = sz;
+                    tr->size = dst_sz;
                     tr->imm = 8;
                     return dst;
                 }
