@@ -547,16 +547,10 @@ io::out("[{:.3}]", 2.71828);       // [2.718]
 io::out("[{:04x}]", 255);          // [00ff]
 ```
 
-`io::out` is a **compiler intrinsic** (like Rust's `println!`): it parses `{}` at compile time and picks the
-print format per argument. It needs `use std::io`, and it handles structs (expanded to
-`Name { field: value, ... }`, including nested) and any number of arguments.
-
-Why keep it an intrinsic at all? Printing an arbitrary STRUCT with `{}` uses compile-time
-reflection (the compiler expands the fields), which a library cannot express. For everything
-else the library route exists: `fmt::outf(f, args...)` is io::out written in pure MVS. It takes a
-variadic `...dyn Display` slice, walks the `{}` placeholders at run time, and dispatches each
-value through its `Display` impl (every primitive ships one; user structs join by writing
-`impl Display for T`). See `examples/08_stdlib/lib_out.mvs`.
+`io::out` is a **library function** in `std/io.mvs`: it takes a format string and a variadic
+`...dyn Display` slice, walks the `{}` placeholders at run time, and dispatches each value
+through its `Display` impl. Every primitive type ships a Display impl; user structs join by
+writing `impl Display for T`. It needs `use std::io`, and it handles any number of arguments.
 
 #### `::` as a path separator
 
@@ -1383,11 +1377,12 @@ The double's bit-pattern lives in rax like an integer, moving into xmm only for 
 
 If a side is an int it's converted first with `cvtsi2sd`.
 
-### 6.6 io::out (compiler intrinsic)
+### 6.6 io::out (library function)
 
-Compiling `io::out("x = {}", n)`, the compiler: (1) scans the format string for `{}` and counts placeholders;
-(2) picks a specifier per arg (`{}` + int → `%lld`, str → `%s`, char → `%c`, float → `%f`, `{:x}` → `%llx`);
-(3) builds the C format `"x = %lld\n"` and calls `printf`.
+`io::out` is a library function in `std/io.mvs`. At run time it walks the format string byte by
+byte, and for each `{}` placeholder it calls the next argument's `Display::fmt` method through
+dynamic dispatch (the variadic `...dyn Display` mechanism). The returned `String` is written to
+stdout via `fputs`, then freed.
 
 ### 6.7 Symbol naming
 
@@ -1686,10 +1681,9 @@ fixed:
   taking or returning `f32` won't narrow double to single (function pointers
   are meant for MVS functions).
 
-A note on io::out: the library path is complete. `fmt::outf(f, args...)` is a
-pure-MVS formatted print built on Display impls and variadic `...dyn Display`
-slices. `io::out` itself stays an intrinsic because printing an arbitrary
-struct uses compile-time reflection, which a library cannot express.
+`io::out` is a library function in `std/io.mvs`, built on Display impls and
+variadic `...dyn Display` slices. It walks the format string at run time and
+dispatches each argument through dynamic dispatch.
 
 For where to edit when adding a feature, see the table in
 [../CLAUDE.md](../CLAUDE.md).

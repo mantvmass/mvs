@@ -18,11 +18,11 @@ func main() -> i8 {
     io.out("(-2) ** 2 = {}", (-2) ** 2);       // 4  (parentheses keep the minus inside)
     io.out("17 % 5 = {}", 17 % 5);             // 2  (modulo, integers only)
 
-    io.out("5 > 3 = {}", 5 > 3);               // 1 (comparison yields bool 1/0)
-    io.out("5 == 3 = {}", 5 == 3);             // 0
-    io.out("true && false = {}", true && false); // 0 (short-circuit)
-    io.out("true || false = {}", true || false); // 1
-    io.out("!false = {}", !false);                // 1
+    io.out("5 > 3 = {}", 5 > 3);               // true
+    io.out("5 == 3 = {}", 5 == 3);             // false
+    io.out("true && false = {}", true && false); // false (short-circuit)
+    io.out("true || false = {}", true || false); // true
+    io.out("!false = {}", !false);                // true
 
     io.out("sum6 = {}", sum6(1, 2, 3, 4, 5, 6)); // 21
 

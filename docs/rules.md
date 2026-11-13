@@ -17,7 +17,7 @@ you write an OS, a bootloader, or bare-metal code with it.
 - Nothing in the compiler core emits I/O or pulls in an OS dependency. Anything
   that touches the OS or CRT (printing, files, sockets, input) lives in
   `std/*.mvs` and must be brought into scope with `use`.
-- `io::out` is an intrinsic, but it is gated behind `use std::io`.
+- `io::out` is a library function (variadic trait objects), gated behind `use std::io`.
 - Codegen uses the win64 calling convention by default. That is the ABI of
   calling a function, not an OS API; an OS for the same architecture can use
   the same convention.
