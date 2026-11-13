@@ -217,12 +217,21 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             continue;
         }
         if (is_float_param) {
-            if (fn->is_export && p->type == TYPE_F32 && p->ptr == 0) {
+            if (p->type == TYPE_F32 && p->ptr == 0) {
                 if (pnf < 8) {
+                    if (!fn->is_export)
+                        fprintf(g->out, "    fcvt s%d, d%d\n", pnf, pnf);
                     addr_local(g, "x9", psym->offset);
                     fprintf(g->out, "    str s%d, [x9]\n", pnf++);
                 } else {
-                    fprintf(g->out, "    ldr w0, [x29, #%d]\n", 16 + 8 * pnstk++);
+                    if (!fn->is_export) {
+                        fprintf(g->out, "    ldr d0, [x29, #%d]\n", 16 + 8 * pnstk);
+                        fprintf(g->out, "    fcvt s0, d0\n");
+                        fprintf(g->out, "    fmov w0, s0\n");
+                    } else {
+                        fprintf(g->out, "    ldr w0, [x29, #%d]\n", 16 + 8 * pnstk);
+                    }
+                    pnstk++;
                     addr_local(g, "x9", psym->offset);
                     fprintf(g->out, "    str w0, [x9]\n");
                 }
@@ -642,9 +651,8 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
                 else fprintf(g->out, "    mov x9, #%d\n    add sp, sp, x9\n", callspace);
             }
             if (inst->dst != IR_NONE) {
-                int c_abi = inst->sig && (inst->sig->is_extern || inst->sig->is_export);
                 if (inst->sig && is_float_type(inst->sig->type) && inst->sig->ptr == 0) {
-                    if (c_abi && inst->sig->type == TYPE_F32)
+                    if (inst->sig->type == TYPE_F32)
                         fprintf(g->out, "    fcvt d0, s0\n");
                     fprintf(g->out, "    fmov x0, d0\n");
                 }

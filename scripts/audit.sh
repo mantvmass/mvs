@@ -31,7 +31,7 @@ step() { printf '\n=== %s ===\n' "$1"; }
 note() { fails="$fails\n  - $1"; }
 
 CFLAGS_C="-Wall -Wextra -Werror -O2 -Isrc"
-SRC="src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c"
+SRC="src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/ir.c src/lower.c src/opt.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c"
 
 step "build the compiler (warnings are errors)"
 if gcc $CFLAGS_C $SRC -o mvs; then echo "ok"; else echo "FAILED"; note "compiler build"; exit 1; fi

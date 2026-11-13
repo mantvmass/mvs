@@ -236,7 +236,9 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             continue;
         }
         if (pos < 4) {
-            if (fn->is_export && p->type == TYPE_F32 && p->ptr == 0) {
+            if (p->type == TYPE_F32 && p->ptr == 0) {
+                if (!fn->is_export)
+                    fprintf(g->out, "    cvtsd2ss xmm%d, xmm%d\n", pos, pos);
                 fprintf(g->out, "    movd dword [rbp - %d], xmm%d\n", psym->offset, pos);
             } else if (is_float_param) {
                 fprintf(g->out, "    movq rax, xmm%d\n", pos);
@@ -245,8 +247,14 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
                 fprintf(g->out, "    mov [rbp - %d], %s\n", psym->offset, argregs[pos]);
             }
         } else {
-            if (fn->is_export && p->type == TYPE_F32 && p->ptr == 0) {
-                fprintf(g->out, "    mov eax, dword [rbp + %d]\n", 48 + (pos - 4) * 8);
+            if (p->type == TYPE_F32 && p->ptr == 0) {
+                if (fn->is_export) {
+                    fprintf(g->out, "    mov eax, dword [rbp + %d]\n", 48 + (pos - 4) * 8);
+                } else {
+                    fprintf(g->out, "    movq xmm0, [rbp + %d]\n", 48 + (pos - 4) * 8);
+                    fprintf(g->out, "    cvtsd2ss xmm0, xmm0\n");
+                    fprintf(g->out, "    movd eax, xmm0\n");
+                }
                 fprintf(g->out, "    mov dword [rbp - %d], eax\n", psym->offset);
             } else {
                 fprintf(g->out, "    mov rax, [rbp + %d]\n", 48 + (pos - 4) * 8);
@@ -592,7 +600,7 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             fprintf(g->out, "    add rsp, %d\n", call_frame);
             if (inst->dst != IR_NONE) {
                 if (inst->sig && is_float_type(inst->sig->type) && inst->sig->ptr == 0) {
-                    if ((inst->sig->is_extern || inst->sig->is_export) && inst->sig->type == TYPE_F32)
+                    if (inst->sig->type == TYPE_F32)
                         fprintf(g->out, "    cvtss2sd xmm0, xmm0\n");
                     fprintf(g->out, "    movq rax, xmm0\n");
                 }

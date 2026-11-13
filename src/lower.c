@@ -1902,7 +1902,7 @@ IRFunc *lower_func(Gen *g, Node *fn, Node *program, int nregpool) {
         g->sret_off = add_local(g, "$sret", TYPE_USIZE, 0, 0, 0, NULL, NULL, &frame);
 
     g->cur_ret_float = is_float_type(fn->type) && fn->ptr == 0;
-    g->cur_ret_f32c = fn->is_export && fn->type == TYPE_F32 && fn->ptr == 0;
+    g->cur_ret_f32c = fn->type == TYPE_F32 && fn->ptr == 0;
     g->cur_ret_i128 = is_i128(fn->type, fn->ptr);
     g->cur_ret_dyn = is_dyn(fn->type, fn->ptr) ? fn->type_name : NULL;
 

@@ -243,11 +243,20 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             continue;
         }
         if (is_float_param) {
-            if (fn->is_export && p->type == TYPE_F32 && p->ptr == 0) {
+            if (p->type == TYPE_F32 && p->ptr == 0) {
                 if (pnx < 8) {
+                    if (!fn->is_export)
+                        fprintf(g->out, "    cvtsd2ss xmm%d, xmm%d\n", pnx, pnx);
                     fprintf(g->out, "    movd dword [rbp - %d], xmm%d\n", psym->offset, pnx++);
                 } else {
-                    fprintf(g->out, "    mov eax, dword [rbp + %d]\n", 16 + 8 * pnstk++);
+                    if (!fn->is_export) {
+                        fprintf(g->out, "    movq xmm0, [rbp + %d]\n", 16 + 8 * pnstk);
+                        fprintf(g->out, "    cvtsd2ss xmm0, xmm0\n");
+                        fprintf(g->out, "    movd eax, xmm0\n");
+                    } else {
+                        fprintf(g->out, "    mov eax, dword [rbp + %d]\n", 16 + 8 * pnstk);
+                    }
+                    pnstk++;
                     fprintf(g->out, "    mov dword [rbp - %d], eax\n", psym->offset);
                 }
             } else {
@@ -612,9 +621,8 @@ static void emit_ir_func(Gen *g, IRFunc *f) {
             }
             if (callspace) fprintf(g->out, "    add rsp, %d\n", callspace);
             if (inst->dst != IR_NONE) {
-                int c_abi = inst->sig && (inst->sig->is_extern || inst->sig->is_export);
                 if (inst->sig && is_float_type(inst->sig->type) && inst->sig->ptr == 0) {
-                    if (c_abi && inst->sig->type == TYPE_F32)
+                    if (inst->sig->type == TYPE_F32)
                         fprintf(g->out, "    cvtss2sd xmm0, xmm0\n");
                     fprintf(g->out, "    movq rax, xmm0\n");
                 }
