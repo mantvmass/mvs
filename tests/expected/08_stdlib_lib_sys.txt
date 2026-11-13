@@ -1,6 +1,6 @@
-slept = 1
-epoch ok = 1
+slept = true
+epoch ok = true
 env = hello
 missing = []
-pid ok = 1
-run ok = 1
+pid ok = true
+run ok = true

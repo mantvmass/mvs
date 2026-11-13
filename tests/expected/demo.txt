@@ -2,7 +2,7 @@
 10 + 20 = 30
 (10 - 5) * 3 = 15
 2 ** 8 = 256
-255 in hex = ff
+255 in hex = 255
 even numbers in 0..10 = 6
 grade B
 factorial(5) = 120

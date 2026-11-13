@@ -47,7 +47,7 @@ func main() -> i8 {
     c.add();                               // default by = 1
     c.add(5);
     io.out("counter = {}", c.val);         // 106
-    io.out("{}", p);                       // prints the pretty generic name
+    io.out("pair = ({}, {})", p.first(), p.second());
 
     // nested generic: a box of a pair
     let nb: Boxed<Pair<i64, i64>> = Boxed<Pair<i64, i64>> { val: Pair<i64, i64> { a: 1, b: 2 } };

@@ -235,6 +235,17 @@ static void alias_module_functions(Loader *L, int mod_index, const char *from_ns
     int start = L->item_start[mod_index], end = L->item_end[mod_index];
     if (end > L->result->nitems) end = L->result->nitems;
     int added = 0;
+    if (to_ns[0] && !from_ns[0]) {
+        const char *canon = L->loaded[mod_index];
+        for (int i = start; i < end; i++) {
+            Node *it = L->result->items[i];
+            if (it->kind != ND_FUNC) continue;
+            if (it->mod && strcmp(it->mod, canon) == 0) {
+                free(it->mod);
+                it->mod = strdup(to_ns);
+            }
+        }
+    }
     for (int i = start; i < end; i++) {
         Node *it = L->result->items[i];
         if (it->kind != ND_FUNC || it->is_method || it->is_extern || it->is_export) continue;

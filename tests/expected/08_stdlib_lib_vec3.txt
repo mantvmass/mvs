@@ -1,6 +1,6 @@
-contains 20: 1
-contains 99: 0
+contains 20: true
+contains 99: false
 index_of 30: 2
 index_of 99: -1
-contains hello: 1
-contains foo: 0
+contains hello: true
+contains foo: false

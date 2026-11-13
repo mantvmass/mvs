@@ -1,9 +1,9 @@
 /*
  * std/fmt.mvs - user-extensible formatting via the Display trait (pure MVS)
  *
- * Unlike io.out (a compiler intrinsic, since it takes an unlimited number/kind of {}),
- * this module is a "real library" using trait + generic (static dispatch):
- * any type that impls Display can be printed through fmt.println.
+ * io.out uses Display via variadic trait objects (dynamic dispatch at runtime).
+ * This module also provides fmt.println for static dispatch (one type at a time):
+ * any type that impls Display can be printed through either path.
  *
  * Usage:
  *     use std::{fmt, string};
@@ -49,6 +49,60 @@ impl Display for bool  {
     func fmt(self: *bool) -> String {
         if (*self) { return String::from("true"); }
         return String::from("false");
+    }
+}
+
+impl Display for u128 {
+    func fmt(self: *u128) -> String {
+        let v: u128 = *self;
+        if (v == 0) { return String::from("0"); }
+        let s: String = String::new();
+        while (v > 0) {
+            let d: u8 = (v % 10) as u8;
+            s.push_char((d + 48) as char);
+            v = v / 10;
+        }
+        let n: usize = s.len();
+        let p: *u8 = s.as_ptr();
+        let lo: usize = 0;
+        let hi: usize = n - 1;
+        while (lo < hi) {
+            let tmp: u8 = p[lo];
+            p[lo] = p[hi];
+            p[hi] = tmp;
+            lo = lo + 1;
+            hi = hi - 1;
+        }
+        return s;
+    }
+}
+
+impl Display for i128 {
+    func fmt(self: *i128) -> String {
+        let v: i128 = *self;
+        if (v == 0) { return String::from("0"); }
+        let neg: bool = v < 0;
+        let u: u128;
+        if (neg) { u = (0 as u128) - (v as u128); } else { u = v as u128; }
+        let s: String = String::new();
+        while (u > 0) {
+            let d: u8 = (u % 10) as u8;
+            s.push_char((d + 48) as char);
+            u = u / 10;
+        }
+        if (neg) { s.push_char('-'); }
+        let n: usize = s.len();
+        let p: *u8 = s.as_ptr();
+        let lo: usize = 0;
+        let hi: usize = n - 1;
+        while (lo < hi) {
+            let tmp: u8 = p[lo];
+            p[lo] = p[hi];
+            p[hi] = tmp;
+            lo = lo + 1;
+            hi = hi - 1;
+        }
+        return s;
     }
 }
 

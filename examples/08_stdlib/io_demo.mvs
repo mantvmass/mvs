@@ -4,8 +4,22 @@
 //  run:    examples\08_stdlib\io_demo.exe
 // ============================================================
 use std::io;
+use std::string::String;
 
 struct Point { x: i32; y: i32; }
+
+impl Display for Point {
+    func fmt(self: *Point) -> String {
+        let s: String = String::from("Point { x: ");
+        let xs: String = String::from_int(self.x as i64);
+        s.push_str(xs.as_str()); xs.drop();
+        s.push_str(", y: ");
+        let ys: String = String::from_int(self.y as i64);
+        s.push_str(ys.as_str()); ys.drop();
+        s.push_str(" }");
+        return s;
+    }
+}
 
 func main() -> i8 {
     io.out("plain text");                                  // plain text (+ trailing newline)

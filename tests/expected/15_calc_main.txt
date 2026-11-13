@@ -35,7 +35,7 @@ after sort.ascending:
   [2] 12.000000
   [3] 42.500000
   [4] 1024.000000
-is_sorted: 1
+is_sorted: true
 after sort.descending:
   [0] 1024.000000
   [1] 42.500000

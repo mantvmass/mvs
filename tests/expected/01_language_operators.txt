@@ -4,10 +4,10 @@
 -2 ** 2 = -4
 (-2) ** 2 = 4
 17 % 5 = 2
-5 > 3 = 1
-5 == 3 = 0
-true && false = 0
-true || false = 1
-!false = 1
+5 > 3 = true
+5 == 3 = false
+true && false = false
+true || false = true
+!false = true
 sum6 = 21
 sum even < 7 = 12

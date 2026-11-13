@@ -1,6 +1,6 @@
 plain text
-int=7 float=2.500000 str=hi char=A bool=1
-hex: ff
+int=7 float=2.500000 str=hi char=A bool=true
+hex: 255
 literal braces: {}
 many args: 1 2 3 4 5 6
 struct: Point { x: 3, y: 4 }

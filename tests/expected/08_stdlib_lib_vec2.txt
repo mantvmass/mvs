@@ -1,5 +1,5 @@
 last = 50
-as_ptr valid = 1
+as_ptr valid = true
 remove(1) = 20
 swap_remove(0) = 10
 after swap_remove, len = 3

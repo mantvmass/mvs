@@ -1,10 +1,10 @@
-exists = 1
+exists = true
 size = 11
 read_line = hello
 after append, read = hello
 world
 extra
-copy exists = 1
-moved exists = 1
+copy exists = true
+moved exists = true
 bytes len = 3
 read_dir count = 3

@@ -11,8 +11,8 @@ max = 30
 after overwrite 10 = TEN
 removed 20 = twenty
 len after remove = 4
-contains 5 = 1
-contains 20 = 0
+contains 5 = true
+contains 20 = false
 apple: 1
 banana: 2
 cherry: 3

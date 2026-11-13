@@ -1171,10 +1171,7 @@ void reach_node(Gen *g, Node *n, const char *ns, char *reached) {
     if (!n) return;
     if (n->kind == ND_CALL) {
         Node *callee = n->operand;
-        if (callee->kind == ND_MEMBER && callee->operand->kind == ND_IDENT &&
-            strcmp(callee->operand->name, "io") == 0 && strcmp(callee->name, "out") == 0) {
-            reach_func(g, func_index(g, find_extern_any(g, "printf")), reached); /* io.out uses printf */
-        } else if (callee->kind == ND_IDENT) {
+        if (callee->kind == ND_IDENT) {
             Node *t = find_func(g, ns, callee->name);
             if (!t) t = find_func(g, "", callee->name);
             reach_func(g, func_index(g, t), reached);

@@ -36,7 +36,7 @@ func main() -> i8 {
         t = t + 1;
     }
     io.out("count = {}", counter);
-    io.out("partials = {}", partial);
+    io.out("partials = [{}, {}, {}, {}]", partial[0], partial[1], partial[2], partial[3]);
     io.out("sum ok = {}", partial[0] + partial[1] + partial[2] + partial[3] == counter);
     return 0;
 }

@@ -3,16 +3,19 @@
  *
  * Usage:
  *     use std::io;
- *     io.out("hello");                       // print a message (newline appended automatically)
+ *     io.out("hello");                       // print a message (newline appended)
  *     io.out("number = {}", 42);             // Rust-style interpolation with {}
  *     io.print("no newline");                // raw print, no newline
  *     let line: str = io.read_line("prompt> ");  // read a whole line
  *     io.eprint("error message");            // print to stderr
  *
- * Note: io.out is a compiler intrinsic (like Rust's println!, which is a macro),
- *       because it must parse {} and pick the print type at compile time.
- *       The other functions below are plain MVS calling printf via extern.
+ * io.out is a library function using the Display trait (like fmt.outf).
+ * Every argument type must impl Display (all primitives do; structs need
+ * a manual impl). Format specifiers ({:x}, {:8.2}) are accepted but
+ * ignored: the value is always printed via Display::fmt.
  */
+use std::fmt;
+use std::string::String;
 
 extern func printf(fmt: str) -> i32;
 extern func fprintf(stream: *u8, fmt: str) -> i32;
@@ -20,6 +23,7 @@ extern func scanf(fmt: str) -> i32;
 extern func fgets(buf: *u8, n: i32, stream: *u8) -> *u8;
 extern func malloc(n: usize) -> *u8;
 extern func strlen(s: str) -> usize;
+extern func putchar(c: i32) -> i32;
 
 @compile(target_os = "windows")
 extern func __acrt_iob_func(index: u32) -> *u8;
@@ -81,4 +85,34 @@ func read_line(prompt: str) -> str {
     let n: usize = strlen(buf);
     if (n > 0 && buf[n - 1] == 10) { buf[n - 1] = 0; }
     return buf;
+}
+
+// formatted print with newline (like Rust's println!). {} placeholders are
+// resolved at run time through the Display trait. Format specs ({:x} etc.)
+// are accepted but the value is always printed via Display::fmt.
+func out(f: str, args: ...dyn Display) -> void {
+    let p: *u8 = f;
+    let ai: usize = 0;
+    let i: usize = 0;
+    while (p[i] != 0) {
+        if (p[i] == 123) {
+            if (p[i + 1] == 123) { putchar(123); i = i + 2; continue; }
+            let j: usize = i + 1;
+            while (p[j] != 0 && p[j] != 125) { j = j + 1; }
+            if (p[j] == 125) {
+                if (ai < args_len) {
+                    let s: String = args[ai].fmt();
+                    printf("%s", s.as_str());
+                    s.drop();
+                    ai = ai + 1;
+                }
+                i = j + 1;
+                continue;
+            }
+        }
+        if (p[i] == 125 && p[i + 1] == 125) { putchar(125); i = i + 2; continue; }
+        putchar(p[i] as i32);
+        i = i + 1;
+    }
+    putchar(10);
 }

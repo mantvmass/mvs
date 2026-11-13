@@ -2,10 +2,10 @@ found at 2
 not found
 label = doubled ok
 error: negative input
-hit: some=1 at 2
-miss: none=1 fallback=-1
-good: ok=1 val=42
-bad: err=1 msg=negative input
+hit: some=true at 2
+miss: none=true fallback=-1
+good: ok=true val=42
+bad: err=true msg=negative input
 bad fallback = 0
 str option = text
 f64 fallback = 2.500000

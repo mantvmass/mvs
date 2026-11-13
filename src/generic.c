@@ -1951,6 +1951,14 @@ static int scan_calls(Node *prog, Node *n, Bind *map, int *nmap, int *made) {
     }
     if (is_gcall) {
         Node *tmpl = find_template(prog, n->operand->name);
+        if (tmpl && n->operand->kind == ND_MEMBER && n->operand->operand &&
+            n->operand->operand->kind == ND_IDENT) {
+            const char *call_ns = n->operand->operand->name;
+            const char *tns = tmpl->ns ? tmpl->ns : "";
+            const char *tmod = tmpl->mod ? tmpl->mod : "";
+            if (strcmp(tns, call_ns) != 0 && strcmp(tmod, call_ns) != 0)
+                tmpl = NULL;
+        }
         if (!tmpl && n->operand->ngen > 0) {
             /* explicit type arguments on a call that resolves to no generic function:
              * silently dropping them would change the call's meaning behind the

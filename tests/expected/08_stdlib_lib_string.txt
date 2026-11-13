@@ -1,14 +1,14 @@
 hello, world
 len = 12
-as_ptr = 1
+as_ptr = true
 char_at(0) = 104
 byte_at(0) = 104
 clone = hello, world
-contains(",") = 1
+contains(",") = true
 index_of("world") = 7
 last_index_of("l") = 10
-starts_with("hello") = 1
-ends_with("world") = 1
+starts_with("hello") = true
+ends_with("world") = true
 substring(0,5) = hello
 trim = hi
 trim_start = hi  
@@ -19,4 +19,4 @@ repeat(3) = hahaha
 replace = a-b-c
 count("X") = 2
 truncate(3) = abc
-after clear, is_empty = 1
+after clear, is_empty = true
