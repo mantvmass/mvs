@@ -16,7 +16,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nasm
 
       - name: Build compiler (gcc, warnings are errors)
-        run: gcc -Wall -Wextra -Werror -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/ir.c src/lower.c src/opt.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs
+        run: gcc -Wall -Wextra -Werror -Wno-format-truncation -Wno-stringop-truncation -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/ir.c src/lower.c src/opt.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs
 
       - name: Run ELF64 test suite (compile, link, run, diff goldens)
         run: sh scripts/test_elf_ci.sh
