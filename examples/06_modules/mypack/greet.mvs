@@ -1,0 +1,7 @@
+func hello() -> str {
+    return "hello from greet submodule";
+}
+
+func goodbye() -> str {
+    return "goodbye from greet submodule";
+}

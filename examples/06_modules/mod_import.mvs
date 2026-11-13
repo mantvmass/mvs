@@ -1,0 +1,18 @@
+/*
+ * mod.mvs directory modules (like Rust's mod.rs)
+ *
+ * When "import from ./mypack" and mypack.mvs doesn't exist,
+ * the compiler looks for mypack/mod.mvs instead.
+ * mod.mvs can re-export from submodules with pub import.
+ */
+import { io } from "std";
+import { hello, goodbye } from "./mypack";
+import { add, mul } from "./mypack";
+
+func main() -> i8 {
+    io.out("{}", hello());
+    io.out("{}", goodbye());
+    io.out("2 + 3 = {}", add(2, 3));
+    io.out("4 * 5 = {}", mul(4, 5));
+    return 0;
+}

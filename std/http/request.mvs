@@ -1,0 +1,166 @@
+/*
+ * std/http/request.mvs - HTTP request parsing
+ */
+import { mem } from "std";
+import { cstr } from "core";
+import { Vec } from "std/vec";
+import { HashMap } from "std/map";
+import { Option, Some, None } from "std/option";
+import { slice, index_of, lower, is_space, trim, to_int, url_decode, SP, CR, LF, COLON } from "./util";
+
+const MAX_REQUEST: i64 = 65536;
+
+struct Request {
+    method: str;
+    path: str;
+    query_string: str;
+    version: str;
+    headers: HashMap<str, str>;
+    params: HashMap<str, str>;
+    body: str;
+    owned: Vec<i64>;
+    ok: bool;
+}
+
+impl Request {
+    func empty() -> Request {
+        let r: Request = Request {
+            method: "", path: "", query_string: "", version: "",
+            headers: HashMap<str, str>::new(),
+            params: HashMap<str, str>::new(),
+            body: "",
+            owned: Vec<i64>::new(),
+            ok: false,
+        };
+        return r;
+    }
+
+    func track(self: *Request, s: str) -> str {
+        self.owned.push(s as i64);
+        return s;
+    }
+
+    func header(self: *Request, name: str) -> Option<str> {
+        let key: str = lower(name);
+        let got: Option<str> = self.headers.get(key);
+        mem.dealloc(key as *u8);
+        return got;
+    }
+
+    func param(self: *Request, name: str) -> Option<str> {
+        return self.params.get(name);
+    }
+
+    func query(self: *Request, name: str) -> Option<str> {
+        let q: str = self.query_string;
+        let n: i64 = cstr.len(q) as i64;
+        let start: i64 = 0;
+        while (start < n) {
+            let amp: i64 = index_of(q, 38, start);
+            let end: i64 = amp;
+            if (end < 0) { end = n; }
+            let eq: i64 = index_of(q, 61, start);
+            if (eq >= 0 && eq < end) {
+                let key: str = slice(q, start, eq);
+                let hit: bool = cstr.eq(key, name);
+                mem.dealloc(key as *u8);
+                if (hit) {
+                    let raw: str = slice(q, eq + 1, end);
+                    let val: str = url_decode(raw);
+                    mem.dealloc(raw as *u8);
+                    self.track(val);
+                    return Some(val);
+                }
+            }
+            if (amp < 0) { return None(); }
+            start = amp + 1;
+        }
+        return None();
+    }
+
+    func content_length(self: *Request) -> i64 {
+        match (self.header("content-length")) {
+            Some(v) => { return to_int(v); }
+            None => { return 0; }
+        }
+    }
+
+    func is_method(self: *Request, m: str) -> bool { return cstr.eq(self.method, m); }
+
+    func drop(self: *Request) -> void {
+        let i: usize = 0;
+        while (i < self.owned.len()) {
+            mem.dealloc(self.owned.get(i) as *u8);
+            i = i + 1;
+        }
+        self.owned.drop();
+        self.headers.drop();
+        self.params.drop();
+    }
+}
+
+func parse_request(raw: str) -> Request {
+    let req: Request = Request::empty();
+    let n: i64 = cstr.len(raw) as i64;
+    if (n <= 0 || n > MAX_REQUEST) { return req; }
+
+    let sp1: i64 = index_of(raw, SP, 0);
+    if (sp1 < 0) { return req; }
+    let sp2: i64 = index_of(raw, SP, sp1 + 1);
+    if (sp2 < 0) { return req; }
+    let eol: i64 = index_of(raw, LF, sp2 + 1);
+    if (eol < 0) { return req; }
+    let vend: i64 = eol;
+    let p: *u8 = raw as *u8;
+    if (vend > 0 && p[(vend - 1) as usize] == CR) { vend = vend - 1; }
+
+    req.method = req.track(slice(raw, 0, sp1));
+    req.version = req.track(slice(raw, sp2 + 1, vend));
+
+    let target: str = slice(raw, sp1 + 1, sp2);
+    let qmark: i64 = index_of(target, 63, 0);
+    if (qmark >= 0) {
+        let rawpath: str = slice(target, 0, qmark);
+        req.path = req.track(url_decode(rawpath));
+        mem.dealloc(rawpath as *u8);
+        req.query_string = req.track(slice(target, qmark + 1, cstr.len(target) as i64));
+    } else {
+        req.path = req.track(url_decode(target));
+        req.query_string = req.track(slice(target, 0, 0));
+    }
+    mem.dealloc(target as *u8);
+
+    let pos: i64 = eol + 1;
+    let scanning: bool = true;
+    while (scanning) {
+        if (pos >= n) { scanning = false; }
+        else {
+            let e: i64 = index_of(raw, LF, pos);
+            if (e < 0) { e = n; }
+            let lineend: i64 = e;
+            if (lineend > pos && p[(lineend - 1) as usize] == CR) { lineend = lineend - 1; }
+            if (lineend == pos) {
+                pos = e + 1;
+                scanning = false;
+            } else {
+                let c: i64 = index_of(raw, COLON, pos);
+                if (c >= 0 && c < lineend) {
+                    let namepart: str = slice(raw, pos, c);
+                    let key: str = lower(namepart);
+                    mem.dealloc(namepart as *u8);
+                    let valpart: str = slice(raw, c + 1, lineend);
+                    let val: str = trim(valpart);
+                    mem.dealloc(valpart as *u8);
+                    req.track(key);
+                    req.track(val);
+                    req.headers.insert(key, val);
+                }
+                pos = e + 1;
+            }
+        }
+    }
+    if (pos > n) { pos = n; }
+    req.body = req.track(slice(raw, pos, n));
+    req.ok = true;
+    return req;
+}

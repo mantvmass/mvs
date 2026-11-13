@@ -1,0 +1,100 @@
+/*
+ * Builder pattern: methods take self by value and return Self
+ *
+ * Rust-like builder:
+ *     func method(self: T, ...) -> T { ... return self; }
+ *
+ * The caller chains:
+ *     let x: T = T::new().a(1).b("hi").c(true);
+ */
+import { io } from "std";
+import { String } from "std/string";
+
+struct Config {
+    host: String;
+    port: i64;
+    debug: bool;
+}
+
+impl Config {
+    func new() -> Config {
+        return Config { host: String::from("localhost"), port: 8080, debug: false };
+    }
+
+    func host(self: Config, h: str) -> Config {
+        self.host.drop();
+        self.host = String::from(h);
+        return self;
+    }
+
+    func port(self: Config, p: i64) -> Config {
+        self.port = p;
+        return self;
+    }
+
+    func debug(self: Config, d: bool) -> Config {
+        self.debug = d;
+        return self;
+    }
+
+    func show(self: *Config) -> void {
+        io.out("host: {} port: {} debug: {}", self.host.as_str(), self.port, self.debug);
+    }
+
+    func drop(self: *Config) -> void {
+        self.host.drop();
+    }
+}
+
+struct Query {
+    table: str;
+    filter: str;
+    limit: i64;
+    offset: i64;
+}
+
+impl Query {
+    func from(table: str) -> Query {
+        return Query { table: table, filter: "", limit: 100, offset: 0 };
+    }
+
+    func filter(self: Query, f: str) -> Query {
+        self.filter = f;
+        return self;
+    }
+
+    func limit(self: Query, n: i64) -> Query {
+        self.limit = n;
+        return self;
+    }
+
+    func offset(self: Query, n: i64) -> Query {
+        self.offset = n;
+        return self;
+    }
+
+    func show(self: *Query) -> void {
+        io.out("SELECT * FROM {} WHERE {} LIMIT {} OFFSET {}", self.table, self.filter, self.limit, self.offset);
+    }
+}
+
+func main() -> i8 {
+    let c: Config = Config::new()
+        .host("example.com")
+        .port(3000)
+        .debug(true);
+    c.show();
+
+    let c2: Config = Config::new().port(9090);
+    c2.show();
+
+    let q: Query = Query::from("users")
+        .filter("active = true")
+        .limit(10)
+        .offset(20);
+    q.show();
+
+    c.drop();
+    c2.drop();
+    return 0;
+}

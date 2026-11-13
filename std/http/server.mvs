@@ -1,0 +1,81 @@
+/*
+ * std/http/server.mvs - listener and serve loop
+ */
+import { mem } from "std";
+import { cstr } from "core";
+import { String } from "std/string";
+import { TcpServer, TcpSocket } from "std/net";
+import { Request, parse_request } from "./request";
+import { Response } from "./response";
+import { Router } from "./router";
+import { index_of, slice, to_int, COLON } from "./util";
+
+struct Listener {
+    sock: TcpServer;
+    ok: bool;
+    addr: str;
+}
+
+impl Listener {
+    func bind(addr: str) -> Listener {
+    let c: i64 = index_of(addr, COLON, 0);
+    let ip: str = "0.0.0.0";
+    let port: i64 = 80;
+    if (c >= 0) {
+        ip = slice(addr, 0, c);
+        let ptext: str = slice(addr, c + 1, cstr.len(addr) as i64);
+        port = to_int(ptext);
+        mem.dealloc(ptext as *u8);
+    } else {
+        ip = slice(addr, 0, cstr.len(addr) as i64);
+    }
+    let l: Listener = Listener { sock: TcpServer::bind(ip, port as u16), ok: port > 0, addr: addr };
+    mem.dealloc(ip as *u8);
+    if (l.sock.fd == 0) { l.ok = false; }
+    return l;
+    }
+
+    func close(self: *Listener) -> i32 {
+        if (!self.ok) { return 0; }
+        self.ok = false;
+        return self.sock.close();
+    }
+}
+
+func serve_once(l: *Listener, app: *Router) -> i32 {
+    if (!l.ok) { return 0 - 1; }
+    let conn: TcpSocket = l.sock.accept();
+    let raw: str = conn.recv();
+    let req: Request = parse_request(raw);
+    let res: Response = app.handle(&req);
+    let text: String = res.render();
+    conn.send(text.as_str());
+    if (app.verbose) { log_line(&req, &res); }
+    text.drop();
+    res.drop();
+    req.drop();
+    mem.dealloc(raw as *u8);
+    return conn.close();
+}
+
+func serve_n(l: *Listener, app: *Router, n: i64) -> i32 {
+    if (!l.ok) { return 0 - 1; }
+    let served: i64 = 0;
+    while (served < n) {
+        serve_once(l, app);
+        served = served + 1;
+    }
+    return 0;
+}
+
+func serve(l: *Listener, app: *Router) -> i32 {
+    if (!l.ok) { return 0 - 1; }
+    while (true) { serve_once(l, app); }
+    return 0;
+}
+
+func log_line(req: *Request, res: *Response) -> void {
+    printf("%s %s -> %d\n", req.method, req.path, res.status as i32);
+}
+
+extern func printf(fmt: str, a: str, b: str, c: i32) -> i32;

@@ -197,7 +197,7 @@ func main() -> i8 {
     call(&l, &app, "OPTIONS", "/ping", "");
 
     io.out("--- two requests in flight, served as a batch, with the access log on");
-    app.log(true);
+    app = app.log(true);
     let a: TcpSocket = send_request(ADDR, "GET", "/users/1", "");
     let b: TcpSocket = send_request(ADDR, "GET", "/users/2", "");
     serve_n(&l, &app, 2);

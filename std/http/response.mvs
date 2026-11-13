@@ -1,0 +1,121 @@
+/*
+ * std/http/response.mvs - HTTP response types and builders
+ */
+import { String } from "std/string";
+
+struct Response {
+    status: i64;
+    ctype: str;
+    extra: String;
+    body: String;
+}
+
+func Status(code: i64) -> Response {
+    let r: Response = Response {
+        status: code,
+        ctype: "text/plain; charset=utf-8",
+        extra: String::new(),
+        body: String::new(),
+    };
+    return r;
+}
+
+func Text(body: str) -> Response {
+    let r: Response = Status(200);
+    r.body.push_str(body);
+    return r;
+}
+
+func Html(body: str) -> Response {
+    let r: Response = Status(200);
+    r.ctype = "text/html; charset=utf-8";
+    r.body.push_str(body);
+    return r;
+}
+
+func Json(body: str) -> Response {
+    let r: Response = Status(200);
+    r.ctype = "application/json";
+    r.body.push_str(body);
+    return r;
+}
+
+func Redirect(location: str) -> Response {
+    let r: Response = Status(302);
+    return r.header("Location", location);
+}
+
+impl Response {
+    func status(self: Response, code: i64) -> Response {
+        self.status = code;
+        return self;
+    }
+
+    func header(self: Response, name: str, value: str) -> Response {
+        self.extra.push_str(name);
+        self.extra.push_str(": ");
+        self.extra.push_str(value);
+        self.extra.push_str("\r\n");
+        return self;
+    }
+
+    func content_type(self: Response, value: str) -> Response {
+        self.ctype = value;
+        return self;
+    }
+
+    func write(self: Response, s: str) -> Response {
+        self.body.push_str(s);
+        return self;
+    }
+
+    func code(self: *Response) -> i64 { return self.status; }
+
+    func render(self: *Response) -> String {
+        let out: String = String::new();
+        out.push_str("HTTP/1.1 ");
+        let code: String = String::from_int(self.status);
+        out.push_str(code.as_str());
+        code.drop();
+        out.push_str(" ");
+        out.push_str(status_text(self.status));
+        out.push_str("\r\nContent-Type: ");
+        out.push_str(self.ctype);
+        out.push_str("\r\nContent-Length: ");
+        let len: String = String::from_uint(self.body.len() as u64);
+        out.push_str(len.as_str());
+        len.drop();
+        out.push_str("\r\nConnection: close\r\n");
+        out.push_str(self.extra.as_str());
+        out.push_str("\r\n");
+        out.push_str(self.body.as_str());
+        return out;
+    }
+
+    func drop(self: *Response) -> void {
+        self.extra.drop();
+        self.body.drop();
+    }
+}
+
+func status_text(code: i64) -> str {
+    if (code == 200) { return "OK"; }
+    else if (code == 201) { return "Created"; }
+    else if (code == 204) { return "No Content"; }
+    else if (code == 301) { return "Moved Permanently"; }
+    else if (code == 302) { return "Found"; }
+    else if (code == 304) { return "Not Modified"; }
+    else if (code == 400) { return "Bad Request"; }
+    else if (code == 401) { return "Unauthorized"; }
+    else if (code == 403) { return "Forbidden"; }
+    else if (code == 404) { return "Not Found"; }
+    else if (code == 405) { return "Method Not Allowed"; }
+    else if (code == 409) { return "Conflict"; }
+    else if (code == 413) { return "Payload Too Large"; }
+    else if (code == 418) { return "I am a teapot"; }
+    else if (code == 429) { return "Too Many Requests"; }
+    else if (code == 500) { return "Internal Server Error"; }
+    else if (code == 501) { return "Not Implemented"; }
+    else if (code == 503) { return "Service Unavailable"; }
+    return "Unknown";
+}

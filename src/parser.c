@@ -1469,6 +1469,14 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
             /* the attribute itself failed to parse; skip stamping and recover below */
         } else if (check(&p, TK_IMPORT)) {
             node_add_item(prog, parse_import(&p));
+        } else if (check(&p, TK_IDENT) && strcmp(p.cur.lexeme, "pub") == 0) {
+            advance(&p);
+            if (!check(&p, TK_IMPORT)) { error(&p, "expected 'import' after 'pub'"); }
+            else {
+                Node *imp = parse_import(&p);
+                imp->is_export = 1;
+                node_add_item(prog, imp);
+            }
         } else if (check(&p, TK_FUNC)) {
             node_add_item(prog, parse_func_decl(&p, 0));
         } else if (check(&p, TK_EXPORT)) {

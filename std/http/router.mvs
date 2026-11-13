@@ -1,0 +1,163 @@
+/*
+ * std/http/router.mvs - method router and path-based router
+ */
+import { cstr } from "core";
+import { mem } from "std";
+import { Vec } from "std/vec";
+import { HashMap } from "std/map";
+import { Request } from "./request";
+import { Response, Status, Text } from "./response";
+import { slice, COLON, STAR, SLASH } from "./util";
+
+const MAX_METHODS: i64 = 8;
+
+struct MethodEntry {
+    method: str;
+    handler: func(*Request) -> Response;
+}
+
+struct MethodRouter {
+    entries: [MethodEntry; 8];
+    count: i64;
+}
+
+func no_handler(_req: *Request) -> Response { return Status(500); }
+
+func method_router(method: str, h: func(*Request) -> Response) -> MethodRouter {
+    let blank: MethodEntry = MethodEntry { method: "", handler: no_handler };
+    let m: MethodRouter = MethodRouter {
+        entries: [blank, blank, blank, blank, blank, blank, blank, blank],
+        count: 0,
+    };
+    return m.on(method, h);
+}
+
+impl MethodRouter {
+    func on(self: MethodRouter, method: str, h: func(*Request) -> Response) -> MethodRouter {
+        if (self.count < MAX_METHODS) {
+            self.entries[self.count as usize] = MethodEntry { method: method, handler: h };
+            self.count = self.count + 1;
+        }
+        return self;
+    }
+
+    func get(self: MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("GET", h); }
+    func post(self: MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("POST", h); }
+    func put(self: MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("PUT", h); }
+    func delete(self: MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("DELETE", h); }
+    func patch(self: MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("PATCH", h); }
+    func head(self: MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("HEAD", h); }
+    func any(self: MethodRouter, h: func(*Request) -> Response) -> MethodRouter { return self.on("*", h); }
+}
+
+func get(h: func(*Request) -> Response) -> MethodRouter { return method_router("GET", h); }
+func post(h: func(*Request) -> Response) -> MethodRouter { return method_router("POST", h); }
+func put(h: func(*Request) -> Response) -> MethodRouter { return method_router("PUT", h); }
+func delete(h: func(*Request) -> Response) -> MethodRouter { return method_router("DELETE", h); }
+func patch(h: func(*Request) -> Response) -> MethodRouter { return method_router("PATCH", h); }
+func head(h: func(*Request) -> Response) -> MethodRouter { return method_router("HEAD", h); }
+func options(h: func(*Request) -> Response) -> MethodRouter { return method_router("OPTIONS", h); }
+func any(h: func(*Request) -> Response) -> MethodRouter { return method_router("*", h); }
+
+struct Route {
+    method: str;
+    pattern: str;
+    handler: func(*Request) -> Response;
+}
+
+func match_path(pattern: str, path: str, out: *HashMap<str, str>, owned: *Vec<i64>) -> bool {
+    let pn: i64 = cstr.len(pattern) as i64;
+    let sn: i64 = cstr.len(path) as i64;
+    let pp: *u8 = pattern as *u8;
+    let sp: *u8 = path as *u8;
+    let i: i64 = 0;
+    let j: i64 = 0;
+    while (i < pn) {
+        if (pp[i as usize] != SLASH || j >= sn || sp[j as usize] != SLASH) { return false; }
+        i = i + 1;
+        j = j + 1;
+        let pstart: i64 = i;
+        while (i < pn && pp[i as usize] != SLASH) { i = i + 1; }
+        let sstart: i64 = j;
+        while (j < sn && sp[j as usize] != SLASH) { j = j + 1; }
+        if (i - pstart == 1 && pp[pstart as usize] == STAR) { return true; }
+        if (pstart < pn && pp[pstart as usize] == COLON) {
+            let name: str = slice(pattern, pstart + 1, i);
+            let value: str = slice(path, sstart, j);
+            owned.push(name as i64);
+            owned.push(value as i64);
+            out.insert(name, value);
+        } else {
+            let a: str = slice(pattern, pstart, i);
+            let b: str = slice(path, sstart, j);
+            let same: bool = cstr.eq(a, b);
+            mem.dealloc(a as *u8);
+            mem.dealloc(b as *u8);
+            if (!same) { return false; }
+        }
+    }
+    return j >= sn;
+}
+
+func default_fallback(_req: *Request) -> Response { return Text("404 not found").status(404); }
+
+struct Router {
+    routes: Vec<Route>;
+    missing: func(*Request) -> Response;
+    requests: i64;
+    verbose: bool;
+}
+
+impl Router {
+    func new() -> Router {
+        let r: Router = Router {
+            routes: Vec<Route>::new(),
+            missing: default_fallback,
+            requests: 0,
+            verbose: false,
+        };
+        return r;
+    }
+
+    func drop(self: *Router) -> void { self.routes.drop(); }
+
+    func route(self: Router, pattern: str, m: MethodRouter) -> Router {
+        let i: i64 = 0;
+        while (i < m.count) {
+            let e: MethodEntry = m.entries[i];
+            self.routes.push(Route { method: e.method, pattern: pattern, handler: e.handler });
+            i = i + 1;
+        }
+        return self;
+    }
+
+    func fallback(self: Router, h: func(*Request) -> Response) -> Router {
+        self.missing = h;
+        return self;
+    }
+
+    func log(self: Router, on: bool) -> Router {
+        self.verbose = on;
+        return self;
+    }
+
+    func handle(self: *Router, req: *Request) -> Response {
+        self.requests = self.requests + 1;
+        if (!req.ok) { return Text("400 bad request").status(400); }
+        let i: usize = 0;
+        let allowed: bool = false;
+        while (i < self.routes.len()) {
+            let r: Route = self.routes.get(i);
+            if (match_path(r.pattern, req.path, &req.params, &req.owned)) {
+                if (cstr.eq(r.method, "*") || cstr.eq(r.method, req.method)) {
+                    return r.handler(req);
+                }
+                allowed = true;
+            }
+            i = i + 1;
+        }
+        if (allowed) { return Text("405 method not allowed").status(405); }
+        let nf: func(*Request) -> Response = self.missing;
+        return nf(req);
+    }
+}

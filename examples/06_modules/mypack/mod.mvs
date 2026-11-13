@@ -1,0 +1,2 @@
+pub import { hello, goodbye } from "./greet";
+pub import { add, mul } from "./math";

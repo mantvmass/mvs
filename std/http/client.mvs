@@ -1,0 +1,98 @@
+/*
+ * std/http/client.mvs - HTTP client utilities
+ */
+import { mem } from "std";
+import { cstr } from "core";
+import { String } from "std/string";
+import { TcpSocket } from "std/net";
+import { Option, Some, None } from "std/option";
+import { slice, index_of, header_end, lower, is_space, to_int, SP, CR, LF, COLON } from "./util";
+
+func send_request(addr: str, method: str, path: str, body: str) -> TcpSocket {
+    let c: i64 = index_of(addr, COLON, 0);
+    let ip: str = slice(addr, 0, c);
+    let ptext: str = slice(addr, c + 1, cstr.len(addr) as i64);
+    let sock: TcpSocket = TcpSocket::connect(ip, to_int(ptext) as u16);
+    let req: String = String::new();
+    req.push_str(method);
+    req.push_str(" ");
+    req.push_str(path);
+    req.push_str(" HTTP/1.1\r\nHost: ");
+    req.push_str(ip);
+    req.push_str("\r\nContent-Length: ");
+    let n: String = String::from_uint(cstr.len(body) as u64);
+    req.push_str(n.as_str());
+    n.drop();
+    req.push_str("\r\nConnection: close\r\n\r\n");
+    req.push_str(body);
+    sock.send(req.as_str());
+    req.drop();
+    mem.dealloc(ip as *u8);
+    mem.dealloc(ptext as *u8);
+    return sock;
+}
+
+func read_response(sock: *TcpSocket) -> String {
+    let raw: str = sock.recv();
+    let out: String = String::from(raw);
+    mem.dealloc(raw as *u8);
+    return out;
+}
+
+func fetch(addr: str, method: str, path: str, body: str) -> String {
+    let sock: TcpSocket = send_request(addr, method, path, body);
+    let out: String = read_response(&sock);
+    sock.close();
+    return out;
+}
+
+func response_status(raw: str) -> i64 {
+    if (!cstr.starts_with(raw, "HTTP/")) { return 0 - 1; }
+    let sp: i64 = index_of(raw, SP, 0);
+    if (sp < 0) { return 0 - 1; }
+    let end: i64 = index_of(raw, SP, sp + 1);
+    if (end < 0) { return 0 - 1; }
+    let code: str = slice(raw, sp + 1, end);
+    let v: i64 = to_int(code);
+    mem.dealloc(code as *u8);
+    return v;
+}
+
+func response_body(raw: str) -> str {
+    let h: i64 = header_end(raw);
+    if (h < 0) { return slice(raw, 0, 0); }
+    return slice(raw, h + 4, cstr.len(raw) as i64);
+}
+
+func response_header(raw: str, name: str) -> Option<str> {
+    let n: i64 = cstr.len(raw) as i64;
+    let p: *u8 = raw as *u8;
+    let key: str = lower(name);
+    let klen: i64 = cstr.len(key) as i64;
+    let kp: *u8 = key as *u8;
+    let i: i64 = 0;
+    while (i < n) {
+        if (p[i as usize] == LF && i + klen + 1 < n) {
+            let s: i64 = i + 1;
+            let k: i64 = 0;
+            let hit: bool = true;
+            while (k < klen && hit) {
+                let a: u8 = p[(s + k) as usize];
+                if (a >= 65 && a <= 90) { a = a + 32; }
+                if (a != kp[k as usize]) { hit = false; }
+                k = k + 1;
+            }
+            if (hit && p[(s + klen) as usize] == COLON) {
+                let v: i64 = s + klen + 1;
+                while (v < n && is_space(p[v as usize])) { v = v + 1; }
+                let e: i64 = v;
+                while (e < n && p[e as usize] != CR && p[e as usize] != LF) { e = e + 1; }
+                mem.dealloc(key as *u8);
+                return Some(slice(raw, v, e));
+            }
+        }
+        i = i + 1;
+    }
+    mem.dealloc(key as *u8);
+    return None();
+}

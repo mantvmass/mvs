@@ -102,17 +102,17 @@ impl FetchRequest {
         };
     }
 
-    func header(self: *FetchRequest, name: str, value: str) -> FetchRequest {
+    func header(self: FetchRequest, name: str, value: str) -> FetchRequest {
         self.headers.push_str(name);
         self.headers.push_str(": ");
         self.headers.push_str(value);
         self.headers.push_str("\r\n");
-        return *self;
+        return self;
     }
 
-    func body(self: *FetchRequest, b: str) -> FetchRequest {
+    func body(self: FetchRequest, b: str) -> FetchRequest {
         self.body_str = b;
-        return *self;
+        return self;
     }
 
     func send(self: *FetchRequest) -> FetchResponse {

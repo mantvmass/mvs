@@ -166,6 +166,13 @@ static int ends_with_mvs(const char *p) {
     return n >= 4 && strcmp(p + n - 4, ".mvs") == 0;
 }
 
+/* Starts with "./" or "../"? (relative import inside a module) */
+static int starts_with_dot(const char *p) {
+    if (p[0] == '.' && (p[1] == '/' || p[1] == '\\')) return 1;
+    if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\\')) return 1;
+    return 0;
+}
+
 /* Make an absolute (canonical) path so identical files compare equal */
 static void canonicalize(const char *path, char *out, size_t n) {
 #ifdef _WIN32
@@ -215,6 +222,7 @@ static int defs_has(const char *defs, const char *name) {
 }
 
 static void load_module(Loader *L, const char *path, const char *ns);
+static void handle_import(Loader *L, Node *imp, const char *base_dir, const char *parent_ns);
 
 /* A module imported under one form and then the other: clone its free functions
  * under the second spelling so both resolve. `from_ns` is the namespace the
@@ -273,6 +281,13 @@ static const char *package_dir(Loader *L, const char *path) {
 static int resolve_module_file(Loader *L, const char *path, const char *base_dir, char *out, size_t n) {
     if (is_absolute(path)) { snprintf(out, n, "%s", path); return 1; }
     if (ends_with_mvs(path)) { snprintf(out, n, "%s/%s", base_dir, path); return 1; }
+    /* relative path (./xxx or ../xxx): resolve against base_dir, append .mvs */
+    if (starts_with_dot(path)) {
+        snprintf(out, n, "%s/%s.mvs", base_dir, path);
+        if (!read_file_exists(out))
+            snprintf(out, n, "%s/%s/mod.mvs", base_dir, path);
+        return 1;
+    }
     const char *pdir = package_dir(L, path);
     if (L->nostd && pdir != L->coredir) {
         fprintf(stderr, "error: cannot import package module '%s' in --nostd (freestanding) mode\n", path);
@@ -282,6 +297,8 @@ static int resolve_module_file(Loader *L, const char *path, const char *base_dir
     const char *slash = strchr(path, '/');
     const char *sub = slash ? slash + 1 : path;       /* strip "std/" or "core/" */
     snprintf(out, n, "%s/%s.mvs", pdir, sub);
+    if (!read_file_exists(out))
+        snprintf(out, n, "%s/%s/mod.mvs", pdir, sub);
     return 1;
 }
 
@@ -292,7 +309,7 @@ static int resolve_module_file(Loader *L, const char *path, const char *base_dir
  *      import { factorial } from "./lib.mvs"
  *   C) import lib from "./lib.mvs"               whole module as namespace lib (lib.factorial)
  *      import str from "std/string" */
-static void handle_import(Loader *L, Node *imp, const char *base_dir) {
+static void handle_import(Loader *L, Node *imp, const char *base_dir, const char *parent_ns) {
     const char *path = imp->str_val;
     if (!path) return;
 
@@ -327,8 +344,11 @@ static void handle_import(Loader *L, Node *imp, const char *base_dir) {
             const char *name = imp->items[i]->name;
             char file[1024];
             snprintf(file, sizeof(file), "%s/%s.mvs", pdir, name);
+            if (!read_file_exists(file))
+                snprintf(file, sizeof(file), "%s/%s/mod.mvs", pdir, name);
             if (!read_file_exists(file)) {
-                fprintf(stderr, "error: package '%s' has no module '%s' (looked for %s)\n", path, name, file);
+                fprintf(stderr, "error: package '%s' has no module '%s' (looked for %s/%s.mvs or %s/%s/mod.mvs)\n",
+                        path, name, pdir, name, pdir, name);
                 L->had_error = 1; continue;
             }
             char canon[1024]; canonicalize(file, canon, sizeof(canon));
@@ -336,10 +356,15 @@ static void handle_import(Loader *L, Node *imp, const char *base_dir) {
             load_module(L, file, name);
         }
     } else {
-        /* Form B: symbol import; pull symbols directly (namespace = "") + verify they exist */
+        /* Form B: symbol import; pull symbols directly (namespace = "") + verify they exist.
+         * For pub imports inside a namespaced module, load with the parent namespace so
+         * re-exported functions are reachable as parent.func() */
         char file[1024];
         if (!resolve_module_file(L, path, base_dir, file, sizeof(file))) return;
-        load_module(L, file, "");
+        const char *sub_ns = "";
+        if (imp->is_export && parent_ns && parent_ns[0])
+            sub_ns = parent_ns;
+        load_module(L, file, sub_ns);
 
         char canon[1024];
         canonicalize(file, canon, sizeof(canon));
@@ -417,6 +442,23 @@ static void load_module(Loader *L, const char *path, const char *ns) {
 
     char *mod_defs = collect_defs(prog); /* record this module's top-level symbols for import checks */
 
+    /* pub import re-exports: symbols named in pub import statements count as
+     * exports of this module (allows mod.mvs to re-export from submodules) */
+    for (int i = 0; i < prog->nitems; i++) {
+        Node *it = prog->items[i];
+        if (it->kind == ND_IMPORT && it->is_export) {
+            for (int j = 0; j < it->nitems; j++) {
+                const char *sym = it->items[j]->name;
+                if (!sym || defs_has(mod_defs, sym)) continue;
+                size_t cur = strlen(mod_defs);
+                size_t need = cur + strlen(sym) + 2;
+                mod_defs = (char *)realloc(mod_defs, need);
+                strcat(mod_defs, sym);
+                strcat(mod_defs, "|");
+            }
+        }
+    }
+
     /* This module's folder, used to resolve its own nested imports */
     char dir[1024];
     path_dirname(path, dir);
@@ -426,7 +468,7 @@ static void load_module(Loader *L, const char *path, const char *ns) {
         Node *it = prog->items[i];
         if (!cfg_matches(L, it)) continue;    /* @compile says this item is not for this target */
         if (it->kind == ND_IMPORT) {
-            handle_import(L, it, dir);            /* nested import: keep loading recursively */
+            handle_import(L, it, dir, ns);        /* nested import: keep loading recursively */
         } else {
             if (it->kind == ND_FUNC && !(ns && ns[0])) {
                 /* A module imported for its symbols has no namespace, but it still
