@@ -10,6 +10,7 @@
  */
 
 const PREC = {
+  RANGE: 0,
   ASSIGN: 1,
   OR: 2,
   AND: 3,
@@ -59,7 +60,8 @@ module.exports = grammar({
 
     _top_level_item: $ => choice(
       $.attribute,
-      $.import_statement,
+      $.use_statement,
+      $.mod_declaration,
       $.extern_declaration,
       $.function_definition,
       $.struct_definition,
@@ -84,17 +86,32 @@ module.exports = grammar({
       field('value', $.string_literal),
     ),
 
-    // ---- imports: the three forms (the path decides) -----------------------
+    // ---- use/mod: Rust-style module paths -----------------------------------
 
-    import_statement: $ => choice(
-      seq('import', '{', commaSep1($.identifier), '}', 'from', field('path', $.string_literal), ';'),
-      seq('import', field('alias', $.identifier), 'from', field('path', $.string_literal), ';'),
+    use_statement: $ => seq(
+      optional('pub'),
+      'use',
+      $.identifier,
+      repeat(seq('::', choice($._use_suffix, $.identifier))),
+      ';',
+    ),
+
+    _use_suffix: $ => choice(
+      seq('{', commaSep1($.identifier), '}'),
+      '*',
+    ),
+
+    mod_declaration: $ => seq(
+      optional('pub'),
+      'mod',
+      field('name', $.identifier),
+      ';',
     ),
 
     // ---- functions ---------------------------------------------------------
 
     function_definition: $ => seq(
-      optional('export'),
+      optional(choice('export', 'pub')),
       'func',
       field('name', $.identifier),
       optional($.type_parameters),
@@ -154,6 +171,7 @@ module.exports = grammar({
     // ---- struct / enum / trait / impl -------------------------------------
 
     struct_definition: $ => seq(
+      optional('pub'),
       'struct',
       field('name', alias($.identifier, $.type_identifier)),
       optional($.type_parameters),
@@ -363,15 +381,30 @@ module.exports = grammar({
       optional(','),
     ),
 
-    // Patterns are one level deep in MVS v1: a variant name, optionally
-    // qualified with the enum, optionally binding its payload by position.
+    // Patterns: wildcard, literal (with optional range), or variant with payload.
     pattern: $ => choice(
       $.wildcard_pattern,
+      seq($._pattern_literal, choice('..', '..='), $._pattern_literal),
+      $._pattern_literal,
       seq(
         optional(seq(field('enum', alias($.identifier, $.type_identifier)), '::')),
         field('variant', $.identifier),
-        optional(seq('(', commaSep($.identifier), ')')),
+        optional(seq('(', commaSep($._sub_pattern), ')')),
       ),
+    ),
+
+    _sub_pattern: $ => choice(
+      $.identifier,
+      $._pattern_literal,
+    ),
+
+    _pattern_literal: $ => choice(
+      $.integer_literal,
+      $.float_literal,
+      $.string_literal,
+      $.char_literal,
+      $.boolean_literal,
+      seq('-', choice($.integer_literal, $.float_literal)),
     ),
 
     wildcard_pattern: _ => '_',
@@ -507,6 +540,17 @@ module.exports = grammar({
         prec.right(PREC.POWER, seq(
           field('left', $._expression),
           field('operator', '**'),
+          field('right', $._expression),
+        )),
+        // Range operators for slice expressions: arr[start..end]
+        prec.left(PREC.RANGE, seq(
+          field('left', $._expression),
+          field('operator', '..'),
+          field('right', $._expression),
+        )),
+        prec.left(PREC.RANGE, seq(
+          field('left', $._expression),
+          field('operator', '..='),
           field('right', $._expression),
         )),
       );

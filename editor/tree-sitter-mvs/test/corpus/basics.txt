@@ -2,7 +2,7 @@
 hello world
 ================================================================================
 
-import { io } from "std";
+use std::io;
 
 func main() -> i8 {
     io.out("hello, {}!", "world");
@@ -12,9 +12,9 @@ func main() -> i8 {
 --------------------------------------------------------------------------------
 
 (source_file
-  (import_statement
+  (use_statement
     (identifier)
-    (string_literal))
+    (identifier))
   (function_definition
     (identifier)
     (parameter_list)
@@ -617,5 +617,103 @@ func main() -> i8 {
         (identifier)
         (primitive_type)
         (string_literal))
+      (return_statement
+        (integer_literal)))))
+
+================================================================================
+use, mod, pub
+================================================================================
+
+use std::io;
+use std::vec::{Vec, VecIter};
+pub use core::mem;
+pub mod network;
+mod utils;
+
+pub struct Point { x: i64; y: i64; }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (use_statement
+    (identifier)
+    (identifier))
+  (use_statement
+    (identifier)
+    (identifier)
+    (identifier)
+    (identifier))
+  (use_statement
+    (identifier)
+    (identifier))
+  (mod_declaration
+    (identifier))
+  (mod_declaration
+    (identifier))
+  (struct_definition
+    (type_identifier)
+    (field_declaration
+      (identifier)
+      (primitive_type))
+    (field_declaration
+      (identifier)
+      (primitive_type))))
+
+================================================================================
+slice and range patterns
+================================================================================
+
+func main() -> i8 {
+    let s: *i64 = arr[1..3];
+    let v: i64 = match (x) {
+        1..5 => 10,
+        10..=20 => 20,
+        Some(42) => 30,
+        _ => 0,
+    };
+    return 0;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameter_list)
+    (primitive_type)
+    (block
+      (let_declaration
+        (identifier)
+        (pointer_type
+          (primitive_type))
+        (index_expression
+          (identifier)
+          (binary_expression
+            (integer_literal)
+            (integer_literal))))
+      (let_declaration
+        (identifier)
+        (primitive_type)
+        (match_expression
+          (identifier)
+          (match_arm
+            (pattern
+              (integer_literal)
+              (integer_literal))
+            (integer_literal))
+          (match_arm
+            (pattern
+              (integer_literal)
+              (integer_literal))
+            (integer_literal))
+          (match_arm
+            (pattern
+              (identifier)
+              (integer_literal))
+            (integer_literal))
+          (match_arm
+            (pattern
+              (wildcard_pattern))
+            (integer_literal))))
       (return_statement
         (integer_literal)))))

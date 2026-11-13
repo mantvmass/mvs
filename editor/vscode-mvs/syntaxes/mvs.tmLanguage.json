@@ -82,10 +82,10 @@
     },
     "keywords": {
       "patterns": [
-        { "name": "keyword.control.import.mvs", "match": "\\b(import|from)\\b" },
+        { "name": "keyword.control.use.mvs", "match": "\\b(use|mod)\\b" },
         { "name": "keyword.control.mvs", "match": "\\b(if|elseif|else|while|for|do|switch|case|default|break|continue|return|match)\\b" },
         { "name": "storage.type.mvs", "match": "\\b(func|struct|enum|trait|impl|let|const)\\b" },
-        { "name": "storage.modifier.mvs", "match": "\\b(extern|export|dyn|where)\\b" },
+        { "name": "storage.modifier.mvs", "match": "\\b(extern|export|pub|dyn|where)\\b" },
         { "name": "keyword.operator.cast.mvs", "match": "\\bas\\b" }
       ]
     },
@@ -129,6 +129,7 @@
       "patterns": [
         { "name": "keyword.operator.arrow.mvs", "match": "->|=>" },
         { "name": "keyword.operator.variadic.mvs", "match": "\\.\\.\\." },
+        { "name": "keyword.operator.range.mvs", "match": "\\.\\.(=)?" },
         { "name": "keyword.operator.mvs", "match": "\\*\\*|<<|>>|<=|>=|==|!=|&&|\\|\\||\\+=|-=|\\*=|/=|\\+\\+|--|[-+*/%=<>!&|^~]" }
       ]
     },

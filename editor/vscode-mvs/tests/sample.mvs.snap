@@ -7,45 +7,31 @@
 #^^^^^^^^^^^ source.mvs comment.block.mvs
 #           ^^ source.mvs comment.block.mvs
 >
->import { io, math } from "std";
-#^^^^^^ source.mvs keyword.control.import.mvs
-#      ^ source.mvs
-#       ^ source.mvs punctuation.bracket.mvs
-#        ^^^ source.mvs
-#           ^ source.mvs punctuation.separator.mvs
-#            ^^^^^^ source.mvs
+>use std::{io, math};
+#^^^ source.mvs keyword.control.use.mvs
+#   ^^^^ source.mvs
+#       ^^ source.mvs punctuation.separator.path.mvs
+#         ^ source.mvs punctuation.bracket.mvs
+#          ^^ source.mvs
+#            ^ source.mvs punctuation.separator.mvs
+#             ^^^^^ source.mvs
 #                  ^ source.mvs punctuation.bracket.mvs
-#                   ^ source.mvs
-#                    ^^^^ source.mvs keyword.control.import.mvs
-#                        ^ source.mvs
-#                         ^ source.mvs string.quoted.double.mvs
-#                          ^^^ source.mvs string.quoted.double.mvs
-#                             ^ source.mvs string.quoted.double.mvs
-#                              ^ source.mvs punctuation.separator.mvs
->import { String } from "std/string";
-#^^^^^^ source.mvs keyword.control.import.mvs
-#      ^ source.mvs
-#       ^ source.mvs punctuation.bracket.mvs
-#        ^ source.mvs
-#         ^^^^^^ source.mvs entity.name.type.mvs
-#               ^ source.mvs
-#                ^ source.mvs punctuation.bracket.mvs
-#                 ^ source.mvs
-#                  ^^^^ source.mvs keyword.control.import.mvs
-#                      ^ source.mvs
-#                       ^ source.mvs string.quoted.double.mvs
-#                        ^^^^^^^^^^ source.mvs string.quoted.double.mvs
-#                                  ^ source.mvs string.quoted.double.mvs
-#                                   ^ source.mvs punctuation.separator.mvs
->import mylib from "./mathlib.mvs";
-#^^^^^^ source.mvs keyword.control.import.mvs
-#      ^^^^^^^ source.mvs
-#             ^^^^ source.mvs keyword.control.import.mvs
-#                 ^ source.mvs
-#                  ^ source.mvs string.quoted.double.mvs
-#                   ^^^^^^^^^^^^^ source.mvs string.quoted.double.mvs
-#                                ^ source.mvs string.quoted.double.mvs
-#                                 ^ source.mvs punctuation.separator.mvs
+#                   ^ source.mvs punctuation.separator.mvs
+>use std::string::String;
+#^^^ source.mvs keyword.control.use.mvs
+#   ^^^^ source.mvs
+#       ^^ source.mvs punctuation.separator.path.mvs
+#         ^^^^^^ source.mvs
+#               ^^ source.mvs punctuation.separator.path.mvs
+#                 ^^^^^^ source.mvs entity.name.type.mvs
+#                       ^ source.mvs punctuation.separator.mvs
+>use self::mathlib;
+#^^^ source.mvs keyword.control.use.mvs
+#   ^ source.mvs
+#    ^^^^ source.mvs variable.language.self.mvs
+#        ^^ source.mvs punctuation.separator.path.mvs
+#          ^^^^^^^ source.mvs
+#                 ^ source.mvs punctuation.separator.mvs
 >
 >@compile(target_os = "linux", target_arch = "aarch64")
 #^ source.mvs punctuation.definition.annotation.mvs

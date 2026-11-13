@@ -683,6 +683,14 @@
             "named": false
           },
           {
+            "type": "..",
+            "named": false
+          },
+          {
+            "type": "..=",
+            "named": false
+          },
+          {
             "type": "/",
             "named": false
           },
@@ -2565,42 +2573,6 @@
     }
   },
   {
-    "type": "import_statement",
-    "named": true,
-    "fields": {
-      "alias": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "path": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "string_literal",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "identifier",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "index_expression",
     "named": true,
     "fields": {
@@ -3240,6 +3212,22 @@
     }
   },
   {
+    "type": "mod_declaration",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "parameter",
     "named": true,
     "fields": {
@@ -3553,7 +3541,27 @@
       "required": false,
       "types": [
         {
+          "type": "boolean_literal",
+          "named": true
+        },
+        {
+          "type": "char_literal",
+          "named": true
+        },
+        {
+          "type": "float_literal",
+          "named": true
+        },
+        {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "integer_literal",
+          "named": true
+        },
+        {
+          "type": "string_literal",
           "named": true
         },
         {
@@ -3732,11 +3740,11 @@
           "named": true
         },
         {
-          "type": "import_statement",
+          "type": "let_declaration",
           "named": true
         },
         {
-          "type": "let_declaration",
+          "type": "mod_declaration",
           "named": true
         },
         {
@@ -3745,6 +3753,10 @@
         },
         {
           "type": "trait_definition",
+          "named": true
+        },
+        {
+          "type": "use_statement",
           "named": true
         }
       ]
@@ -4420,6 +4432,21 @@
     }
   },
   {
+    "type": "use_statement",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "variadic_type",
     "named": true,
     "fields": {},
@@ -4632,7 +4659,15 @@
     "named": false
   },
   {
+    "type": "..",
+    "named": false
+  },
+  {
     "type": "...",
+    "named": false
+  },
+  {
+    "type": "..=",
     "named": false
   },
   {
@@ -4713,8 +4748,7 @@
   },
   {
     "type": "block_comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "bool",
@@ -4797,10 +4831,6 @@
     "named": false
   },
   {
-    "type": "from",
-    "named": false
-  },
-  {
     "type": "func",
     "named": false
   },
@@ -4837,10 +4867,6 @@
     "named": false
   },
   {
-    "type": "import",
-    "named": false
-  },
-  {
     "type": "integer_literal",
     "named": true
   },
@@ -4854,11 +4880,18 @@
   },
   {
     "type": "line_comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "match",
+    "named": false
+  },
+  {
+    "type": "mod",
+    "named": false
+  },
+  {
+    "type": "pub",
     "named": false
   },
   {
@@ -4911,6 +4944,10 @@
   },
   {
     "type": "u8",
+    "named": false
+  },
+  {
+    "type": "use",
     "named": false
   },
   {

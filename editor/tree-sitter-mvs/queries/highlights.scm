@@ -49,8 +49,9 @@
 "return" @keyword.return
 
 [
-  "import"
-  "from"
+  "use"
+  "mod"
+  "pub"
 ] @keyword.import
 
 "as" @keyword.operator
@@ -122,7 +123,7 @@
 (attribute) @attribute
 (attribute name: (identifier) @attribute)
 
-(import_statement alias: (identifier) @module)
+(mod_declaration name: (identifier) @module)
 
 ; ---- operators and punctuation ----
 
@@ -134,6 +135,8 @@
   "&" "|" "^" "~" "<<" ">>"
   "++" "--"
   "->" "=>"
+  ".."
+  "..="
   "..."
 ] @operator
 
