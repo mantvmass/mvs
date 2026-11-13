@@ -15,7 +15,7 @@ int new_label(Gen *g) { return g->label_id++; }
 /* Write a function's label name into the buffer according to these rules:
  *   - extern (foreign): raw name, e.g. printf (to match the symbol in the C runtime)
  *   - main (empty namespace): keep the name main so the C runtime can call it
- *   - has a namespace: mvs_<ns>_<name>   e.g. io.out -> mvs_io_out
+ *   - has a namespace: mvs_<ns>_<name>   e.g. io.read -> mvs_io_read
  *   - no namespace: mvs_<name>           e.g. factorial -> mvs_factorial */
 void func_label_of(Node *fn, char *buf) {
     /* extern and export use the raw symbol name so C can match/call it (buf must be LABEL_MAX bytes) */
@@ -340,156 +340,6 @@ ExprType type_of(Gen *g, Node *n) {
         default: break;
     }
     return r;
-}
-
-/* Infer the base type (used to pick the io.out format specifier) */
-DataType infer_type(Gen *g, Node *n) {
-    return type_of(g, n).base;
-}
-
-/* Append string s to a growable buffer (updates the values pointed to by out, len, cap) */
-static void buf_append(char **out, size_t *len, size_t *cap, const char *s) {
-    size_t sl = strlen(s);
-    while (*len + sl + 2 > *cap) { *cap *= 2; *out = (char *)realloc(*out, *cap); }
-    memcpy(*out + *len, s, sl);
-    *len += sl;
-}
-
-/* Pick a printf specifier by type (pointer=address, str=%s, char=%c, float=%f, unsigned=%llu, others=%lld).
- * The user spec supports width/precision Rust-style: {:8} {:8.2} {:.3} {:08} and {:x} / {:08x} for hex.
- * The "0W.P" part is passed to printf verbatim, so semantics match C exactly. */
-static const char *spec_for(DataType base, int ptr, const char *user) {
-    static char buf[32];
-    const char *u = user ? user : "";
-    if (*u == ':') u++;                          /* both "8.2" and ":8.2" arrive here */
-    char wp[16]; int wi = 0;                     /* the width/precision part, verbatim */
-    while (*u && wi < 14 && ((*u >= '0' && *u <= '9') || *u == '.')) wp[wi++] = *u++;
-    wp[wi] = '\0';
-    int is_hex = (u[0] == 'x' && u[1] == '\0');
-    /* 128-bit values are converted to decimal text at run time (mvs_i128_str), even for {:x};
-     * width still applies because the text goes through %s */
-    if (ptr == 0 && (base == TYPE_I128 || base == TYPE_U128)) { snprintf(buf, sizeof(buf), "%%%ss", wp); return buf; }
-    if (is_hex)             { snprintf(buf, sizeof(buf), "%%%sllx", wp); return buf; }
-    if (ptr > 0)            { snprintf(buf, sizeof(buf), "%%%sllu", wp); return buf; }  /* pointer = address */
-    if (base == TYPE_STR)   { snprintf(buf, sizeof(buf), "%%%ss", wp); return buf; }
-    if (base == TYPE_CHAR)  { snprintf(buf, sizeof(buf), "%%%sc", wp); return buf; }
-    if (is_float_type(base)){ snprintf(buf, sizeof(buf), "%%%sf", wp); return buf; }
-    if (base==TYPE_U8||base==TYPE_U16||base==TYPE_U32||base==TYPE_U64||base==TYPE_U128||base==TYPE_USIZE)
-                            { snprintf(buf, sizeof(buf), "%%%sllu", wp); return buf; }
-    snprintf(buf, sizeof(buf), "%%%slld", wp);
-    return buf;
-}
-
-static void expand_struct(Gen *g, Node *base, const char *sname,
-                          char **out, size_t *len, size_t *cap,
-                          Node **vals, int *nv, int vals_cap, int depth);
-
-/* Expand a whole [T; N] value into "[e0, e1, ...]" with one printf value per element
- * (synthetic ND_INDEX nodes with constant indices) */
-static void expand_array(Gen *g, Node *base, ExprType et,
-                         char **out, size_t *len, size_t *cap,
-                         Node **vals, int *nv, int vals_cap, int depth) {
-    buf_append(out, len, cap, "[");
-    for (int j = 0; j < et.arr; j++) {
-        if (j) buf_append(out, len, cap, ", ");
-        Node *idx = node_new(ND_INT, base->line);
-        idx->int_val = j; idx->type = TYPE_I64;
-        Node *ix = node_new(ND_INDEX, base->line);
-        ix->lhs = base; ix->rhs = idx;
-        if (et.base == TYPE_STRUCT && et.ptr == 0) {
-            expand_struct(g, ix, et.sname, out, len, cap, vals, nv, vals_cap, depth + 1);
-        } else if (*nv < vals_cap) {
-            buf_append(out, len, cap, spec_for(et.base, et.ptr, NULL));
-            vals[(*nv)++] = ix;
-        } else {
-            buf_append(out, len, cap, "?");
-        }
-    }
-    buf_append(out, len, cap, "]");
-}
-
-/* Expand a struct into the form "Name { f1: <spec>, f2: <spec> }" (like Rust's {:?})
- * and store the member-access nodes (base.field) into vals to pass to printf */
-static void expand_struct(Gen *g, Node *base, const char *sname,
-                          char **out, size_t *len, size_t *cap,
-                          Node **vals, int *nv, int vals_cap, int depth) {
-    StructInfo *s = find_struct(g, sname);
-    if (!s) { buf_append(out, len, cap, "?"); return; }
-    if (depth > 32) { buf_append(out, len, cap, "..."); return; }  /* guard against abnormally deep recursion */
-    /* If base is a struct result from a function (ND_CALL), point at the reserved "temp slot" instead
-     * (members read from the same temp); otherwise each field access would re-evaluate the call */
-    if (base->kind == ND_CALL && base->int_val) {
-        Node *fr = node_new(ND_FRAMEREF, base->line);
-        fr->int_val = base->int_val;
-        fr->type = TYPE_STRUCT; fr->type_name = strdup(sname);
-        base = fr;
-    }
-    buf_append(out, len, cap, s->display ? s->display : sname);
-    buf_append(out, len, cap, " { ");
-    for (int i = 0; i < s->nfields; i++) {
-        if (i) buf_append(out, len, cap, ", ");
-        buf_append(out, len, cap, s->fields[i].name);
-        buf_append(out, len, cap, ": ");
-        Node *m = node_new(ND_MEMBER, base->line);  /* base.field node */
-        m->operand = base; m->name = strdup(s->fields[i].name);
-        if (s->fields[i].arr > 0) {
-            ExprType fe = { s->fields[i].type, s->fields[i].ptr, s->fields[i].sname, s->fields[i].sig, s->fields[i].arr, 0 };
-            expand_array(g, m, fe, out, len, cap, vals, nv, vals_cap, depth + 1); /* [T; N] field */
-        } else if (s->fields[i].type == TYPE_STRUCT && s->fields[i].ptr == 0) {
-            expand_struct(g, m, s->fields[i].sname, out, len, cap, vals, nv, vals_cap, depth + 1); /* nested */
-        } else if (*nv < vals_cap) {
-            buf_append(out, len, cap, spec_for(s->fields[i].type, s->fields[i].ptr, NULL));
-            vals[(*nv)++] = m;
-        } else {
-            buf_append(out, len, cap, "?"); /* over the vals limit; emit a literal so specifiers match the arg count */
-        }
-    }
-    buf_append(out, len, cap, " }");
-}
-
-/* Convert an MVS format string (Rust-style {}) into a C printf format
- *   {} / {:?}  -> specifier chosen by the argument's type; structs are expanded into "Name { ... }"
- *   {:x}       -> hexadecimal ; {{ }} -> { } ; % -> %% ; a \n is appended automatically
- * Returns a new (malloc) buffer; sets *out_len, *out_nph (number of MVS-level placeholders),
- * and fills vals[] (values actually passed to printf; structs expanded into multiple fields) plus *out_nv */
-char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out_nph,
-                     Node **vals, int *out_nv, int vals_cap) {
-    size_t cap = strlen(fmt) * 2 + 32, len = 0;
-    char *out = (char *)malloc(cap);
-    int argi = 1, ph = 0, nv = 0;
-    for (const char *p = fmt; *p; p++) {
-        if (len + 8 > cap) { cap *= 2; out = (char *)realloc(out, cap); }
-        if (p[0] == '{' && p[1] == '{') { out[len++] = '{'; p++; continue; }
-        if (p[0] == '}' && p[1] == '}') { out[len++] = '}'; p++; continue; }
-        if (p[0] == '{') {
-            char spec[16]; int si = 0;
-            p++;
-            while (*p && *p != '}') { if (si < 15) spec[si++] = *p; p++; }
-            spec[si] = '\0';
-            if (*p == '\0') break;   /* unclosed '{': avoid reading past the buffer */
-            Node *arg = (argi < call->nitems) ? call->items[argi] : NULL;
-            ExprType at = { TYPE_I64, 0, NULL, NULL, 0, 0 };
-            if (arg) at = type_of(g, arg);
-            int is_hex = (strcmp(spec, "x") == 0 || strcmp(spec, ":x") == 0);
-            if (arg && at.arr > 0 && !is_hex) {
-                expand_array(g, arg, at, &out, &len, &cap, vals, &nv, vals_cap, 0);  /* whole array */
-            } else if (arg && at.base == TYPE_STRUCT && at.ptr == 0 && !is_hex) {
-                expand_struct(g, arg, at.sname, &out, &len, &cap, vals, &nv, vals_cap, 0);
-            } else {
-                buf_append(&out, &len, &cap, spec_for(at.base, at.ptr, spec));
-                if (arg && nv < vals_cap) vals[nv++] = arg;
-            }
-            argi++; ph++;
-            continue;
-        }
-        if (p[0] == '%') { out[len++] = '%'; out[len++] = '%'; continue; }
-        out[len++] = p[0];
-    }
-    out[len++] = '\n'; /* automatic trailing newline */
-    *out_len = (int)len;
-    *out_nph = ph;
-    *out_nv = nv;
-    return out;
 }
 
 /* runtime bounds checking (see common.h); main.c flips it off for --no-check */
@@ -1155,15 +1005,6 @@ void reach_func(Gen *g, int idx, char *reached) {
     reached[idx] = 1;
     Node *f = g->funcs[idx];
     reach_node(g, f->body, f->mod ? f->mod : "", reached);
-}
-
-/* Find an extern by name whoever declared it. Externs are private to their
- * module for name resolution, but io.out is a compiler intrinsic that emits a
- * call to printf no matter which module declared it. */
-Node *find_extern_any(Gen *g, const char *name) {
-    for (int i = 0; i < g->nfuncs; i++)
-        if (g->funcs[i]->is_extern && strcmp(g->funcs[i]->name, name) == 0) return g->funcs[i];
-    return NULL;
 }
 
 /* Scan a node for function calls and mark the targets reachable (recursively visits every child) */

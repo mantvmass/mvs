@@ -115,7 +115,7 @@ typedef struct {
     RegPlan plan;           /* locals promoted to registers in the current function */
     int regsave_off;        /* frame offset where the callee-saved registers are parked */
     const char *cur_ret_dyn;/* trait name if the function returns dyn Trait (hidden sret pointer), else NULL */
-    int io_imported;        /* 1 if the io module was imported (gates the built-in io.out function) */
+
 
     /* String pool: stores string bytes to be declared in the .data section */
     struct { unsigned char *data; int len; } strs[MAX_STR]; int nstrs;
@@ -173,7 +173,7 @@ void  global_label(const char *name, char *buf);
 
 /* --- function / variable / string tables --- */
 Node *find_func(Gen *g, const char *ns, const char *name);
-Node *find_extern_any(Gen *g, const char *name);   /* module-blind, for the io.out intrinsic */
+
 Sym  *find_var(Gen *g, const char *name);
 int   intern_string(Gen *g, const char *data, int len);
 
@@ -217,14 +217,9 @@ void  register_struct(Gen *g, Node *decl);
 void  layout_structs(Gen *g);   /* compute offset/size of every struct (fixpoint, supports forward references) */
 Field *find_field(StructInfo *s, const char *name);
 ExprType type_of(Gen *g, Node *n);
-DataType infer_type(Gen *g, Node *n);
+
 /* Signature if the callee is a function pointer value (TYPE_FUNC variable/field), else NULL (= direct call) */
 Node *expr_func_sig(Gen *g, Node *callee);
-
-/* --- convert an io.out format string (Rust-style {}) into a C printf format ---
- * Fills vals[] = the values actually passed to printf (structs expanded field by field), *out_nv = count */
-char *build_c_format(Gen *g, Node *call, const char *fmt, int *out_len, int *out_nph,
-                     Node **vals, int *out_nv, int vals_cap);
 
 /* --- reserving variable space on the stack (frame layout) --- */
 int   add_local(Gen *g, const char *name, DataType type, int ptr, int arr, int arr2, char *sname, Node *sig, int *frame);

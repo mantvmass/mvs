@@ -978,10 +978,6 @@ int x86_64_sysv_generate(Node *program, FILE *out) {
         }
     }
 
-    /* check whether the io module is imported (any function with namespace "io") to gate io.out */
-    for (int i = 0; i < g.nfuncs; i++)
-        if (g.funcs[i]->ns && strcmp(g.funcs[i]->ns, "io") == 0) { g.io_imported = 1; break; }
-
     /* reachability analysis (tree-shaking): start from main and global initializers
      * so only functions actually called get generated, shrinking the output */
     char reached[MAX_FUNC]; memset(reached, 0, sizeof(reached));

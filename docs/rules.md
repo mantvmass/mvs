@@ -179,7 +179,7 @@ Build, assemble, link:
 |-------|-------|------|
 | `main` | `main` | exported for the CRT |
 | user function (no ns) | `mvs_<name>` | avoids clashing with libc |
-| function in a module | `mvs_<ns>_<name>` | io::out becomes `mvs_io_out` |
+| function in a module | `mvs_<ns>_<name>` | io::read becomes `mvs_io_read` |
 | extern | `<name>` (raw) | must match C |
 | global variable | `mvs_gv_<name>` | |
 | string constant | `mvs_str_<idx>` | in `.data` |
@@ -277,8 +277,8 @@ Build, assemble, link:
   `core` is the pure-MVS subset usable under `--nostd`.
 - structs/traits are not namespaced yet (always global); bring a type into
   scope with `use`. Namespace affects free functions only.
-- `io::out` parses `{}` at compile time and picks a format per argument
-  (`build_c_format()` in `arch/common.c`); gated on `use std::io`.
+- `io::out` is a library function in `std/io.mvs` using variadic trait objects
+  (`...dyn Display`); it parses `{}` at runtime and calls `Display::fmt` per argument.
 - Tree-shaking: only functions reachable from main (and exports) are emitted.
 
 ## 7. Multi-architecture structure (don't break this)
@@ -286,7 +286,7 @@ Build, assemble, link:
 ```
 src/arch/
   common.h/.c    shared, arch-independent: type system, struct layout,
-                 symbol table, variable allocation, reachability, build_c_format
+                 symbol table, variable allocation, reachability
   x86_64/win.c   win64 ABI, NASM
   x86_64/sysv.c  SysV ABI, NASM: 6 GPR args + xmm class, no shadow space,
                  AL count for variadic C

@@ -3089,8 +3089,7 @@ static void tc_check(TcCtx *c, Node *n) {
                        !tc_find(c, callee->operand->name)) {
                 /* ns.f(...): a module function called through its namespace. Externs are
                  * skipped on purpose (their C signatures may be variadic or shortened,
-                 * e.g. printf declared with one parameter) and intrinsics like io.out
-                 * simply have no ND_FUNC to match. */
+                 * e.g. printf declared with one parameter). */
                 for (int i = 0; i < c->prog->nitems; i++) {
                     Node *d = c->prog->items[i];
                     if (d->kind == ND_FUNC && !d->is_extern && !d->is_method && d->ngen == 0 &&

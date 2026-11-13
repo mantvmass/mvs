@@ -1065,9 +1065,6 @@ int arm64_linux_generate(Node *program, FILE *out) {
         }
     }
 
-    for (int i = 0; i < g.nfuncs; i++)
-        if (g.funcs[i]->ns && strcmp(g.funcs[i]->ns, "io") == 0) { g.io_imported = 1; break; }
-
     char reached[MAX_FUNC]; memset(reached, 0, sizeof(reached));
     int has_main = 0;
     for (int i = 0; i < g.nfuncs; i++) {

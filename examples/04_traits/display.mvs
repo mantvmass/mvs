@@ -3,8 +3,8 @@
 //  build:  mvs.exe examples/04_traits/display.mvs
 //  run:    examples\04_traits\display.exe
 //
-//  io.out("{}", ..) is a compiler intrinsic (unlimited args, like Rust's println!)
-//  fmt.println is pure MVS; any type that impls Display prints through it (static dispatch)
+//  io.out("{}", ..) uses variadic trait objects: any type that impls Display can be printed.
+//  fmt.println is the static-dispatch alternative (one type at a time).
 // ============================================================
 use std::fmt;
 use std::string::String;
