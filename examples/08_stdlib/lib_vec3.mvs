@@ -1,5 +1,5 @@
-import { io, vec } from "std";
-import { Vec } from "std/vec";
+use std::{io, vec};
+use std::vec::Vec;
 
 func main() -> i8 {
     let v: Vec<i64> = Vec<i64>::new();

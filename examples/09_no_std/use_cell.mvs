@@ -1,6 +1,6 @@
 // core/cell: interior mutability wrapper
 // build: mvs.exe examples/09_no_std/use_cell.mvs --nostd
-import { Cell, swap } from "core/cell";
+use core::cell::{Cell, swap};
 
 export func kmain() -> i64 {
     let c: Cell = Cell::new(42);

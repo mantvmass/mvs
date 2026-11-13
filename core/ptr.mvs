@@ -1,7 +1,7 @@
 /*
  * core/ptr.mvs - raw pointer utilities in pure MVS (no CRT, no OS; --nostd safe)
  *
- *     import { ptr } from "core";
+ *     use core::ptr;
  *     if (!ptr.is_null(p)) { let v: u64 = ptr.read64(p); }
  */
 

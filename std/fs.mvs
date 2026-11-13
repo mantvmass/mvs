@@ -3,15 +3,15 @@
  *
  * Uses foreign functions from the C runtime.
  * Usage:
- *     import { fs } from "std";
+ *     use std::fs;
  *     fs.write("out.txt", "hello");
  *     let s: str = fs.read("out.txt");
  *     if (fs.exists("out.txt")) { fs.remove("out.txt"); }
  *
  *     let entries: Vec<String> = fs.read_dir(".");
  */
-import { Vec } from "std/vec";
-import { String } from "std/string";
+use std::vec::Vec;
+use std::string::String;
 
 extern func fopen(path: str, mode: str) -> *u8;
 extern func fputs(s: str, stream: *u8) -> i32;

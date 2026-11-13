@@ -4,7 +4,7 @@
 //  run:    examples\04_traits\traits.exe
 //  dispatch is static (monomorphization), no vtable/overhead
 // ============================================================
-import { io } from "std";
+use std::io;
 
 struct Point { x: i32; y: i32; }
 struct Circle { r: i32; }

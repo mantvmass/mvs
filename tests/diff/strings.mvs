@@ -1,6 +1,6 @@
 // Differential test: string and buffer work, the same in MVS and strings.c
-import { io } from "std";
-import { cstr, mem, bits } from "core";
+use std::io;
+use core::{cstr, mem, bits};
 
 extern func malloc(n: usize) -> *u8;
 

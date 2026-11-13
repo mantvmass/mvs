@@ -1,5 +1,5 @@
 // std/rand: pure-MVS xorshift64, the same sequence on EVERY platform
-import { io, rand } from "std";
+use std::{io, rand};
 
 func main() -> i8 {
     rand.seed(42);

@@ -1,13 +1,13 @@
 /*
  * std/http/router.mvs - method router and path-based router
  */
-import { cstr } from "core";
-import { mem } from "std";
-import { Vec } from "std/vec";
-import { HashMap } from "std/map";
-import { Request } from "./request";
-import { Response, Status, Text } from "./response";
-import { slice, COLON, STAR, SLASH } from "./util";
+use core::cstr;
+use std::mem;
+use std::vec::Vec;
+use std::map::HashMap;
+use self::request::Request;
+use self::response::{Response, Status, Text};
+use self::util::{slice, COLON, STAR, SLASH};
 
 const MAX_METHODS: i64 = 8;
 

@@ -6,8 +6,8 @@
 //  io.out("{}", ..) is a compiler intrinsic (unlimited args, like Rust's println!)
 //  fmt.println is pure MVS; any type that impls Display prints through it (static dispatch)
 // ============================================================
-import { fmt } from "std";              // fmt.println + trait Display
-import { String } from "std/string";    // the String type
+use std::fmt;
+use std::string::String;
 
 struct Point { x: i32; y: i32; }
 impl Display for Point {

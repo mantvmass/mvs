@@ -8,8 +8,8 @@
  * The input is a list of hardcoded expression strings so the output is
  * deterministic for golden testing.
  */
-import { io, math, convert, sort } from "std";
-import { Vec } from "std/vec";
+use std::{io, math, convert, sort};
+use std::vec::Vec;
 
 extern func malloc(n: usize) -> *u8;
 extern func free(p: *u8) -> void;

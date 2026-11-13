@@ -1,14 +1,14 @@
 /*
  * std/http/server.mvs - listener and serve loop
  */
-import { mem } from "std";
-import { cstr } from "core";
-import { String } from "std/string";
-import { TcpServer, TcpSocket } from "std/net";
-import { Request, parse_request } from "./request";
-import { Response } from "./response";
-import { Router } from "./router";
-import { index_of, slice, to_int, COLON } from "./util";
+use std::mem;
+use core::cstr;
+use std::string::String;
+use std::net::{TcpServer, TcpSocket};
+use self::request::{Request, parse_request};
+use self::response::Response;
+use self::router::Router;
+use self::util::{index_of, slice, to_int, COLON};
 
 struct Listener {
     sock: TcpServer;

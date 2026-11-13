@@ -6,12 +6,12 @@
  * reported with the line it happened on: a toy language does not need error
  * recovery, and pretending otherwise would hide bugs.
  */
-import { Vec } from "std/vec";
-import { cstr } from "core";
-import { Token, Tok } from "./lexer.mvs";
-import { Prog, Ast, Bin, Un, Asg, If3, Wh, Lst, Call, Fn } from "./ast.mvs";
-import { OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD } from "./ast.mvs";
-import { OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE, OP_NEG } from "./ast.mvs";
+use std::vec::Vec;
+use core::cstr;
+use self::lexer::{Token, Tok};
+use self::ast::{Prog, Ast, Bin, Un, Asg, If3, Wh, Lst, Call, Fn};
+use self::ast::{OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD};
+use self::ast::{OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE, OP_NEG};
 
 struct Parser {
     toks: Vec<Token>;

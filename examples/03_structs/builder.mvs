@@ -7,8 +7,8 @@
  * The caller chains:
  *     let x: T = T::new().a(1).b("hi").c(true);
  */
-import { io } from "std";
-import { String } from "std/string";
+use std::io;
+use std::string::String;
 
 struct Config {
     host: String;

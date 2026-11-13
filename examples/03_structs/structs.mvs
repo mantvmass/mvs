@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/03_structs/structs.mvs
 //  run:    examples\03_structs\structs.exe
 // ============================================================
-import { io } from "std";
+use std::io;
 
 struct Point { x: i32; y: i32; }
 

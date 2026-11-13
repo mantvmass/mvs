@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/01_language/control.mvs
 //  run:    examples\01_language\control.exe
 // ============================================================
-import { io } from "std";
+use std::io;
 
 func main() -> i8 {
     // if / elseif / else

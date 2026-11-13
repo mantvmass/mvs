@@ -5,7 +5,7 @@
  * a plain MVS loop or expression. It works under --nostd for OS/bare-metal
  * code that needs math without linking libm.
  *
- *     import { math } from "core";
+ *     use core::math;
  *     let d: i64 = math.gcd(48, 18);         // 6
  *     let p: bool = math.is_power_of_two(64); // true
  */

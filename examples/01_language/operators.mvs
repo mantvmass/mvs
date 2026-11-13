@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/01_language/operators.mvs
 //  run:    examples\01_language\operators.exe
 // ============================================================
-import { io } from "std";
+use std::io;
 
 // function taking 6 parameters (beyond 4 -> passed on the stack)
 func sum6(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32) -> i32 {

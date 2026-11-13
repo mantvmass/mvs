@@ -10,7 +10,7 @@
  * callers.
  *
  * Usage:
- *     import { volatile } from "core";
+ *     use core::volatile;
  *     volatile.write32(0xB8000 as *u8, 0x0F41);  // VGA: 'A' white-on-black
  *     let status: u32 = volatile.read32(uart_base + 0x14);
  */

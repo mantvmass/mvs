@@ -1,5 +1,5 @@
 // std/fs: filesystem operations (extended coverage)
-import { io, fs } from "std";
+use std::{io, fs};
 
 func main() -> void {
     let dir: str = "examples/08_stdlib/_test_fs_tmp";

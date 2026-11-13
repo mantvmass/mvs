@@ -1,6 +1,6 @@
 // std/vec: extended Vec methods coverage
-import { io } from "std";
-import { Vec } from "std/vec";
+use std::io;
+use std::vec::Vec;
 
 func main() -> void {
     let v: Vec<i64> = Vec<i64>::with_capacity(8);

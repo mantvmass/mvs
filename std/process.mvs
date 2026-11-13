@@ -5,7 +5,7 @@
  * directly through the namespace); pid differs per OS (@compile).
  *
  * Example:
- *     import { io, process } from "std";
+ *     use std::{io, process};
  *     io.out("pid = {}", process.pid());
  *     let rc: i32 = process.run("echo hello");
  *     process.exit(0);

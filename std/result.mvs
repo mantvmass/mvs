@@ -2,7 +2,7 @@
  * std/result.mvs - Result<T, E>: success (T) or error (E), a TRUE Rust-style enum
  *
  * Usage:
- *     import { Result, Ok, Err } from "std/result";
+ *     use std::result::{Result, Ok, Err};
  *
  *     func parse_positive(x: i64) -> Result<i64, str> {
  *         if (x < 0) { return Err<i64, str>("negative"); }

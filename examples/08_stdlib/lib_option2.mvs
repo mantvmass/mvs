@@ -1,5 +1,5 @@
-import { io } from "std";
-import { Option, Some, None } from "std/option";
+use std::io;
+use std::option::{Option, Some, None};
 
 func fallback_val() -> i64 { return 42; }
 func fallback_opt() -> Option<i64> { return Some(99); }

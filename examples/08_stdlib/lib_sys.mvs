@@ -1,7 +1,7 @@
 // std/time + std/env + std/process: values are inherently nondeterministic, so
 // the output prints deterministic PROPERTIES (the goldens stay identical on
 // every platform).
-import { io, time, env, process } from "std";
+use std::{io, time, env, process};
 
 func main() -> i8 {
     // time: sleeping must advance the millisecond clock

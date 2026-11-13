@@ -6,7 +6,7 @@
  * CRT-backed, so it is identical on every supported target.
  *
  * Example:
- *     import { mem } from "std";
+ *     use std::mem;
  *     let p: *u8 = mem.alloc(64);
  *     mem.zero(p, 64);
  *     mem.dealloc(p);

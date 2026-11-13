@@ -8,7 +8,7 @@
 //  time, so one variable (or array) can hold different concrete types.
 //  `where T: A + B` constrains a generic over several traits at once.
 // ============================================================
-import { io } from "std";
+use std::io;
 
 struct Rect { w: i32; h: i32; }
 struct Circle { r: i32; }

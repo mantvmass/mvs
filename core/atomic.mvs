@@ -1,7 +1,7 @@
 /*
  * core/atomic.mvs - lock-free atomic operations (--nostd safe)
  *
- *     import { atomic } from "core";
+ *     use core::atomic;
  *
  *     let counter: i64 = 0;
  *     atomic.store(&counter, 10);

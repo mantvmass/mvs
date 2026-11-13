@@ -2,8 +2,8 @@
  * std/set.mvs - HashSet<T>: open-addressing hash set (linear probing)
  *
  * Usage:
- *     import { io } from "std";
- *     import { HashSet } from "std/set";
+ *     use std::io;
+ *     use std::set::HashSet;
  *
  *     let s: HashSet<i64> = HashSet<i64>::new();
  *     s.insert(10);
@@ -18,7 +18,7 @@
  * add a pair to support another type). Grows by doubling at 70% load.
  * remove() uses tombstone deletion (same as HashMap).
  */
-import { Vec } from "std/vec";
+use std::vec::Vec;
 
 extern func realloc(p: *u8, n: usize) -> *u8;
 extern func free(p: *u8) -> void;

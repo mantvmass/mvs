@@ -2,9 +2,9 @@
  * std/sorted_map.mvs - SortedMap<K, V>: ordered map backed by sorted arrays
  *
  * Usage:
- *     import { io } from "std";
- *     import { SortedMap } from "std/sorted_map";
- *     import { Option } from "std/option";
+ *     use std::io;
+ *     use std::sorted_map::SortedMap;
+ *     use std::option::Option;
  *
  *     let m: SortedMap<i64, str> = SortedMap<i64, str>::new();
  *     m.insert(3, "three");
@@ -17,7 +17,7 @@
  * Lookup is O(log n), insert/remove are O(n) (array shift).
  * Key types: i64 and str (add a map_cmp overload for more).
  */
-import { Option, Some, None } from "std/option";
+use std::option::{Option, Some, None};
 
 extern func realloc(p: *u8, n: usize) -> *u8;
 extern func free(p: *u8) -> void;

@@ -7,7 +7,7 @@
  * (block statements, call arguments) live in a second flat vector as a
  * (start, count) range, the same trick a C compiler uses.
  */
-import { Vec } from "std/vec";
+use std::vec::Vec;
 
 // binary and unary operator codes, shared with the compiler
 const OP_ADD: i64 = 0;

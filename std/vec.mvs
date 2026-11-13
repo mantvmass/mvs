@@ -2,8 +2,8 @@
  * std/vec.mvs - Vec<T>: a growable array (Rust style)
  *
  * Usage:
- *     import { io } from "std";
- *     import { Vec } from "std/vec";
+ *     use std::io;
+ *     use std::vec::Vec;
  *
  *     let v: Vec<i64> = Vec<i64>::new();
  *     v.push(10);

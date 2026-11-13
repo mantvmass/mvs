@@ -1,7 +1,7 @@
 /*
  * core/bits.mvs - bit manipulation in pure MVS (--nostd safe)
  *
- *     import { bits } from "core";
+ *     use core::bits;
  *     let n: i64 = bits.popcount(mask);
  */
 

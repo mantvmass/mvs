@@ -1,6 +1,6 @@
 // std/string: String type methods
-import { io } from "std";
-import { String } from "std/string";
+use std::io;
+use std::string::String;
 
 func main() -> void {
     let s: String = String::with_capacity(64);

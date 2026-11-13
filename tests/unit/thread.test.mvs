@@ -1,6 +1,6 @@
 // unit tests for std/thread + std/sync (deterministic by construction:
 // the mutex makes the final counter exact, and join orders the reads)
-import { test, thread, sync } from "std";
+use std::{test, thread, sync};
 
 let m: Mutex;
 let counter: i64 = 0;

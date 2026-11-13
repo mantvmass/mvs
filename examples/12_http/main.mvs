@@ -13,15 +13,15 @@
  * Memory is manual: each round trip drops the response String it read, and the
  * server drops the Request and Response it built.
  */
-import { io, mem } from "std";
-import { Router, Listener, Request, Response } from "std/http";
-import { get, post, put, delete, head, options, any } from "std/http";
-import { Text, Html, Json, Status, Redirect } from "std/http";
-import { serve_once, serve_n } from "std/http";
-import { send_request, read_response, response_status, response_body, response_header } from "std/http";
-import { TcpSocket } from "std/net";
-import { String } from "std/string";
-import { Option, Some, None } from "std/option";
+use std::{io, mem};
+use std::http::{Router, Listener, Request, Response};
+use std::http::{get, post, put, delete, head, options, any};
+use std::http::{Text, Html, Json, Status, Redirect};
+use std::http::{serve_once, serve_n};
+use std::http::{send_request, read_response, response_status, response_body, response_header};
+use std::net::TcpSocket;
+use std::string::String;
+use std::option::{Option, Some, None};
 
 const ADDR: str = "127.0.0.1:47822";
 

@@ -7,7 +7,7 @@
 //  idea: -c makes MVS produce use_c.obj; then clang links the .obj with mathops.c
 //          declare extern func matching the C signatures (see mathops.c)
 // ============================================================
-import { io } from "std";
+use std::io;
 
 extern func c_add(a: i32, b: i32) -> i32;
 extern func c_gcd(a: i32, b: i32) -> i32;

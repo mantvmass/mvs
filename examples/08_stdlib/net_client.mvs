@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/08_stdlib/net_client.mvs
 //  run:    examples\08_stdlib\net_client.exe   (requires a reachable server)
 // ============================================================
-import { io, net } from "std";
+use std::{io, net};
 
 func main() -> i8 {
     let conn: TcpSocket = TcpSocket::connect("93.184.216.34", 80);  // example.com

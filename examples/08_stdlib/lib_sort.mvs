@@ -1,5 +1,5 @@
 // std/sort: generic sorting and checking
-import { io, sort } from "std";
+use std::{io, sort};
 
 func main() -> void {
     let a: [i64; 6] = [5, 3, 8, 1, 9, 2];

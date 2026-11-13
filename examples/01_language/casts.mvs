@@ -6,7 +6,7 @@
 //  This language refuses sloppy typing: 50 + "50" is a compile-time error
 //  To really convert, use `as` (binds tighter than arithmetic operators)
 // ============================================================
-import { io } from "std";
+use std::io;
 
 func main() -> i8 {
     let a: i32 = 7;

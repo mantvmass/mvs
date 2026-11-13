@@ -4,7 +4,7 @@
 //  run:    examples\02_functions\generics.exe
 //  The compiler emits a copy only for types actually used (max__i64, max__f64, ...)
 // ============================================================
-import { io } from "std";
+use std::io;
 
 func max<T>(a: T, b: T) -> T { if (a > b) { return a; } return b; }
 func min<T>(a: T, b: T) -> T { if (a < b) { return a; } return b; }

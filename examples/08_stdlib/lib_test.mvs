@@ -1,5 +1,5 @@
 // std/test: exercise the assertion helpers (ne, lt, gt, le, ge)
-import { io, test } from "std";
+use std::{io, test};
 
 func main() -> void {
     test.ne(1, 2);

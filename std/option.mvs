@@ -2,7 +2,7 @@
  * std/option.mvs - Option<T>: a value that may be absent (a TRUE Rust-style enum)
  *
  * Usage:
- *     import { Option, Some, None } from "std/option";
+ *     use std::option::{Option, Some, None};
  *
  *     func find(...) -> Option<i64> {
  *         if (found) { return Some(i); }    // T inferred from the argument

@@ -1,7 +1,7 @@
 /*
  * core/cmp.mvs - comparisons in pure MVS (no CRT, no OS; --nostd safe)
  *
- *     import { cmp } from "core";
+ *     use core::cmp;
  *     let m: i64 = cmp.max(a, b);        // generic: works for any ordered type
  */
 

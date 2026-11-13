@@ -1,7 +1,7 @@
 /*
  * core/ffi.mvs - C-compatible type sizes and limit helpers (--nostd safe)
  *
- *     import { ffi } from "core";
+ *     use core::ffi;
  *     let sz: usize = ffi.c_int_size();
  *
  * MVS has no type aliases, so this module provides the sizes and

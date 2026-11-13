@@ -3,7 +3,7 @@
  *
  * ("cstr" because `str` is a type keyword; these are classic C strings.)
  *
- *     import { cstr } from "core";
+ *     use core::cstr;
  *     if (cstr.eq(name, "root")) { ... }
  */
 

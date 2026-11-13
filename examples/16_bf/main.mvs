@@ -1,6 +1,6 @@
 // Brainfuck interpreter: exercises arrays, pointer casts, while loops, putchar.
 // Runs several BF programs inline and prints their output.
-import { io, fmt, mem, convert } from "std";
+use std::{io, fmt, mem, convert};
 
 extern func putchar(c: i32) -> i32;
 

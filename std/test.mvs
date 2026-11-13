@@ -8,7 +8,7 @@
  * "  FAIL  <name>: ..." and exits the test binary with 1.
  *
  * Example (math.test.mvs):
- *     import { test, math } from "std";
+ *     use std::{test, math};
  *
  *     @test
  *     func gcd_of_common_factors() -> void {
@@ -18,7 +18,7 @@
  *         test.near(math.sqrt(2.0), 1.4142135, 0.0001);
  *     }
  */
-import { io } from "std";
+use std::io;
 
 extern func exit(code: i32) -> void;
 extern func strcmp(a: str, b: str) -> i32;

@@ -1,8 +1,8 @@
 // unit tests for the core package (hosted here; the same code runs --nostd,
 // proven by examples/09_no_std/use_core.mvs's zero-undefined check in CI)
-import { test } from "std";
-import { mem, cmp, ptr, cstr, bits } from "core";
-import { Slice } from "core/slice";
+use std::test;
+use core::{mem, cmp, ptr, cstr, bits};
+use core::slice::Slice;
 
 extern func malloc(n: usize) -> *u8;
 

@@ -1,4 +1,4 @@
-import { io } from "std";
+use std::io;
 
 func main() -> i64 {
     let a: i64 = 100;

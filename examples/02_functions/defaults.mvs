@@ -6,7 +6,7 @@
 //  A trailing parameter may declare a default (h: i32 = 10); calls that omit it
 //  get the default filled in at compile time. Works for methods too.
 // ============================================================
-import { io } from "std";
+use std::io;
 
 func area(w: i32, h: i32 = 10, scale: i32 = 1) -> i32 {
     return w * h * scale;

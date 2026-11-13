@@ -1,5 +1,5 @@
 // unit tests for the std library, run by `mvs test`
-import { test, math, mem, string, rand } from "std";
+use std::{test, math, mem, string, rand};
 
 func test_math_int() -> void {
     test.eq(math.abs(0 - 5), 5);

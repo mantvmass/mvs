@@ -1,2 +1,2 @@
-pub import { hello, goodbye } from "./greet";
-pub import { add, mul } from "./math";
+pub use self::greet::{hello, goodbye};
+pub use self::math::{add, mul};

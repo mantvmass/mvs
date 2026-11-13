@@ -1,5 +1,5 @@
 // std/math: extended coverage (float utils, trig helpers)
-import { io, math } from "std";
+use std::{io, math};
 
 func main() -> void {
     io.out("hypot(3,4) = {}", math.hypot(3.0, 4.0));

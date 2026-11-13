@@ -6,7 +6,7 @@
  * (GetTickCount64/Sleep on Windows, gettimeofday/usleep on Linux).
  *
  * Example:
- *     import { io, time } from "std";
+ *     use std::{io, time};
  *     let t: i64 = time.millis();
  *     time.sleep_ms(100);
  *     io.out("elapsed = {} ms", time.millis() - t);

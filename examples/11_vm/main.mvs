@@ -16,14 +16,14 @@
  * Memory: every Lexer, Prog, Chunk, Compiler and Vm created here is dropped
  * explicitly, which is the whole point of MVS being manual (docs/rules.md 0.2).
  */
-import { io } from "std";
-import { Vec } from "std/vec";
-import { cstr } from "core";
-import { Lexer, Token, tokenize } from "./lexer.mvs";
-import { Prog, Ast } from "./ast.mvs";
-import { Parser } from "./parser.mvs";
-import { Chunk, Compiler } from "./compiler.mvs";
-import { Vm, disassemble } from "./vm.mvs";
+use std::io;
+use std::vec::Vec;
+use core::cstr;
+use self::lexer::{Lexer, Token, tokenize};
+use self::ast::{Prog, Ast};
+use self::parser::Parser;
+use self::compiler::{Chunk, Compiler};
+use self::vm::{Vm, disassemble};
 
 const STEP_LIMIT: i64 = 2000000;
 

@@ -1,7 +1,7 @@
 /*
  * examples/09_no_std/use_ffi.mvs - test core/ffi constants (nostd, return code)
  */
-import { ffi } from "core";
+use core::ffi;
 
 func main() -> i32 {
     if (ffi.c_int_size() != 4)     { return 1; }

@@ -2,7 +2,7 @@
  * std/path.mvs - path manipulation utilities
  *
  * Usage:
- *     import { path } from "std";
+ *     use std::path;
  *     let dir: String = path.dirname("/home/user/file.txt");   // "/home/user"
  *     let base: String = path.basename("/home/user/file.txt"); // "file.txt"
  *     let ext: String = path.extension("file.txt");            // "txt"
@@ -13,7 +13,7 @@ extern func strlen(s: str) -> usize;
 extern func malloc(n: usize) -> *u8;
 extern func memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 
-import { String } from "std/string";
+use std::string::String;
 
 func is_sep(c: u8) -> bool {
     return c == 47 || c == 92;

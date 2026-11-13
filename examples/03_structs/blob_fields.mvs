@@ -1,7 +1,7 @@
 // 16-byte and float fields initialized from plain literals in a struct literal:
 // the i128 high half must be widened (zero/sign extended), ints must convert to
 // floats, and a method accumulating into an i128 field must stay exact.
-import { io } from "std";
+use std::io;
 
 struct Acc {
     total: i128;

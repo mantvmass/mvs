@@ -1,13 +1,13 @@
 // The API axis: functions that scripts/api_coverage.py found nothing calling.
 // A std function nothing calls is a function nothing proves still works, so
 // every gap the coverage check reports gets a test here.
-import { test, math } from "std";
-import { String } from "std/string";
-import { Option, Some, None } from "std/option";
-import { HashMap, map_hash, map_eq } from "std/map";
-import { set_hash, set_eq } from "std/set";
-import { SortedMap, map_cmp } from "std/sorted_map";
-import { ptr, arch } from "core";
+use std::{test, math};
+use std::string::String;
+use std::option::{Option, Some, None};
+use std::map::{HashMap, map_hash, map_eq};
+use std::set::{set_hash, set_eq};
+use std::sorted_map::{SortedMap, map_cmp};
+use core::{ptr, arch};
 
 struct Point { x: i64; y: i64; }
 

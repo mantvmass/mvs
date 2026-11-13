@@ -1,10 +1,10 @@
 // comprehensive test of every core module under --nostd.
 // build: mvs.exe examples/09_no_std/use_core_all.mvs --nostd
-import { mem, cmp, ptr, cstr, bits } from "core";
-import { Slice } from "core/slice";
-import { fmt, hash, sort, math, volatile } from "core";
-import { Option, Some, None } from "core/option";
-import { Result, Ok, Err } from "core/result";
+use core::{mem, cmp, ptr, cstr, bits};
+use core::slice::Slice;
+use core::{fmt, hash, sort, math, volatile};
+use core::option::{Option, Some, None};
+use core::result::{Result, Ok, Err};
 
 // a tiny static arena
 let arena: [u8; 128] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,

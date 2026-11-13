@@ -9,7 +9,7 @@
 //  Not supported (compile errors guide you): compound assignment (x += y),
 //  ++/--, direct float casts, switch/if on a bare i128 (compare with != 0).
 // ============================================================
-import { io } from "std";
+use std::io;
 
 func square128(x: i128) -> i128 {
     return x * x;

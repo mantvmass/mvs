@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/02_functions/recursion.mvs
 //  run:    examples\02_functions\recursion.exe
 // ============================================================
-import { io } from "std";
+use std::io;
 
 func fib(n: i32) -> i64 {
     if (n < 2) { return n as i64; }

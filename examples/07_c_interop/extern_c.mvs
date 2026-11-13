@@ -4,7 +4,7 @@
 //  run:    examples\07_c_interop\extern_c.exe
 //  (extern = declare a foreign function from the C runtime / a linked library)
 // ============================================================
-import { io } from "std";
+use std::io;
 
 extern func strlen(s: str) -> usize;
 extern func atoi(s: str) -> i32;

@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/08_stdlib/files.mvs
 //  run:    examples\08_stdlib\files.exe
 // ============================================================
-import { io, fs } from "std";
+use std::{io, fs};
 
 func main() -> i8 {
     // write a file, then read it back

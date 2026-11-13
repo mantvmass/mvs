@@ -1,7 +1,7 @@
 /*
  * core/slice.mvs - Slice<T>: a {pointer, length} view in pure MVS (--nostd safe)
  *
- *     import { Slice } from "core/slice";
+ *     use core::slice::Slice;
  *     let s: Slice<i64> = Slice<i64>::new(buf, 8);
  *     if (s.in_bounds(3)) { let v: i64 = s.get(3); }
  *

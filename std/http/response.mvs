@@ -1,7 +1,7 @@
 /*
  * std/http/response.mvs - HTTP response types and builders
  */
-import { String } from "std/string";
+use std::string::String;
 
 struct Response {
     status: i64;

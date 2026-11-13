@@ -6,11 +6,11 @@
  * is the guaranteed bottom: the CPU cannot proceed past it.
  *
  * Usage:
- *     import { panic } from "core";
+ *     use core::panic;
  *     panic.abort();                      // halt immediately
  *     panic.abort_msg("out of memory");   // write to VGA then halt
  */
-import { arch } from "core";
+use core::arch;
 
 // a replaceable handler function pointer; an OS kernel can install its own
 // (serial dump, LED blink, register dump) early in boot with set_handler().

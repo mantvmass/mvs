@@ -2,7 +2,7 @@
 // before the access. In-range code behaves exactly as before; an out-of-range
 // index traps (ud2 / brk) instead of reading or writing past the array.
 // Compile with --no-check to trust the indices C-style.
-import { io } from "std";
+use std::io;
 
 struct Grid { cells: [i64; 4]; tag: i64; }
 

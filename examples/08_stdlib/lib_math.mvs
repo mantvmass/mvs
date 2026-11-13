@@ -1,5 +1,5 @@
 // std/math: libm wrappers plus integer helpers, overloaded across i64/f64
-import { io, math } from "std";
+use std::{io, math};
 
 func main() -> i8 {
     // libm wrappers

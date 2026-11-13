@@ -9,7 +9,7 @@
  * All functions take a raw pointer and an element count. Comparison uses the
  * built-in < and > operators, so these work on any numeric type.
  *
- *     import { sort } from "core";
+ *     use core::sort;
  *     let a: [i64; 5] = [3, 1, 4, 1, 5];
  *     sort.i64s(a, 5);         // [1, 1, 3, 4, 5]
  *     let idx: i64 = sort.bsearch_i64(a, 5, 4);  // 3

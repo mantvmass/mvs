@@ -4,7 +4,7 @@
  * FNV-1a and splitmix64, the same algorithms std/map uses internally,
  * exposed for freestanding code that needs hashing without the full HashMap.
  *
- *     import { hash } from "core";
+ *     use core::hash;
  *     let h: u64 = hash.fnv1a(data, len);
  *     let m: u64 = hash.splitmix64(seed);
  */

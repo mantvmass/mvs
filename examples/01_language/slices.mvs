@@ -1,5 +1,5 @@
-import { io } from "std";
-import { Slice } from "core/slice";
+use std::io;
+use core::slice::Slice;
 
 func sum_ptr(p: *i64, n: i64) -> i64 {
     let total: i64 = 0;

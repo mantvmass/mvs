@@ -1,7 +1,7 @@
 // OS threads + Mutex: 4 workers x 10000 mutex-protected increments = exactly
 // 40000 on every run and every platform (that determinism is the whole point
 // of the lock). CreateThread/SRWLock on Windows, pthreads on Linux.
-import { io, thread, sync } from "std";
+use std::{io, thread, sync};
 
 let m: Mutex;               // a zeroed global Mutex is valid and unlocked
 let counter: i64 = 0;

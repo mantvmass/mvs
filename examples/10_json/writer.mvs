@@ -5,9 +5,9 @@
  * the arena recursively and append into a String the caller owns.
  * Strings are re-escaped so that write(parse(x)) is valid JSON again.
  */
-import { Doc, Json } from "./value.mvs";
-import { String } from "std/string";
-import { cstr } from "core";
+use self::value::{Doc, Json};
+use std::string::String;
+use core::cstr;
 
 // append a JSON-escaped copy of s (with the surrounding quotes)
 func write_escaped(out: *String, s: str) -> void {

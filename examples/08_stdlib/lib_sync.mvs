@@ -1,5 +1,5 @@
 // std/sync: RwLock and CondVar coverage
-import { io, sync, thread } from "std";
+use std::{io, sync, thread};
 
 let g_ready: i64 = 0;
 let g_mu: Mutex;

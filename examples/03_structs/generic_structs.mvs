@@ -1,6 +1,6 @@
 // generic structs: struct Vec<T> templates, monomorphized per concrete use
 // (methods come along; nested generics like Boxed<Pair<i64, i64>> work too)
-import { io } from "std";
+use std::io;
 
 struct Pair<T, U> {
     a: T;

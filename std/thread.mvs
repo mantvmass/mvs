@@ -5,7 +5,7 @@
  * argument in, one opaque result out, POSIX style). spawn returns a handle;
  * join blocks until that thread finishes.
  *
- *     import { io, thread } from "std";
+ *     use std::{io, thread};
  *
  *     func worker(arg: *u8) -> *u8 {
  *         io.out("hello from thread {}", *arg);

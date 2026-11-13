@@ -72,7 +72,8 @@ typedef enum {
                     *  operand = default value expression (parameters only, NULL = no default) */
     ND_FUNC,       /* function definition: uses name, type (return type), items (parameters), body.
                     *  If is_extern = 1 and body = NULL, this declares a foreign function */
-    ND_IMPORT,     /* module import: uses str_val (path), items (imported names as ND_IDENT) */
+    ND_IMPORT,     /* use statement: str_val (path with ::), items (symbols), name="*" for glob */
+    ND_MOD,        /* mod declaration: name = module name, is_export = pub mod */
     ND_TRAIT,      /* trait definition: uses name (trait name), items (method signatures as bodyless ND_FUNC) */
     ND_TRAIT_IMPL, /* marker that a type impls a trait: uses name (trait name), type_name (type name) */
     ND_PROGRAM     /* whole program: uses items (list of top-level definitions) */

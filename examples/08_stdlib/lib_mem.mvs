@@ -1,5 +1,5 @@
 // std/mem: heap allocation and raw memory operations
-import { io, mem } from "std";
+use std::{io, mem};
 
 func main() -> i8 {
     // alloc + set + read back (a raw *u8 prints as an address, so cast to str)

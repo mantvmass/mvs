@@ -7,12 +7,12 @@
  * division by zero, a bad jump) stops the machine with a message instead of
  * corrupting memory, because a VM that trusts its input is not a VM.
  */
-import { Vec } from "std/vec";
-import { io } from "std";
-import { cstr } from "core";
-import { Chunk, Op, CallOp, FnInfo } from "./compiler.mvs";
-import { OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD } from "./ast.mvs";
-import { OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE, OP_NEG } from "./ast.mvs";
+use std::vec::Vec;
+use std::io;
+use core::cstr;
+use self::compiler::{Chunk, Op, CallOp, FnInfo};
+use self::ast::{OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD};
+use self::ast::{OP_LT, OP_LE, OP_GT, OP_GE, OP_EQ, OP_NE, OP_NEG};
 
 const STACK_MAX: i64 = 4096;
 const FRAME_MAX: i64 = 256;

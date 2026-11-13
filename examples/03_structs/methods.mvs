@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/03_structs/methods.mvs
 //  run:    examples\03_structs\methods.exe
 // ============================================================
-import { io } from "std";
+use std::io;
 
 struct Rect { w: i32; h: i32; }
 

@@ -1,6 +1,6 @@
 // Channels: bounded MPMC channel for thread communication
-import { io, thread } from "std";
-import { Channel } from "std/channel";
+use std::{io, thread};
+use std::channel::Channel;
 
 let ch: Channel;
 

@@ -1,5 +1,5 @@
 // std/rand: extended coverage (coin, bytes, shuffle)
-import { io, rand } from "std";
+use std::{io, rand};
 
 func main() -> void {
     rand.seed(12345);

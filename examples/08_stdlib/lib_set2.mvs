@@ -1,6 +1,6 @@
-import { io } from "std";
-import { HashSet } from "std/set";
-import { Vec } from "std/vec";
+use std::io;
+use std::set::HashSet;
+use std::vec::Vec;
 
 func main() -> i8 {
     let s: HashSet<i64> = HashSet<i64>::new();

@@ -2,9 +2,9 @@
 /* a block
    comment */
 
-import { io, math } from "std";
-import { String } from "std/string";
-import mylib from "./mathlib.mvs";
+use std::{io, math};
+use std::string::String;
+use self::mathlib;
 
 @compile(target_os = "linux", target_arch = "aarch64")
 extern func close(s: usize) -> i32;

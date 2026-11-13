@@ -6,7 +6,7 @@
  * cryptography; it is a fast statistical PRNG.
  *
  * Example:
- *     import { io, rand } from "std";
+ *     use std::{io, rand};
  *     rand.seed(42);
  *     io.out("d6 = {}", rand.range(1, 6));
  */

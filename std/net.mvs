@@ -8,7 +8,7 @@
  * are selected per target with @compile(target_os = ...).
  *
  * Example (client):
- *     import { net } from "std";
+ *     use std::net;
  *     let conn: TcpSocket = TcpSocket::connect("93.184.216.34", 80);
  *     conn.send("GET / HTTP/1.0\r\n\r\n");
  *     let reply: str = conn.recv();

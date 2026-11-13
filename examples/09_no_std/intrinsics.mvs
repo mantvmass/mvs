@@ -2,7 +2,7 @@
 // build: mvs.exe examples/09_no_std/intrinsics.mvs --nostd
 // Every helper is a leaf wrapper around one instruction, chosen per target with
 // @compile(target_arch), so the same source builds for x86-64 and AArch64.
-import { arch, bits } from "core";
+use core::{arch, bits};
 
 export func kmain() -> i64 {
     // hints and barriers: no observable effect, but they must assemble and run

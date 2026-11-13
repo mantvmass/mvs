@@ -2,13 +2,13 @@
  * std/http/mod.mvs - HTTP module, re-exports from submodules
  *
  * Usage:
- *     import { Router, Request, Response } from "std/http";
- *     import { get, post, Text, Html, Json, Status, Listener, serve } from "std/http";
+ *     use std::http::{Router, Request, Response};
+ *     use std::http::{get, post, Text, Html, Json, Status, Listener, serve};
  */
 
-pub import { slice, index_of, header_end, lower, is_space, trim, to_int, hex_val, url_decode } from "./util";
-pub import { Request, parse_request } from "./request";
-pub import { Response, Status, Text, Html, Json, Redirect, status_text } from "./response";
-pub import { MethodRouter, MethodEntry, Route, Router, match_path, method_router, no_handler, default_fallback, get, post, put, delete, patch, head, options, any } from "./router";
-pub import { Listener, serve_once, serve_n, serve, log_line } from "./server";
-pub import { send_request, read_response, fetch, response_status, response_body, response_header } from "./client";
+pub use self::util::{slice, index_of, header_end, lower, is_space, trim, to_int, hex_val, url_decode};
+pub use self::request::{Request, parse_request};
+pub use self::response::{Response, Status, Text, Html, Json, Redirect, status_text};
+pub use self::router::{MethodRouter, MethodEntry, Route, Router, match_path, method_router, no_handler, default_fallback, get, post, put, delete, patch, head, options, any};
+pub use self::server::{Listener, serve_once, serve_n, serve, log_line};
+pub use self::client::{send_request, read_response, fetch, response_status, response_body, response_header};

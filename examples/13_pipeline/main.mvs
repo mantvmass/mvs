@@ -10,10 +10,10 @@
  *
  * Exercises: thread.Scope, channels (bounded MPMC), atomics, match.
  */
-import { io, thread } from "std";
-import { Scope } from "std/thread";
-import { Channel } from "std/channel";
-import { atomic } from "core";
+use std::{io, thread};
+use std::thread::Scope;
+use std::channel::Channel;
+use core::atomic;
 
 struct PipeCtx {
     jobs: *Channel;

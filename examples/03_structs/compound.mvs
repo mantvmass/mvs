@@ -5,7 +5,7 @@
 //
 //  get().value += 5 must evaluate get() exactly once; the counter proves it.
 // ============================================================
-import { io } from "std";
+use std::io;
 extern func malloc(n: usize) -> *u8;
 
 struct Cell { value: i32; }

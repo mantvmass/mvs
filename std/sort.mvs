@@ -2,8 +2,8 @@
  * std/sort.mvs - sorting algorithms for Vec<T>
  *
  * Usage:
- *     import { sort } from "std";
- *     import { Vec } from "std/vec";
+ *     use std::sort;
+ *     use std::vec::Vec;
  *     let v: Vec<i64> = Vec<i64>::new();
  *     v.push(3); v.push(1); v.push(2);
  *     sort.ascending(v.as_ptr(), v.len());   // [1, 2, 3]

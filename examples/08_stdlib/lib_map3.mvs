@@ -1,6 +1,6 @@
-import { io } from "std";
-import { HashMap } from "std/map";
-import { Vec } from "std/vec";
+use std::io;
+use std::map::HashMap;
+use std::vec::Vec;
 
 func main() -> i8 {
     let m: HashMap<str, i64> = HashMap<str, i64>::new();

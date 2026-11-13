@@ -1,7 +1,7 @@
 // user functions may share names with std module functions: an unqualified call
 // binds to the user's (global) definition, ns.func still reaches the module's,
 // and overload sets stay separate per namespace.
-import { io, fs, math } from "std";
+use std::{io, fs, math};
 
 func read(a: i64, b: i64) -> i64 { return a * 10 + b; }     // vs fs.read(path)
 func write(x: i64) -> i64 { return x + 1; }                 // vs fs.write(path, s)

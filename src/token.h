@@ -38,8 +38,11 @@ typedef enum {
     TK_DEFAULT,      /* default - default case inside switch */
     TK_BREAK,        /* break   - exit a loop/switch */
     TK_CONTINUE,     /* continue- skip to the next iteration */
-    TK_IMPORT,       /* import  - import a module */
-    TK_FROM,         /* from    - specifies the source of an import */
+    TK_IMPORT,       /* import  - (legacy, unused) */
+    TK_FROM,         /* from    - (legacy, unused) */
+    TK_USE,          /* use     - import items from a module (Rust-style path) */
+    TK_MOD,          /* mod     - declare a submodule */
+    TK_PUB,          /* pub     - visibility modifier (pub use, pub mod, pub func) */
     TK_EXTERN,       /* extern  - declare an external function (foreign function from the C runtime) */
     TK_EXPORT,       /* export  - export a function so C can call it (uses the raw symbol name) */
     TK_IMPL,         /* impl    - block defining methods of a struct (Rust-style) */

@@ -6,7 +6,7 @@
  * (no CRT), so a None unwrap spins forever (halts the core on bare metal).
  * Prefer match, is_some, or unwrap_or in freestanding code.
  *
- *     import { Option, Some, None } from "core/option";
+ *     use core::option::{Option, Some, None};
  *
  *     match (find(...)) {
  *         Some(v) => { ... }

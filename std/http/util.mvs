@@ -1,8 +1,8 @@
 /*
  * std/http/util.mvs - string helpers and byte constants for the HTTP module
  */
-import { mem } from "std";
-import { cstr } from "core";
+use std::mem;
+use core::cstr;
 
 const SP: u8 = 32;
 const CR: u8 = 13;

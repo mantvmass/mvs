@@ -6,8 +6,8 @@
 //  str    = pointer to constant text (read-only, uses "")
 //  String = heap buffer, appendable/mutable, must be drop()ed manually (no GC)
 // ============================================================
-import { io } from "std";
-import { String } from "std/string";
+use std::io;
+use std::string::String;
 
 func main() -> i8 {
     let s: String = String::from("hello");                 // build from a str (copied to the heap)

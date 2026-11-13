@@ -1,5 +1,5 @@
-import { io } from "std";
-import { HashSet } from "std/set";
+use std::io;
+use std::set::HashSet;
 
 func main() -> void {
     let s: HashSet<i64> = HashSet<i64>::new();

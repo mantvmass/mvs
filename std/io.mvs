@@ -2,7 +2,7 @@
  * std/io.mvs - the io module of the standard library (written in MVS itself)
  *
  * Usage:
- *     import { io } from "std";
+ *     use std::io;
  *     io.out("hello");                       // print a message (newline appended automatically)
  *     io.out("number = {}", 42);             // Rust-style interpolation with {}
  *     io.print("no newline");                // raw print, no newline

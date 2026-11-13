@@ -1,6 +1,6 @@
 // bench/loops.mvs - the shapes a low-level language must not be slow at
 // The C file next to it is the same program; scripts/bench.sh times both.
-import { io } from "std";
+use std::io;
 
 // a tight accumulation loop: the loop counter and the accumulator are the
 // whole working set, so this measures how often a local touches memory

@@ -1,6 +1,6 @@
-import { io, thread } from "std";
-import { Scope } from "std/thread";
-import { atomic } from "core";
+use std::{io, thread};
+use std::thread::Scope;
+use core::atomic;
 
 func worker(arg: *u8) -> *u8 {
     let counter: *i64 = arg as *i64;

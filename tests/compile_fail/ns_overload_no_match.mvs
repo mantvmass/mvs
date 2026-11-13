@@ -1,6 +1,6 @@
 //~ ERROR: no overload of 'min' matches
 // std/math has min(i64,i64) and min(f64,f64); strings match neither
-import { math } from "std";
+use std::math;
 
 func main() -> i8 {
     math.min("a", "b");

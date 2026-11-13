@@ -4,7 +4,7 @@
 //  run:    examples\01_language\bitwise.exe
 //  note: ^ = XOR; exponentiation uses ** (e.g. 2 ** 8)
 // ============================================================
-import { io } from "std";
+use std::io;
 
 func main() -> i8 {
     io.out("12 & 10 = {}", 12 & 10);     // 8

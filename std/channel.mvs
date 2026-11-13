@@ -1,8 +1,8 @@
 /*
  * std/channel.mvs - bounded MPMC channel for i64 values
  *
- *     import { io, thread } from "std";
- *     import { Channel } from "std/channel";
+ *     use std::{io, thread};
+ *     use std::channel::Channel;
  *
  *     let ch: Channel = Channel::new(8);  // buffer for 8 values
  *
@@ -29,7 +29,7 @@
  * Not safe to copy by value after creation (contains OS handles).
  */
 
-import { Mutex, CondVar } from "std/sync";
+use std::sync::{Mutex, CondVar};
 
 extern func malloc(n: usize) -> *u8;
 extern func free(p: *u8) -> void;

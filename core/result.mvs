@@ -5,7 +5,7 @@
  * same Ok/Err constructors. unwrap/unwrap_err halt the core instead of
  * printing a message (no CRT available).
  *
- *     import { Result, Ok, Err } from "core/result";
+ *     use core::result::{Result, Ok, Err};
  *
  *     func parse(x: i64) -> Result<i64, i64> {
  *         if (x < 0) { return Err<i64, i64>(0 - 1); }

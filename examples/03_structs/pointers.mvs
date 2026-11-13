@@ -4,7 +4,7 @@
 //  run:    examples\03_structs\pointers.exe
 //  (MVS has no array type; use pointer + malloc instead)
 // ============================================================
-import { io } from "std";
+use std::io;
 extern func malloc(n: usize) -> *u8;
 extern func free(p: *u8) -> void;
 

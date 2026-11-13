@@ -4,7 +4,7 @@
 //  run:    examples\02_functions\overload.exe
 //  + a generic calling an overload = a duck-typed constraint
 // ============================================================
-import { io } from "std";
+use std::io;
 
 struct Point { x: i32; y: i32; }
 

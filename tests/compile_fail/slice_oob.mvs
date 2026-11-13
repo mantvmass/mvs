@@ -1,5 +1,5 @@
 //~ ERROR: slice [2..8] out of bounds for array of length 5
-import { io } from "std";
+use std::io;
 func main() -> void {
     let a: [i64; 5];
     let p: *i64 = a[2..8];

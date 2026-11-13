@@ -5,7 +5,7 @@
  * Integer and float variants share names through function overloading.
  *
  * Example:
- *     import { io, math } from "std";
+ *     use std::{io, math};
  *     io.out("{}", math.sqrt(2.0));
  *     io.out("{}", math.abs(0 - 5));
  *     io.out("{}", math.clamp(12, 0, 10));

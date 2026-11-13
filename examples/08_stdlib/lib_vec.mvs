@@ -1,8 +1,8 @@
 // Vec<T>: the first real collection, built on generic structs.
 // Growable heap buffer + bounds-checked access; element size comes from
 // scaled pointer arithmetic, so one template serves every element type.
-import { io } from "std";
-import { Vec } from "std/vec";
+use std::io;
+use std::vec::Vec;
 
 struct P { x: i64; y: i64; }
 

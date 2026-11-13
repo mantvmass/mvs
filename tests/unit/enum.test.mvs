@@ -1,5 +1,5 @@
 // unit tests for Rust-style enums + match
-import { test } from "std";
+use std::test;
 
 enum Op {
     Add(i64, i64),

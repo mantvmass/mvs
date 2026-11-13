@@ -1,5 +1,5 @@
 // hex (0x) and binary (0b) integer literals, round-tripped through {:x}
-import { io } from "std";
+use std::io;
 
 func main() -> i8 {
     let color: u32 = 0xFF8800;

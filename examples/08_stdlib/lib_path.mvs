@@ -1,6 +1,6 @@
-import { io } from "std";
-import { String } from "std/string";
-import { path } from "std";
+use std::io;
+use std::string::String;
+use std::path;
 
 func show(label: str, s: *String) -> void {
     io.out("{}: {}", label, s.as_str());

@@ -1,5 +1,5 @@
 // unit tests for core language behavior, run by `mvs test`
-import { test } from "std";
+use std::test;
 
 struct P { x: i64; y: i64; }
 impl P {

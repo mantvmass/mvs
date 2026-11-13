@@ -1,6 +1,6 @@
 // Differential test: the SAME algorithm in MVS and in C (arith.c) must print
 // byte-identical output. This checks the generated code, not just the compiler.
-import { io } from "std";
+use std::io;
 
 func collatz_len(start: i64) -> i64 {
     let n: i64 = start;

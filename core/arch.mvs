@@ -1,7 +1,7 @@
 /*
  * core/arch.mvs - CPU instruction intrinsics (pure MVS + inline asm; --nostd safe)
  *
- *     import { arch } from "core";
+ *     use core::arch;
  *     arch.pause();                       // spin-wait hint
  *     let t: u64 = arch.timestamp();      // cycle/tick counter
  *     arch.fence();                       // full memory barrier

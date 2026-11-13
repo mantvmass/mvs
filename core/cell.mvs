@@ -1,7 +1,7 @@
 /*
  * core/cell.mvs - interior mutability for i64 values (--nostd safe)
  *
- *     import { cell } from "core";
+ *     use core::cell;
  *
  *     let c: cell.Cell = cell.Cell::new(42);
  *     c.set(99);

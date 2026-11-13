@@ -4,7 +4,7 @@
 //  run:    examples\08_stdlib\net_server.exe
 //  test:   open another terminal -> curl http://127.0.0.1:8080/
 // ============================================================
-import { io, net } from "std";
+use std::{io, net};
 
 func main() -> i8 {
     let server: TcpServer = TcpServer::bind("0.0.0.0", 8080);  // wait on port 8080

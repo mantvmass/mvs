@@ -9,9 +9,9 @@
  * Memory: the caller owns the Lexer and must call lex_free to release the
  * string values the tokens hold (MVS is manual, see docs/rules.md 0.2).
  */
-import { mem } from "std";
-import { cstr } from "core";
-import { Vec } from "std/vec";
+use std::mem;
+use core::cstr;
+use std::vec::Vec;
 
 // --- token kinds -------------------------------------------------------
 // A tagged enum instead of integer constants: the parser matches on it.

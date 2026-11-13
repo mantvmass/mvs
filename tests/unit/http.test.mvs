@@ -1,18 +1,18 @@
 // unit tests for std/http: parsing, routing and rendering, with no sockets
 // involved. An HTTP application is testable exactly because handle() takes a
 // Request and returns a Response rather than touching a connection.
-import { test, mem } from "std";
-import { Router, Request, Response, parse_request } from "std/http";
-import { get, post, put, delete, head, patch, options, any, method_router, no_handler } from "std/http";
-import { Text, Html, Json, Status, Redirect } from "std/http";
-import { status_text, url_decode, trim, to_int, match_path } from "std/http";
-import { index_of, header_end, lower, is_space, hex_val, default_fallback } from "std/http";
-import { response_status, response_body, response_header } from "std/http";
-import { String } from "std/string";
-import { HashMap } from "std/map";
-import { Vec } from "std/vec";
-import { Option, Some, None } from "std/option";
-import { cstr } from "core";
+use std::{test, mem};
+use std::http::{Router, Request, Response, parse_request};
+use std::http::{get, post, put, delete, head, patch, options, any, method_router, no_handler};
+use std::http::{Text, Html, Json, Status, Redirect};
+use std::http::{status_text, url_decode, trim, to_int, match_path};
+use std::http::{index_of, header_end, lower, is_space, hex_val, default_fallback};
+use std::http::{response_status, response_body, response_header};
+use std::string::String;
+use std::map::HashMap;
+use std::vec::Vec;
+use std::option::{Option, Some, None};
+use core::cstr;
 
 func hello(_req: *Request) -> Response { return Text("hello"); }
 func mirror(req: *Request) -> Response { return Text(req.body); }

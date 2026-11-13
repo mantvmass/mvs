@@ -2,7 +2,7 @@
 // Exactly ONE definition of each function below survives per target; if the
 // attribute filtering failed, the compiler would reject the duplicates.
 // Every variant prints the same text so the golden output is target-independent.
-import { io } from "std";
+use std::io;
 
 @compile(target_os = "windows")
 func os_pick() -> str { return "one os variant kept"; }

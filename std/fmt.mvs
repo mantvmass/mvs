@@ -6,7 +6,7 @@
  * any type that impls Display can be printed through fmt.println.
  *
  * Usage:
- *     import { fmt, string } from "std";
+ *     use std::{fmt, string};
  *     struct Point { x: i32; y: i32; }
  *     impl Display for Point {
  *         func fmt(self: *Point) -> String {
@@ -18,7 +18,7 @@
  *     }
  *     fmt.println(p);     // calls Point's Display::fmt automatically (chosen at compile time)
  */
-import { String } from "std/string";
+use std::string::String;
 
 extern func printf(fmt: str) -> i32;
 extern func putchar(c: i32) -> i32;

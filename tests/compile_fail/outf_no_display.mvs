@@ -1,6 +1,6 @@
 //~ ERROR: type 'P' does not implement trait 'Display'
 // variadic ...dyn Display arguments are trait-checked through the namespace call
-import { fmt } from "std";
+use std::fmt;
 
 struct P { x: i64; }
 

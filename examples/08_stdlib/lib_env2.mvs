@@ -1,6 +1,6 @@
-import { io, env } from "std";
-import { Vec } from "std/vec";
-import { String } from "std/string";
+use std::{io, env};
+use std::vec::Vec;
+use std::string::String;
 
 func main() -> i8 {
     let a: Vec<String> = env.args();

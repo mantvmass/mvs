@@ -6,7 +6,7 @@
 //  Just declare main as  func main(argc: i32, argv: **u8) -> i32
 //  The C runtime calls main with argc/argv per the C ABI; argv[i] = *(argv + i) (a C string)
 // ============================================================
-import { io } from "std";
+use std::io;
 extern func printf(fmt: str) -> i32;
 extern func atoi(s: str) -> i32;
 

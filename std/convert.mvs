@@ -2,7 +2,7 @@
  * std/convert.mvs - parse numbers from strings, format numbers to strings
  *
  * Usage:
- *     import { convert } from "std";
+ *     use std::convert;
  *     let n: i64 = convert.parse_int("42");          // 42
  *     let f: f64 = convert.parse_float("3.14");      // 3.14
  *     let h: i64 = convert.parse_hex("FF");          // 255

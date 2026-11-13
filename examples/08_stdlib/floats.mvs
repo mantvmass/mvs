@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/08_stdlib/floats.mvs
 //  run:    examples\08_stdlib\floats.exe
 // ============================================================
-import { io } from "std";
+use std::io;
 extern func sqrt(x: f64) -> f64;     // from C math (linked with the CRT)
 
 func circleArea(r: f64) -> f64 { return 3.14159 * r * r; }

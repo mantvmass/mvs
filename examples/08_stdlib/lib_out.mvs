@@ -8,8 +8,8 @@
 //  (args: ...dyn Display), primitives print via impl-on-primitive, and
 //  user structs join by implementing Display themselves.
 // ============================================================
-import { fmt } from "std";
-import { String } from "std/string";
+use std::fmt;
+use std::string::String;
 
 struct Point { x: i32; y: i32; }
 

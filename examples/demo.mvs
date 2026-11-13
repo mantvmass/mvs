@@ -4,7 +4,7 @@
 //  run:    examples\demo.exe
 //  See topic-specific examples in the 01_language .. 08_stdlib folders
 // ============================================================
-import { io } from "std";
+use std::io;
 
 const APP: str = "MVS Demo";
 

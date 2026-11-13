@@ -9,12 +9,12 @@
  * Depth is capped so a hostile input of nested brackets cannot exhaust the
  * machine stack: a parser that segfaults on bad input is a parser bug.
  */
-import { io } from "std";
-import { Lexer, Token, Tok } from "./lexer.mvs";
-import { Doc, Json, ArrSpan, ObjSpan } from "./value.mvs";
-import { Result, Ok, Err } from "std/result";
-import { Vec } from "std/vec";
-import { String } from "std/string";
+use std::io;
+use self::lexer::{Lexer, Token, Tok};
+use self::value::{Doc, Json, ArrSpan, ObjSpan};
+use std::result::{Result, Ok, Err};
+use std::vec::Vec;
+use std::string::String;
 
 let MAX_DEPTH: i64 = 200;
 

@@ -5,7 +5,7 @@
  * caller-provided buffer. This is how bare-metal code prints numbers.
  *
  * Usage:
- *     import { fmt } from "core";
+ *     use core::fmt;
  *     let buf: [u8; 32] = [...];
  *     let n: usize = fmt.u64_to_dec(buf, 32, 12345);    // "12345", returns 5
  *     let n: usize = fmt.i64_to_dec(buf, 32, 0 - 42);   // "-42", returns 3

@@ -2,8 +2,8 @@
  * std/string.mvs - the String type owning heap memory (owned, growable)
  *
  * Usage:
- *     import { string } from "std";
- *     import { String } from "std/string";
+ *     use std::string;
+ *     use std::string::String;
  *     let s: String = String::from("hello");
  *     s.push_str(", world");
  *     io.out("{}", s.as_str());      // hello, world
@@ -16,7 +16,7 @@
  *       malloc/free) and is not used in --nostd mode.
  */
 
-import { Vec } from "std/vec";
+use std::vec::Vec;
 
 // foreign functions from the C runtime
 extern func malloc(n: usize) -> *u8;

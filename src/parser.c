@@ -69,7 +69,8 @@ static void synchronize(Parser *p) {
             case TK_SEMICOLON:
                 advance(p); return;
             case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT: case TK_ENUM:
-            case TK_IMPORT: case TK_EXTERN: case TK_EXPORT:
+            case TK_IMPORT: case TK_USE: case TK_MOD: case TK_PUB:
+            case TK_EXTERN: case TK_EXPORT:
             case TK_LET: case TK_CONST: case TK_IF: case TK_WHILE: case TK_FOR:
             case TK_DO: case TK_SWITCH: case TK_MATCH: case TK_RETURN: case TK_BREAK: case TK_CONTINUE:
                 return;
@@ -86,7 +87,8 @@ static void synchronize_top(Parser *p) {
         switch (p->cur.type) {
             case TK_EOF:
             case TK_FUNC: case TK_STRUCT: case TK_IMPL: case TK_TRAIT: case TK_ENUM:
-            case TK_IMPORT: case TK_EXTERN: case TK_EXPORT:
+            case TK_IMPORT: case TK_USE: case TK_MOD: case TK_PUB:
+            case TK_EXTERN: case TK_EXPORT:
             case TK_LET: case TK_CONST: case TK_AT:
                 return;
             default:
@@ -1111,36 +1113,90 @@ static Node *parse_trait(Parser *p) {
     return n;
 }
 
-/* import := 'import' '{' IDENT (',' IDENT)* '}' 'from' STRING ';'
- * Stores the path in str_val and the imported names in items (as ND_IDENT nodes) */
-static Node *parse_import(Parser *p) {
+/* use := 'use' path [ '::' '{' IDENT (',' IDENT)* '}' | '::' '*' ] ';'
+ * path := IDENT ('::' IDENT)*
+ * Stores the full :: path in str_val, braced items in items[], name="*" for glob */
+static Node *parse_use(Parser *p) {
     Node *n = node_new(ND_IMPORT, p->cur.line);
-    advance(p); /* consume import */
-    if (check(p, TK_IDENT)) {
-        /* Alias form: import lib from "path"  -> the whole module gets namespace = lib (stored in n->name) */
-        n->name = strdup(p->cur.lexeme);
+    advance(p); /* consume use */
+    char path[1024]; path[0] = '\0';
+    if (check(p, TK_STRING)) {
+        /* String path for edge cases (paths with numbers, deep relatives, etc.)
+         * is_extern flags it so module.c uses file-based resolution */
+        n->is_extern = 1;
+        strncat(path, p->cur.lexeme, sizeof(path) - 1);
         advance(p);
-    } else {
-        /* Braced form: import { a, b } from "path" */
-        expect(p, TK_LBRACE, "expected '{' or an alias name after import");
-        if (!check(p, TK_RBRACE)) {
-            do {
-                if (!check(p, TK_IDENT)) { error(p, "expected name in import list"); break; }
+        if (match(p, TK_COLONCOLON)) {
+            if (check(p, TK_LBRACE)) {
+                advance(p);
+                if (!check(p, TK_RBRACE)) {
+                    do {
+                        if (!check(p, TK_IDENT)) { error(p, "expected name in use list"); break; }
+                        Node *id = node_new(ND_IDENT, p->cur.line);
+                        id->name = strdup(p->cur.lexeme);
+                        node_add_item(n, id);
+                        advance(p);
+                    } while (match(p, TK_COMMA));
+                }
+                expect(p, TK_RBRACE, "expected '}' to close use list");
+            } else if (check(p, TK_STAR)) {
+                n->name = strdup("*");
+                advance(p);
+            } else if (check(p, TK_IDENT)) {
                 Node *id = node_new(ND_IDENT, p->cur.line);
                 id->name = strdup(p->cur.lexeme);
                 node_add_item(n, id);
                 advance(p);
-            } while (match(p, TK_COMMA));
+            } else {
+                error(p, "expected identifier, '{', or '*' after '::'");
+            }
         }
-        expect(p, TK_RBRACE, "expected '}' to close import list");
+        n->str_val = strdup(path);
+        expect(p, TK_SEMICOLON, "expected ';' after use statement");
+        return n;
     }
-    /* 'from' is contextual: it arrives as a plain identifier so that ordinary
-     * code can use the name, and only an import statement gives it meaning */
-    if (check(p, TK_IDENT) && strcmp(p->cur.lexeme, "from") == 0) advance(p);
-    else error(p, "expected 'from' after import list");
-    if (!check(p, TK_STRING)) error(p, "expected module path string");
-    else { n->str_val = strdup(p->cur.lexeme); advance(p); }
-    expect(p, TK_SEMICOLON, "expected ';' after import");
+    if (!check(p, TK_IDENT)) { error(p, "expected path after 'use'"); return n; }
+    strncat(path, p->cur.lexeme, sizeof(path) - 1);
+    advance(p);
+    while (match(p, TK_COLONCOLON)) {
+        if (check(p, TK_LBRACE)) {
+            advance(p);
+            if (!check(p, TK_RBRACE)) {
+                do {
+                    if (!check(p, TK_IDENT)) { error(p, "expected name in use list"); break; }
+                    Node *id = node_new(ND_IDENT, p->cur.line);
+                    id->name = strdup(p->cur.lexeme);
+                    node_add_item(n, id);
+                    advance(p);
+                } while (match(p, TK_COMMA));
+            }
+            expect(p, TK_RBRACE, "expected '}' to close use list");
+            break;
+        } else if (check(p, TK_STAR)) {
+            n->name = strdup("*");
+            advance(p);
+            break;
+        } else if (check(p, TK_IDENT)) {
+            strncat(path, "::", sizeof(path) - strlen(path) - 1);
+            strncat(path, p->cur.lexeme, sizeof(path) - strlen(path) - 1);
+            advance(p);
+        } else {
+            error(p, "expected identifier, '{', or '*' after '::'");
+            break;
+        }
+    }
+    n->str_val = strdup(path);
+    expect(p, TK_SEMICOLON, "expected ';' after use statement");
+    return n;
+}
+
+/* mod := 'mod' IDENT ';' */
+static Node *parse_mod_decl(Parser *p) {
+    Node *n = node_new(ND_MOD, p->cur.line);
+    advance(p); /* consume mod */
+    if (!check(p, TK_IDENT)) error(p, "expected module name after 'mod'");
+    else { n->name = strdup(p->cur.lexeme); advance(p); }
+    expect(p, TK_SEMICOLON, "expected ';' after mod declaration");
     return n;
 }
 
@@ -1467,15 +1523,27 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
         int cfg_start = prog->nitems;   /* stamp every item added by this iteration */
         if (p.panic) {
             /* the attribute itself failed to parse; skip stamping and recover below */
-        } else if (check(&p, TK_IMPORT)) {
-            node_add_item(prog, parse_import(&p));
-        } else if (check(&p, TK_IDENT) && strcmp(p.cur.lexeme, "pub") == 0) {
+        } else if (check(&p, TK_USE)) {
+            node_add_item(prog, parse_use(&p));
+        } else if (check(&p, TK_MOD)) {
+            node_add_item(prog, parse_mod_decl(&p));
+        } else if (check(&p, TK_PUB)) {
             advance(&p);
-            if (!check(&p, TK_IMPORT)) { error(&p, "expected 'import' after 'pub'"); }
-            else {
-                Node *imp = parse_import(&p);
+            if (check(&p, TK_USE)) {
+                Node *imp = parse_use(&p);
                 imp->is_export = 1;
                 node_add_item(prog, imp);
+            } else if (check(&p, TK_MOD)) {
+                Node *m = parse_mod_decl(&p);
+                m->is_export = 1;
+                node_add_item(prog, m);
+            } else if (check(&p, TK_FUNC)) {
+                node_add_item(prog, parse_func_decl(&p, 0));
+            } else if (check(&p, TK_STRUCT)) {
+                node_add_item(prog, parse_struct(&p));
+                match(&p, TK_SEMICOLON);
+            } else {
+                error(&p, "expected 'use', 'mod', 'func', or 'struct' after 'pub'");
             }
         } else if (check(&p, TK_FUNC)) {
             node_add_item(prog, parse_func_decl(&p, 0));
@@ -1504,7 +1572,7 @@ Node *parse_program(const char *src, const char *filename, int *had_error) {
             expect(&p, TK_SEMICOLON, "expected ';' after global declaration");
             node_add_item(prog, n);
         } else {
-            error(&p, "expected an import, function, or global declaration");
+            error(&p, "expected a use, mod, function, or global declaration");
         }
         /* apply pending attributes to everything this iteration produced
          * (an impl block spreads several methods; all of them are gated together) */

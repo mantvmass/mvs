@@ -1,6 +1,6 @@
 // Differential test: structs by value, arrays, sorting, recursion, function
 // pointers, and formatting widths. Must match structs.c exactly.
-import { io } from "std";
+use std::io;
 
 struct Vec3 { x: f64; y: f64; z: f64; }
 struct Item { key: i64; weight: i64; }

@@ -3,7 +3,7 @@
 //  build:  mvs.exe examples/02_functions/funcptr.mvs
 //  run:    examples\02_functions\funcptr.exe
 // ============================================================
-import { io } from "std";
+use std::io;
 
 func add(a: i32, b: i32) -> i32 { return a + b; }
 func mul(a: i32, b: i32) -> i32 { return a * b; }

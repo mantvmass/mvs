@@ -8,9 +8,9 @@
  * Memory: the Lexer owns the identifier strings it allocates and frees them in
  * drop (MVS is manual, see docs/rules.md 0.2).
  */
-import { mem } from "std";
-import { cstr } from "core";
-import { Vec } from "std/vec";
+use std::mem;
+use core::cstr;
+use std::vec::Vec;
 
 // --- token kinds -------------------------------------------------------
 enum Tok {

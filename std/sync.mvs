@@ -1,7 +1,7 @@
 /*
  * std/sync.mvs - synchronization primitives (Mutex, RwLock, CondVar)
  *
- *     import { io, thread, sync } from "std";
+ *     use std::{io, thread, sync};
  *
  *     let m: Mutex;                 // a zeroed Mutex IS a valid unlocked Mutex
  *     let counter: i64 = 0;

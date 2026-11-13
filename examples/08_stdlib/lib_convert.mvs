@@ -1,5 +1,5 @@
 // std/convert: parse numbers from strings and validate formats
-import { io, convert } from "std";
+use std::{io, convert};
 
 func main() -> void {
     io.out("parse_int(\"42\") = {}", convert.parse_int("42"));

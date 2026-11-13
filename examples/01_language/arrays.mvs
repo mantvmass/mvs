@@ -8,7 +8,7 @@
 //  decays to a pointer when passed to a function. Constant indices are bounds
 //  checked at compile time.
 // ============================================================
-import { io } from "std";
+use std::io;
 
 struct Point { x: i32; y: i32; }
 

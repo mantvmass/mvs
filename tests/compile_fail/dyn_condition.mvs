@@ -1,6 +1,6 @@
 //~ ERROR: cannot be used as a condition
 // a trait object in a boolean context would test its address; rejected
-import { String } from "std/string";
+use std::string::String;
 struct A { x: i32; }
 trait T { func f(self: *Self) -> i32; }
 impl T for A { func f(self: *A) -> i32 { return 1; } }

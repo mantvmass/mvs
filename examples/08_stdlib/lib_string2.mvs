@@ -1,6 +1,6 @@
-import { io, string } from "std";
-import { String } from "std/string";
-import { Vec } from "std/vec";
+use std::{io, string};
+use std::string::String;
+use std::vec::Vec;
 
 func main() -> i8 {
     // split

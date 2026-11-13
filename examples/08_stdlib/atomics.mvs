@@ -1,6 +1,6 @@
 // Atomic operations: lock-free counter incremented from multiple threads
-import { io, thread } from "std";
-import { atomic } from "core";
+use std::{io, thread};
+use core::atomic;
 
 let counter: i64 = 0;
 let done_count: i64 = 0;

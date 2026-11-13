@@ -1,6 +1,6 @@
 // unit tests for Vec<T>
-import { test } from "std";
-import { Vec } from "std/vec";
+use std::test;
+use std::vec::Vec;
 
 @test
 func push_get_len() -> void {
