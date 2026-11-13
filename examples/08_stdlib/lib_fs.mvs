@@ -1,5 +1,7 @@
 // std/fs: filesystem operations (extended coverage)
 use std::{io, fs};
+use std::vec::Vec;
+use std::string::String;
 
 func main() -> void {
     let dir: str = "examples/08_stdlib/_test_fs_tmp";
@@ -31,6 +33,10 @@ func main() -> void {
     let blen: usize = 0;
     let _bp: *u8 = fs.read_bytes(bpath, &blen);
     io.out("bytes len = {}", blen);
+
+    let entries: Vec<String> = fs.read_dir(dir);
+    io.out("read_dir count = {}", entries.len);
+    entries.drop();
 
     // cleanup
     fs.delete(path);

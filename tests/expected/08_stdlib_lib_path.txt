@@ -3,5 +3,7 @@ basename: file.txt
 extension: gz
 stem: archive.tar
 join: /home/user/docs
+is_sep /: 1
+is_sep a: 0
 is_absolute /usr: 1
 is_absolute rel: 0

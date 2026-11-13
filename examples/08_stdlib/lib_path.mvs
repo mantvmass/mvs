@@ -23,6 +23,8 @@ func main() -> i8 {
     let j: String = path.join("/home/user", "docs");
     show("join", &j);
 
+    io.out("is_sep /: {}", path.is_sep(47));
+    io.out("is_sep a: {}", path.is_sep(97));
     io.out("is_absolute /usr: {}", path.is_absolute("/usr"));
     io.out("is_absolute rel: {}", path.is_absolute("rel/path"));
 

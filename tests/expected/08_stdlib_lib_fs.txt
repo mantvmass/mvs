@@ -7,3 +7,4 @@ extra
 copy exists = 1
 moved exists = 1
 bytes len = 3
+read_dir count = 3

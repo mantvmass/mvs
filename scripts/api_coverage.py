@@ -44,6 +44,9 @@ EXEMPT = {
     "volatile.wait_bits32": "spin-polls a hardware register",
     "io.read_line": "needs stdin from a terminal",
     "string.is_ws": "internal helper, not user-facing",
+    "fetch.do_fetch": "internal; called by FetchRequest.send(), needs a network peer",
+    "vec.vec_eq": "internal dispatch; called by vec_contains/vec_index_of generics",
+    "string.vec_eq": "internal dispatch; called by vec_contains/vec_index_of for Vec<String>",
 }
 
 def declared():
