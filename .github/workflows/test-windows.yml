@@ -1,0 +1,37 @@
+name: Windows
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NASM
+        run: choco install nasm -y
+
+      - name: Add NASM to PATH
+        run: echo "C:\Program Files\NASM" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build compiler (clang, warnings are errors)
+        run: clang -Wall -Wextra -Werror -D_CRT_SECURE_NO_WARNINGS -Wno-deprecated-declarations -Isrc src/main.c src/lexer.c src/ast.c src/parser.c src/module.c src/generic.c src/diag.c src/codegen.c src/ir.c src/lower.c src/opt.c src/arch/common.c src/arch/x86_64/win.c src/arch/x86_64/sysv.c src/arch/arm64/linux.c -o mvs.exe
+
+      - name: Run test suite (PowerShell driver)
+        run: powershell -ExecutionPolicy Bypass -File scripts/test.ps1
+
+      - name: Run built-in runner (mvs test)
+        run: .\mvs.exe test
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mvs-windows-x86_64
+          path: |
+            mvs.exe
+            std/
+            core/

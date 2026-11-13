@@ -1,0 +1,42 @@
+name: Bug Report
+description: Report a compiler bug, miscompilation, or crash
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What went wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: MVS source to reproduce
+      description: Minimal .mvs file that triggers the bug
+      render: text
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Target
+      options:
+        - win64 (Windows, NASM)
+        - elf64 (Linux x86-64, NASM)
+        - arm64 (Linux AArch64, GNU as)
+        - All targets
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: MVS version or commit
+      description: Output of `mvs --version` or the commit hash
